@@ -605,6 +605,12 @@
     --type-label: .8125rem;
     --type-meta: .8125rem;
     --type-heading: 1rem;
+    --type-section-heading: 1.125rem;
+    --type-stat-label: .9375rem;
+    --type-stat-value: 1.125rem;
+    --space-control-tight: .5rem;
+    --space-control: .75rem;
+    --space-section: 1.5rem;
     --touch-target: 44px;
     /* Archetype names get their own hue so they read as proper nouns */
     --archetype: oklch(0.76 0.085 52);
@@ -983,10 +989,30 @@
   }
   .icon--lg { width: 1.25em; height: 1.25em; }
   .icon--sm { width: .875em; height: .875em; }
+  .icon--stat {
+    background-image: var(--stat-icon-image);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+  }
+  @supports ((-webkit-mask-image: url("")) or (mask-image: url(""))) {
+    .icon--stat {
+      background-color: currentColor;
+      background-image: none;
+      -webkit-mask-image: var(--stat-icon-image);
+      mask-image: var(--stat-icon-image);
+      -webkit-mask-position: center;
+      mask-position: center;
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      -webkit-mask-size: contain;
+      mask-size: contain;
+    }
+  }
   /* Leading icon inside a run of text needs optical separation */
   .icon-text {
     display: inline-flex;
-    align-items: baseline;
+    align-items: center;
     gap: .4em;
   }
   /* Tone icon leads the message; kept inline so multi-line bodies still flow. */
@@ -1005,6 +1031,137 @@
     margin-right: .32em;
     vertical-align: -0.28em;
   }
+  /* Stat controls use the same type roles and spacing rhythm in both input
+     sections while keeping the fragment controls intentionally denser. */
+  .card--fragments > h2,
+  .card--targets > h2 {
+    margin-bottom: var(--space-section);
+    font-size: var(--type-section-heading);
+    font-weight: 720;
+    line-height: 1.25;
+    letter-spacing: 0;
+  }
+  .stat-name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-control-tight);
+    color: inherit;
+    font-size: var(--type-stat-label);
+    font-weight: 680;
+    line-height: 1.2;
+    letter-spacing: .01em;
+  }
+  .stat-name > .icon {
+    flex: 0 0 auto;
+    margin: 0 !important;
+    vertical-align: 0;
+  }
+  .target-stat-group {
+    gap: var(--space-control);
+    padding: 1rem;
+  }
+  .target-stat-group > .stat-label {
+    min-height: 2.75rem;
+    gap: var(--space-control);
+  }
+  .target-stat-name > .icon {
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+  }
+  .target-stat-group > input[type="number"] {
+    min-height: 3.25rem;
+    padding-block: .75rem;
+    font-size: var(--type-stat-value);
+    font-weight: 650;
+    line-height: 1;
+    letter-spacing: -.025em;
+  }
+  .target-stat-group > .stat-range-hint:empty {
+    min-height: 0;
+    margin-top: 0;
+  }
+  .target-stat-group .lock-control {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: .35rem;
+    min-height: 2.75rem;
+    padding: .25rem 0;
+    color: var(--text-dim);
+    font-size: var(--type-label) !important;
+    font-weight: 520;
+    line-height: 1;
+  }
+  .target-stat-group .lock-control > .icon {
+    width: .875rem;
+    height: .875rem;
+    color: color-mix(in oklab, var(--text-dim) 86%, transparent);
+  }
+  #fragmentGrid {
+    align-items: start;
+    gap: 1rem .75rem;
+  }
+  .fragment-stat-control {
+    align-items: center;
+    gap: .75rem;
+    min-width: 0;
+  }
+  #fragmentGrid .fragment-stat-name {
+    justify-content: center;
+    min-height: 1.75rem;
+    font-size: var(--type-stat-label) !important;
+    font-weight: 680;
+  }
+  #fragmentGrid .fragment-stat-name > .icon {
+    width: 1.375rem !important;
+    height: 1.375rem !important;
+  }
+  .fragment-stepper {
+    display: grid;
+    grid-template-columns: var(--touch-target) minmax(2rem, auto) var(--touch-target);
+    align-items: center;
+    justify-content: center;
+    gap: .375rem;
+  }
+  .fragment-stepper .icon-btn {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .fragment-stepper .icon-btn:hover {
+    border-color: var(--border-strong);
+    background: var(--card-strong);
+  }
+  .fragment-value {
+    min-width: 2rem;
+    color: var(--text);
+    text-align: center;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (max-width: 680px) {
+    .card--fragments > h2,
+    .card--targets > h2 {
+      margin-bottom: 1.25rem;
+      font-size: 1.0625rem;
+    }
+    .target-stat-group { padding: .875rem; }
+    .target-stat-name > .icon {
+      width: 1.375rem !important;
+      height: 1.375rem !important;
+    }
+  }
+  @media (max-width: 420px) {
+    .card--targets > h2 {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .target-reset-btn { align-self: flex-start; }
+  }
   .icon-btn {
     display: inline-flex;
     align-items: center;
@@ -1020,44 +1177,543 @@
     background: currentColor;
     vertical-align: .04em;
   }
+
+  /* Owned armor matching */
+  #ownedGearSection {
+    margin-top: 18px !important;
+    padding-top: 18px !important;
+  }
+  .owned-gear-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+  }
+  .owned-gear-title {
+    margin: 0;
+    color: var(--text);
+    font-size: 1rem;
+    font-weight: 740;
+    line-height: 1.35;
+  }
+  .owned-gear-copy {
+    max-width: 66ch;
+    margin: 5px 0 0;
+    color: var(--text-dim);
+    font-size: var(--type-label);
+    line-height: 1.55;
+  }
+  .owned-gear-summary {
+    flex: none;
+    padding: 5px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-quiet);
+    color: var(--text-dim);
+    font-size: var(--type-label);
+    white-space: nowrap;
+  }
+  .owned-gear-summary strong { color: var(--accent-strong); }
+  .owned-gear-list {
+    margin-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .owned-gear-row {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .owned-gear-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+  }
+  .owned-gear-identity {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+  .owned-gear-archetype {
+    color: var(--archetype);
+    font-size: 1rem;
+    font-weight: 740;
+  }
+  .owned-gear-needed {
+    color: var(--text-dim);
+    font-size: var(--type-label);
+  }
+  .owned-count-control {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+    font-size: var(--type-label);
+  }
+  .owned-count-stepper {
+    display: grid;
+    grid-template-columns: var(--touch-target) 54px var(--touch-target);
+    align-items: stretch;
+  }
+  .owned-count-stepper button,
+  .owned-count-stepper input {
+    min-width: 0;
+    height: var(--touch-target);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-quiet);
+    color: var(--text);
+    text-align: center;
+  }
+  .owned-count-stepper button {
+    padding: 0;
+    cursor: pointer;
+    font-size: 1.15rem;
+    line-height: 1;
+  }
+  .owned-count-stepper button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+  .owned-count-stepper button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+  .owned-count-stepper button:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--card-strong);
+    color: var(--accent-strong);
+  }
+  .owned-count-stepper input {
+    z-index: 1;
+    margin-inline: -1px;
+    border-radius: 0;
+    font-size: 1rem !important;
+    font-weight: 700;
+    appearance: textfield;
+  }
+  .owned-count-stepper input::-webkit-inner-spin-button,
+  .owned-count-stepper input::-webkit-outer-spin-button { margin: 0; appearance: none; }
+  .owned-piece-list {
+    display: grid;
+    gap: 9px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  }
+  .owned-piece-row {
+    display: grid;
+    grid-template-columns: 34px repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 10px;
+  }
+  .owned-piece-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin-bottom: 7px;
+    border-radius: 999px;
+    background: var(--surface-quiet);
+    color: var(--text-dim);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .75rem;
+    font-weight: 700;
+  }
+  .owned-piece-field {
+    display: grid;
+    gap: 5px;
+    color: var(--text-dim);
+    font-size: var(--type-label);
+  }
+  .owned-piece-field select {
+    width: 100%;
+    padding: 8px 30px 8px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-quiet);
+    color: var(--text);
+  }
+  .owned-piece-field select:hover {
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+  }
+  .owned-gear-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .owned-gear-apply {
+    border-color: color-mix(in oklab, var(--accent) 70%, var(--border)) !important;
+    background: color-mix(in oklab, var(--accent) 12%, var(--surface-quiet)) !important;
+    color: var(--accent-strong) !important;
+  }
+  .owned-gear-apply:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--accent) 18%, var(--surface-quiet)) !important;
+  }
+  .target-reset-btn {
+    flex: none;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .armor-budget-workbench {
+    display: grid;
+    gap: 14px;
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .budget-toolbar {
+    display: flex;
+    align-items: end;
+    gap: 14px;
+  }
+  .budget-toolbar .input-group {
+    flex: 0 0 116px;
+    max-width: 116px;
+  }
+  .budget-info {
+    display: grid;
+    grid-template-columns: auto auto;
+    align-items: baseline;
+    gap: 2px 10px;
+    margin-left: auto;
+    text-align: right;
+  }
+  .budget-info > span {
+    color: var(--text-dim);
+    font-size: var(--type-label);
+  }
+  .budget-info > strong {
+    color: var(--accent-strong);
+    font-size: clamp(1.2rem, 2vw, 1.5rem);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .budget-info > small {
+    grid-column: 1 / -1;
+    color: var(--text-dim);
+    font-size: .7rem;
+  }
+  .plus3-panel {
+    display: flex;
+    align-items: center;
+    min-height: 50px;
+    gap: 16px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in oklab, var(--border) 82%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in oklab, var(--surface-quiet) 80%, transparent);
+  }
+  .plus3-toggle {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 9px;
+    cursor: pointer;
+    font-size: .82rem;
+    font-weight: 650;
+  }
+  .plus3-toggle input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  .plus3-count {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: .76rem;
+  }
+  .plus3-count .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .plus3-count-value {
+    min-width: 24px;
+    color: var(--text);
+    text-align: center;
+    font-size: .95rem;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+  }
+  .budget-balance {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: .79rem;
+    line-height: 1.55;
+  }
+  .budget-balance > .icon {
+    flex: none;
+    margin-top: .18em;
+  }
+  .budget-balance.is-health {
+    border-color: color-mix(in oklab, var(--health) 34%, var(--border));
+    background: color-mix(in oklab, var(--health) 10%, var(--card));
+  }
+  .budget-balance.is-health > .icon { color: var(--health); }
+  .budget-balance.is-warning {
+    border-color: color-mix(in oklab, var(--warning) 34%, var(--border));
+    background: color-mix(in oklab, var(--warning) 9%, var(--card));
+  }
+  .budget-balance.is-warning > .icon { color: var(--warning); }
+  .budget-balance.is-success {
+    border-color: color-mix(in oklab, var(--success) 34%, var(--border));
+    background: color-mix(in oklab, var(--success) 9%, var(--card));
+  }
+  .budget-balance.is-success > .icon { color: var(--success); }
+  .budget-fix-btn {
+    margin-top: 7px;
+    padding: 6px 10px;
+    font-size: .72rem;
+  }
+  .minimum-details {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .minimum-details > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 34px;
+    cursor: pointer;
+    color: var(--text);
+    font-size: .8rem;
+    font-weight: 700;
+    list-style: none;
+  }
+  .minimum-details > summary::-webkit-details-marker { display: none; }
+  .minimum-details > summary::before {
+    content: "›";
+    color: var(--accent);
+    font-size: 1.25rem;
+    line-height: 1;
+    transform: rotate(0);
+    transition: transform .16s ease;
+  }
+  .minimum-details[open] > summary::before { transform: rotate(90deg); }
+  .minimum-summary-label { margin-right: auto; }
+  .minimum-summary-status {
+    color: var(--text-dim);
+    font-size: .7rem;
+    font-weight: 600;
+  }
+  .minimum-summary-status.is-warning { color: var(--health); }
+  .minimum-content {
+    display: grid;
+    gap: 10px;
+    padding: 8px 0 0 22px;
+    color: var(--text-dim);
+    font-size: .74rem;
+    line-height: 1.55;
+  }
+  .minimum-stat-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .minimum-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .minimum-stat strong {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .minimum-stat.is-invalid {
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--health);
+  }
+  .minimum-stat em {
+    color: var(--health);
+    font-style: normal;
+  }
+  .tuning-slot-status {
+    padding: 8px 10px;
+    border-left: 2px solid var(--warning);
+    background: color-mix(in oklab, var(--warning) 7%, transparent);
+    color: var(--warning);
+  }
+  .tuning-slot-status.is-error {
+    border-left-color: var(--health);
+    color: var(--health);
+  }
+  .refine-card-copy {
+    max-width: 68ch;
+    margin: -4px 0 16px;
+    color: var(--text-dim);
+    font-size: .78rem;
+    line-height: 1.6;
+  }
+  .constraint-matrix {
+    overflow-x: auto;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .constraint-grid {
+    display: grid;
+    grid-template-columns: minmax(132px, 1.25fr) repeat(3, minmax(104px, .72fr)) minmax(96px, .65fr);
+    min-width: 650px;
+  }
+  .constraint-grid [role="columnheader"] {
+    min-height: 54px;
+    padding: 9px 10px;
+    color: var(--text-dim);
+    text-align: center;
+    font-size: .72rem;
+    font-weight: 700;
+  }
+  .constraint-grid [role="columnheader"]:first-child { text-align: left; }
+  .constraint-grid [role="columnheader"]:first-child,
+  .constraint-stat {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--card);
+    box-shadow: 1px 0 0 var(--border);
+  }
+  .constraint-grid [role="columnheader"]:first-child { z-index: 2; }
+  .constraint-grid [role="columnheader"] small {
+    display: block;
+    margin-top: 2px;
+    color: color-mix(in oklab, var(--text-dim) 78%, transparent);
+    font-size: .62rem;
+    font-weight: 500;
+  }
+  .constraint-cell {
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    padding: 8px 10px;
+    border-top: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  }
+  .constraint-stat {
+    display: grid;
+    gap: 2px;
+    font-weight: 700;
+  }
+  .constraint-stat small {
+    color: var(--text-dim);
+    font-size: .65rem;
+    font-weight: 500;
+  }
+  .constraint-toggle {
+    justify-content: center;
+    cursor: pointer;
+  }
+  .constraint-toggle:hover {
+    background: color-mix(in oklab, var(--accent) 5%, transparent);
+  }
+  .constraint-toggle input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    cursor: pointer;
+  }
+  .constraint-result { justify-content: center; }
+  .constraint-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-dim);
+    font-size: .7rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .constraint-status.is-met { color: var(--success); }
+  .refine-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .refine-actions .btn,
+  .refine-actions .btn-solve {
+    min-height: 40px;
+    padding: 9px 16px;
+    font-size: .8rem;
+  }
+  @media (max-width: 680px) {
+    .owned-gear-header,
+    .owned-gear-row-head {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .owned-gear-summary { align-self: flex-start; }
+    .owned-count-control { justify-content: space-between; }
+    .owned-piece-row { grid-template-columns: 30px minmax(0, 1fr); }
+    .owned-piece-index { grid-row: span 2; }
+    .owned-gear-actions {
+      align-items: stretch;
+      flex-direction: column-reverse;
+    }
+    .owned-gear-actions .btn { width: 100%; }
+    .budget-toolbar {
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+    .budget-toolbar .input-group {
+      flex: 1 1 110px;
+      max-width: none;
+    }
+    .budget-info {
+      flex: 1 0 100%;
+      grid-template-columns: auto auto 1fr;
+      margin: 4px 0 0;
+      text-align: left;
+    }
+    .budget-info > small {
+      grid-column: auto;
+      align-self: center;
+      text-align: right;
+    }
+    .plus3-panel {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .plus3-count {
+      padding: 10px 0 0;
+      border-top: 1px solid var(--border);
+      border-left: 0;
+    }
+    .minimum-content { padding-left: 0; }
+    .minimum-summary-status { display: none; }
+    .refine-actions {
+      align-items: stretch;
+      flex-direction: column-reverse;
+    }
+    .refine-actions .btn,
+    .refine-actions .btn-solve { width: 100%; }
+  }
 </style>
 </head>
 <body>
 <!-- ============================================================
-     Icon sprite — Destiny 2 Armor 3.0 stat glyphs + UI marks.
-     All shapes use currentColor so they inherit stat colours.
+     Icon sprite — UI marks. The six stat glyphs use embedded copies
+     of the transparent PNG files from asset/PNG_51px.
      ============================================================ -->
 <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;overflow:hidden">
   <defs>
-    <!-- Six stat glyphs, drawn on a 24x24 grid -->
-    <symbol id="i-health" viewBox="0 0 24 24">
-      <path d="M12 2.6 4.2 5.5v6.1c0 4.6 3.1 8.3 7.8 9.8 4.7-1.5 7.8-5.2 7.8-9.8V5.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-      <path d="M12 8v8M8 12h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-    </symbol>
-    <symbol id="i-melee" viewBox="0 0 24 24">
-      <path d="M5.2 9.4h13.6l-1.5 6.1a3.4 3.4 0 0 1-3.3 2.6h-4a3.4 3.4 0 0 1-3.3-2.6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-      <path d="M8 9.4V6.5A2 2 0 0 1 10 4.5h4a2 2 0 0 1 2 2v2.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-      <path d="M10.4 12.6v2.2M13.6 12.6v2.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    </symbol>
-    <symbol id="i-grenade" viewBox="0 0 24 24">
-      <circle cx="12" cy="13.8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.8"/>
-      <path d="M9.6 7.5V5.2h4.8v2.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-      <path d="M16.1 6.1 19 3.6M12 10.6v6.4M8.8 13.8h6.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    </symbol>
-    <symbol id="i-super" viewBox="0 0 24 24">
-      <path d="M12 2.8 15.4 9 22 12l-6.6 3L12 21.2 8.6 15 2 12l6.6-3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-      <circle cx="12" cy="12" r="2.4" fill="currentColor"/>
-    </symbol>
-    <symbol id="i-class" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
-      <circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
-      <path d="M12 3.8v3.4M12 16.8v3.4M3.8 12h3.4M16.8 12h3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    </symbol>
-    <symbol id="i-weapons" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="7.6" fill="none" stroke="currentColor" stroke-width="1.8"/>
-      <path d="M12 2.6v5M12 16.4v5M2.6 12h5M16.4 12h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-      <circle cx="12" cy="12" r="1.9" fill="currentColor"/>
-    </symbol>
     <!-- UI marks -->
     <symbol id="i-check" viewBox="0 0 24 24">
       <path d="M4.5 12.8 9.5 17.8 19.5 6.8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1177,7 +1833,12 @@
   </div>
 
   <div class="card card--targets" id="inputCard">
-    <h2 data-i18n="targetsHeading">目标六维属性</h2>
+    <h2>
+      <span data-i18n="targetsHeading">目标六维属性</span>
+      <button class="btn target-reset-btn" type="button" onclick="resetTargetStats()">
+        <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="resetTargetsButton">恢复默认值</span>
+      </button>
+    </h2>
     <div class="input-grid" id="targetGrid"></div>
     <div id="realtimeRangeSummary" style="margin-top:8px;display:none;" aria-live="polite"></div>
     <div class="exotic-settings">
@@ -1209,32 +1870,34 @@
         <div id="exoticFrameworkSummary"></div>
       </div>
     </div>
-    <div class="mod-row">
-      <div class="input-group">
-        <label for="numPlus5" data-i18n="plus5ModCount">+5模组数量</label>
-        <input type="number" id="numPlus5" value="0" min="0" max="5" onchange="sync5to10()">
+    <div class="armor-budget-workbench">
+      <div class="budget-toolbar">
+        <div class="input-group">
+          <label for="numPlus5" data-i18n="plus5ModCount">+5模组数量</label>
+          <input type="number" id="numPlus5" value="0" min="0" max="5" onchange="sync5to10()">
+        </div>
+        <div class="input-group">
+          <label for="numPlus10" data-i18n="plus10ModCount">+10模组数量</label>
+          <input type="number" id="numPlus10" value="5" min="0" max="5" onchange="sync10to5()">
+        </div>
+        <div class="budget-info" id="budgetInfo" aria-live="polite"></div>
       </div>
-      <div class="input-group">
-        <label for="numPlus10" data-i18n="plus10ModCount">+10模组数量</label>
-        <input type="number" id="numPlus10" value="5" min="0" max="5" onchange="sync10to5()">
+      <div class="plus3-panel">
+        <label class="plus3-toggle">
+          <input type="checkbox" id="usePlus3" onchange="togglePlus3()">
+          <span data-i18n-html="plus3ModeLabel">启用调整<strong style="color:var(--accent);">+3</strong>模式（免费+3点/件）</span>
+        </label>
+        <div id="plus3CountRow" class="plus3-count">
+          <span data-i18n="selectWord">选择</span>
+          <button type="button" class="icon-btn" onclick="adjPlus3(-1)" aria-label="减少 +3 件数" title="减少 +3 件数"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-caret-down"/></svg></button>
+          <span id="plus3CountVal" class="plus3-count-value">1</span>
+          <button type="button" class="icon-btn" onclick="adjPlus3(1)" aria-label="增加 +3 件数" title="增加 +3 件数"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-caret-up"/></svg></button>
+          <span data-i18n="plus3PiecesSuffix">件护甲使用+3模式（其余用+5/-5）</span>
+        </div>
       </div>
-      <div class="budget-info" id="budgetInfo"></div>
+      <div id="targetSumDisplay" aria-live="polite" style="display:none;"></div>
+      <div id="statMins" style="display:none;"></div>
     </div>
-    <div class="mod-row" style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px;">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
-        <input type="checkbox" id="usePlus3" onchange="togglePlus3()" style="accent-color:var(--accent);width:16px;height:16px;">
-        <span data-i18n-html="plus3ModeLabel">启用调整<strong style="color:var(--accent);">+3</strong>模式（免费+3点/件）</span>
-      </label>
-      <div id="plus3CountRow" style="display:none;margin-left:24px;">
-        <span style="font-size:13px;color:var(--text-dim);" data-i18n="selectWord">选择</span>
-        <button type="button" class="icon-btn" onclick="adjPlus3(-1)" aria-label="减少 +3 件数" title="减少 +3 件数" style="width:28px;height:28px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:4px;cursor:pointer;font-size:14px;line-height:1;margin:0 4px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-caret-down"/></svg></button>
-        <span id="plus3CountVal" style="min-width:20px;text-align:center;font-weight:700;font-size:15px;">1</span>
-        <button type="button" class="icon-btn" onclick="adjPlus3(1)" aria-label="增加 +3 件数" title="增加 +3 件数" style="width:28px;height:28px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:4px;cursor:pointer;font-size:14px;line-height:1;margin:0 4px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-caret-up"/></svg></button>
-        <span style="font-size:13px;color:var(--text-dim);" data-i18n="plus3PiecesSuffix">件护甲使用+3模式（其余用+5/-5）</span>
-      </div>
-    </div>
-    <div id="targetSumDisplay" style="margin-top:8px;font-size:12px;color:var(--text-dim);display:none;"></div>
-    <div id="statMins" style="margin-top:6px;font-size:11px;color:var(--text-dim);display:none;"></div>
   </div>
   </div>
 
@@ -1275,11 +1938,14 @@
     <!-- Priority Refinement (shown when solve is not perfect) -->
     <div class="card" id="refineCard" style="display:none;">
       <h2 data-i18n="refineHeading">优先属性与约束调整</h2>
-      <p style="font-size:12px;color:var(--text-dim);margin-bottom:8px;" data-i18n="refineDescription">
+      <p class="refine-card-copy" data-i18n="refineDescription">
         选择优化目标后点击下方按钮重新求解。约束条件对求解器施加硬性限制。
       </p>
       <div id="refineCheckboxes"></div>
-      <button class="btn-solve" onclick="refineWithPriorities()" style="font-size:14px;padding:10px 32px;margin-top:12px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="refineButton">重新优化</span></button>
+      <div class="refine-actions">
+        <button class="btn" type="button" onclick="resetConstraints()"><span data-i18n="clearAllButton">清空全部</span></button>
+        <button class="btn-solve" id="btnRefine" type="button" onclick="refineWithPriorities()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="refineButton">重新优化</span></button>
+      </div>
       <div id="refineCost" style="margin-top:14px;font-size:13px;"></div>
     </div>
 
@@ -1308,14 +1974,26 @@
 // ============================================================
 // ICONS
 // ============================================================
-// Returns an <svg> referencing a sprite symbol. Decorative by default
-// (aria-hidden) because icons here always sit next to a text label.
-// Pass a label only when the icon is the sole carrier of meaning.
+const STAT_ICON_ASSETS = Object.freeze({
+  health: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAQAAACQqPihAAAB80lEQVRYw+2XsW7bMBCGPxKGtsBzhi4ZigxxXiCDvGQK0Jdox2bxA0SwkdlLPfYRMhXI7gwdu9gZgg5ZWsDoaGTTcNehqMKTqEJM4bZI9U8iecdPIo/UHfTq9dekXodP9Byq72gqmVzKlYzSITKSK7mUrDnimhAuOAZKpn6dBqEgA1bMfPlLTAUhFVRBiIHMSqoPIJBRdF06A4FjLuweDYz1HoemnTGm+h4548SMfvTX1fMYuyOH7LFtwbitTM1b3bhFMLzPkZnqPvBcaEZeNUumbhua1sLPr5lSVpC5026L5tTNuXmE1Pe0EeUVKAFiQNHAGTQd/FqmjN0iBfIDpHMtWcaicxBz8GuSTswjiHfxka5Xw2+qxzxBLt4tZ+w3Oo84MO17bhs2m+BmCBSNNOCkduJjOqhhAW6JYp7X3vSYfxfTFtCf+Nboe8kL0/7C54bN1/h0LcczJnnDK9Pxwb/v6vu89uY/wMhIzjUhOH5KnZzHE8gIRkYUnOokFaROJ5zGM9UGpkpT8zSQOp2Q05IS1zAmF04AVRDiIHML6FALkwvnWgYp0ab2t9wEnm+D1BYyCn3t2nJoHrgLKgIoWQYffh3/MwKwJDcveMdD66I5YcYqgHSub0zuDStmTszMdYfdVGsx8x3UnlH9kUq6V68d6DuFzLoTywfGBQAAAABJRU5ErkJggg==',
+  melee: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAQAAACQqPihAAAAy0lEQVR42mP8z0APwMQwas2oNcPIGhYc4pvgrPsM+Qw6DG1w/l6GiQx+DClw/hyGTQyRDJFwvt9o3IxaM+ytYcRR34jCWX8Y3jOwMgjA+T8YPjNwMvDA+V8YvjNwMXDD+a9JsWZ4FTbVRJuwi+E0gymDG5zfSoo15kRbc5mBgUGSkPrRfEPFJIAKtjI8xxs3VLLmKMOVYRRoRgxieOXVqGNNyGiCHnnZcy99as/hFWjmZJt4kpRA20S2NaNN9WHS6hwNtFFrRq0ZcGsAKYQgTmfkXjoAAAAASUVORK5CYII=',
+  grenade: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAQAAACQqPihAAAB00lEQVRYw+2Wv0tcQRDHP7sIYpEihW2sNBCsEzjwrhAEG0EwnaZKc+1V4QI2/iAIEUxhYaV/QSApUkgKrbQQQ0wOEkianIgciBbKceCOhUcKczO773JYvW+17+3sfHaGmd2FXLlyZZWzJgUpM5ng5Zuv2gbexLxMgiTIwIQXTPUGYmDCc2Z6BYE+BTLNXHu4z++ol9OYgVIC4UN7sONWnfx/NGYJsNcbiJq0tj7fQmRIHhhWwdXMvohiAJCSVCL9tSORqO2kAeFhDAKUZMI2sDBX1IG+KASg357Wk9Zk3h///fpKA3jEMCfUgAEKnHMAwHh8FxqmxYL/CcBjAD76fQhTDFPzaxAGKVD3awBhHBgRM2gtaYv+CCA8pZKQMihK2aoBBeO/tCGvUmoRgEkpixqQUQJSopoMuQVVNJB+dI5JJV7ud1QSJcW6o2JSIf8D6vxbdRVe86wLDL7jHZU1LV0qx+S6H+l9M8uTbhx2fn+qZ5YbkNEuKA0FrtnLFr8yQ1osZ8T4FstcZMS888rWjL7xDd5wnQHy3u+qvqx1/jsbyZBDt2l4stf6T2wnQU7civVSix42bp0fUUjTLbpLc7tRzLVb4ixi9Nb9SYo5V65cGXQDiK9vesV3DT4AAAAASUVORK5CYII=',
+  super: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAQAAACQqPihAAAEHUlEQVR42u3YS2wVVRjA8V9LeVigCo2UQqQg0pAgGFHBqAuiLDTBxI0bE4IxLARfMYq1IqWU0hJTDNFgo7IwisawrBsJqAgYAkYFBFESgkgUWgGh4SG3yLjo6TD3VW5JcWE4N7kzc+bM95/zne91pijyX7Ri1zHXMX1+4pO+P9V3zM2GKb92mHIPg1GoAPcp7W9MuaYwtgKjwY0aCgUVFwyp1E5AjAIdqjUY1l+YCk0qCZjLSmtHtWZl/YEZbaXKWGxSad3XVVZcGXQlTJnmYFendMWYbqV1+SsGDeorZqxWs+P+Ti32g59AiZEoVwIOgb3elgrjB3jE+2H2yRZl/56M2qLW6P5Ez93Rc9GgSCQaG7VFbVFbNCYSicqiV6I7E+NmRe9GbdET2TKLcuabR81X5KAP/ZBxZ7p6sDTrzj3mGi/S6vNsgSU5VfmZk14y0TJ7feBAmtWlH7vbFPNMRsoq23MJLMmzZt/otFip27XY4SO/5cVMMM90cNbysIIFYQbqwo9q1RuBmWbY7GMdBqoOYyrD/1wPhJ4TloaXKXYpU2T22lRZZq1twRUbjAn9F31lavAY+M5JD8UWeUSdE2CWx+PzvJgeZ1urLfjNUpOu6ML7LXcGPOYpHPVaOmhAfS4I0x31Ky7YbGI8o9xth0bnwRzzwXAzfetsbve8LRE2dtoazlIafdELZKOm2Dm/jK2y0sqEghNKq06E9Z2a/ZMmbF2euPWLRWnXpepNjo2i1rH02YxIQHZkQeQNjjdkXJ/zuj1x+mjuSRPF8e0/EzF5aJa4VB5Mqm9p7YLFDmcZwuV2KM/zBzOuB6kzLaG0M5km0NkLaLxb8mDuTS60Ug1pkGO5/abMClXh/HeLwruM09RL4jqhRgcYbEUcJdIgmfkmOaOfA2S0Zb1mx3LLQ+JLBRxH1SQh2Wmt06sOYIu34mKjpyo77dOEy33do3eVGpUhssrOEAM60sWmR4Hu1LsN77mEEZrjWLxBo+9NDUFzmxYbjTQ+KPsuW3SJbFdudWZEkyetZa7UEWtCiF8YisL11oE7LAzgA+qc63vJUapBFbqs83ycR9ozjrs9a72LqLYkf+GRDzNYg1ux2zPWJ2LCsQxM92u8YD+mqDOgL5hBlqh22puWBMHlcaWZxAx3U1BqjTXOmqY2N6g4Z1+taTZZYHP3+pnjHQsS4iPHQY3WsFZs8LQtZnix8CR9Xq19sbm+bFKcljv9bYjjQY0TDLXQg1b7A6e12GS2IlEhmAveSPPy83Ht3K22cWFOQwwPUfpMPHqXXVdXQ6c02IOS4KbtadU0hy3W2R87gh7QqNjWLmMKghS6v+kGVcS21oMpEFL4bi2lISS+9tisTxUKyV915gLty1ibrYVvcYuu4tNQjqryWmCuf0z5X2H+BZweWOX++PxrAAAAAElFTkSuQmCC',
+  class: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAQAAACQqPihAAAC0ElEQVR42u2XTUhUURTHf840OiguhgZKwqhcVNAqBBcxZJhf+dU45WibNrVuX6v2BS1btPYj/CAdsAgqMAKphGCodKEEgS0KF6aMH2kL/955z5zxvTeTi5o3iznv3vvu7/3Pufecd4s22Y/LRwHzL2GO7wfmCPc4+PcxVwgQdftQUYZ946fEdr/OKgCHeYiPVW6yAEAJftu4FBu7TXcgA76aO7b7B7wAII4PKCbGIwAauWEbd5ukd6fN8wqAMOfV0kA5AONSlZfYDMoVXUZ9UPFZYyRfmO9yWJiLltZWo2cxP5jH/AIgaotkkDYAVhjOB+YHzwEI0bijp41SABJ769kbMyItMYrVsqb/MjqkJ5ErZoFxAMppUssG901vu3bXE5Zywwzp3aNGy0veMGn0tAKwzGgumEWeSUur0TIA9JoRndKTIOUdM8wKAB0E1fKab8Ac73VfziW9UMIrZvvRUlrUskm/rD4z6jIBLZWUN8yY0VJmtHyVNcOUrBDNNge7xCwprEHaLRs1fQ0YK6ZtO6ws7gozyjIALUbLJF8AOA3AJ5OLQ0pCCzx1i0kxpnrSadp6VXHuErLcb6VUv+Kz7g7zgZ+2BAlvmVPFCRIDIMlH9YWpV2L67GVBByxxGdCEF4AmwdOximafKTumWe6BKWbknq3qGVXrtPorqPWKCcg5gPZLuuJsOzO9f+LZ5sqGqTNakvJ5p6V6dkjPrNFzzgvGT9eONRaiwdLfomqT1tPtBVNP2GhJ7qg41mozafRUEnGL8VniMqjMFmHJ9qtTNhsyI69mwmT6TqvlkKxpZa9lrmcYO0E3lQAco8bUIgdqfMSN3efgo6TfWD1unBahQtasycTZrgnmZZ2g2rnT0mtsk1uOPhhXLfvnnTNMRJ4GqKLK5cf/Sc7+6YHdnBbP8WjW7SQ2NRzNEXOKM3tjevJw1Lzm9BhVOLAXMAXM/4L5DdZvnwbdUOcgAAAAAElFTkSuQmCC',
+  weapons: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAQAAACQqPihAAADnklEQVRYw+2XT2hcdRDHP/NLiGXrbtCiJiqIVXpJUaikil5sRdp6K/QgUtJDQRKKkKS31iRqqwUra8VzoV7yx+MeCiKiom3RogdtUAKJRNJ4sDX6Xkwbk8542Le/ffvvZV8U6yGzh52Z32/mO/N9vzfvPdiQDfkvRNJsNontN7HmI1tTwbzJdm9c4Vjzke7fpmcdMIbu0iHNlGz5qrxW1jWjQ7ormcGEa2ObbYCdwBTDbilK+RIvAjDuRiNPm7xuXcBlycufqbvRDsuzE4BtvOE7+q7yX9sYti4Auu2MdqSE0Q45Rac3tzHYIL6fx7x+n5zS+1PA6J28Zlu8ucq4nG7A+XuMsepp3sKIZpuEMeQo5armZcCNynIDmGU3Rj/z3tHJ0XqHoR7MHnvCG1MMyiyJ4n5mkClv7rB9TcBohh5vXC2fsUSgJYa56s2DtnntbvZTYneFk25Jd2tB+zRT/LEpWttU8mifFnS3W+IEf0VrWdtfnbRq2Fir7fXGqCtVuI9qIoZr6p3XMQ5Fxl6bkJWEbqyb9khdkMLadMVFCvwWqTnrTuyGp7x2PlbPDFcA5JnyMZfrdgGA7WyNPCt6noPR8pNcrCihhrSs5KxdsnwvAYA+yA6m3SSAvhWf0O4YgHbxCN+6OQDLWReBBISEciuhG1llgYUKVueYS6LKTTLpowMuNdiVjv/1SkU3muEwISEhAX8QSsCiaDNpzJG1LFnayZElS5az8TuuAkZa7fmKYEAPu1/XAtF77Gy1Tz643aRVyCIhAWGjoVlR+bJd9mQ1AXODkwSEEhKmeW+RgBNFzSBnRbgbDWFkha//GTkCAUGt//ZcG72XpyOWb7ozaZPpK+QIJLBFLrpfEmDkph2iJQr6wn2TBsQeL94OBiqfJJImARe88bLdkaKTNuv1WS7J74kwwDilM9ZpR1Ictz4eKLXFh9WLNTBujo+88az10JRoD89542P5aU0Y4Bzl8XJAj1hLMoQ57eWAJ+w652r31IFxS5wuv3uxx/IaPbhiXq/bQ/YOL5S99rZbbAoG3I/kKV+Wh+m34om8Ftt0DcBabJBHY9733Q91M9Ynwn0peUqPgFl5VYq1T8e2TAPILRmi9B5n5N2nDfI1Ylw+Z4gQmJXjUhof8VEU6RLIcWaBRRl2n7Ee0bu013Jxj41oQQtasJEKb0579e6kTKm+PUG38i6CMeBm0sSlHJ1uhglgIh3IuiT2SbIhG/I/k78BAZxEA4OCcUoAAAAASUVORK5CYII=',
+});
+
+// Stat names resolve to exact embedded copies of the PNG files in
+// asset/PNG_51px. Other names continue to use the inline SVG sprite.
 function icon(name, { size = '', label = '', cls = '' } = {}) {
-  const classes = ['icon', size ? `icon--${size}` : '', cls].filter(Boolean).join(' ');
+  const isStat = Object.prototype.hasOwnProperty.call(STAT_ICON_ASSETS, name);
+  const classes = ['icon', isStat ? 'icon--stat' : '', size ? `icon--${size}` : '', cls].filter(Boolean).join(' ');
   const a11y = label
     ? ` role="img" aria-label="${label}"`
     : ' aria-hidden="true"';
+  if (isStat) {
+    return `<span class="${classes}" data-stat-icon="${name}" style="--stat-icon-image:url('${STAT_ICON_ASSETS[name]}')"${a11y}></span>`;
+  }
   return `<svg class="${classes}"${a11y} focusable="false"><use href="#i-${name}"/></svg>`;
 }
 
@@ -1366,7 +2044,7 @@ const UI_TEXT = {
     introSummary:'程序介绍（点击展开）',
     introContent:'<p>本程序用于命运2护甲3.0版的T5配装求解。输入目标六维属性、模组和碎片后，程序会枚举五件护甲的实际组合，并结合已有护甲判断还需刷取什么。</p><p>异域职业物品模式会根据职业及左右栏特性锁定30/25/20护甲框架，再计算异域职业物品与四件传说护甲的真实可达范围。调整模组、护甲模组和第三属性均参与逐件计算。</p><p>基础参数：每件T5护甲为主要属性30、次要属性25、第三属性20，其余三项大师杰作各5，共90点；五件共450点。调整模组可选+5/-5或+3；每件可装备一个+5或+10护甲模组；单项属性范围为0–200。</p><p>12种护甲框架：突围者、堡垒、搏击手、突击手、掷雷手、爆破专家、装甲兵、楷模典范、掠夺者、专家、枪手、高能者。</p>',
     fragmentsHeading:'碎片属性变化',
-    targetsHeading:'目标六维属性',
+    targetsHeading:'目标六维属性', resetTargetsButton:'恢复默认值',
     exoticModeLabel:'启用<strong style="color:var(--accent);">异域职业物品模式</strong>',
     exoticModeDescription:'锁定异域职业物品的主要/次要/第三属性框架，再用其余四件传说护甲计算最优解与六维理论极限。调整由求解器自动分配，无需手动指定。',
     exoticModeDetail:'选择职业及左右栏特性后，程序自动锁定对应的30/25/20固定框架；右栏特性与主要/次要属性冲突时按游戏候补顺序取剩余属性。',
@@ -1400,7 +2078,7 @@ const UI_TEXT = {
     introSummary:'程式介紹（點擊展開）',
     introContent:'<p>本程式用於天命2防具3.0版的T5配裝求解。輸入目標六維數值、模組和碎片後，程式會列舉五件防具的實際組合，並結合已有防具判斷還需取得什麼。</p><p>異域職業物品模式會根據職業及左右欄特長鎖定30/25/20防具原型，再計算異域職業物品與四件傳說防具的真實可達範圍。調整模組、防具模組和第三數值均參與逐件計算。</p><p>基礎參數：每件T5防具為主要數值30、次要數值25、第三數值20，其餘三項傑作各5，共90點；五件共450點。調整模組可選+5/-5或+3；每件可裝備一個+5或+10防具模組；單項數值範圍為0–200。</p><p>12種防具原型：破圍者、堡壘、赤拳互鬥、衝突者、榴彈兵、爆破專家、巨神兵、至高典範、剝奪者、戰術家、槍手、發電站。</p>',
     fragmentsHeading:'碎片數值變化',
-    targetsHeading:'目標六維數值',
+    targetsHeading:'目標六維數值', resetTargetsButton:'恢復預設值',
     exoticModeLabel:'啟用<strong style="color:var(--accent);">異域職業物品模式</strong>',
     exoticModeDescription:'鎖定異域職業物品的主要/次要/第三數值原型，再用其餘四件傳說防具計算最佳解與六維理論極限。調整由求解器自動分配，無需手動指定。',
     exoticModeDetail:'選擇職業及左右欄特長後，程式自動鎖定對應的30/25/20固定原型；右欄特長與主要/次要數值衝突時，依遊戲候補順序取剩餘數值。',
@@ -1434,7 +2112,7 @@ const UI_TEXT = {
     introSummary:'About this tool (click to expand)',
     introContent:'<p>This tool solves Destiny 2 Armor 3.0 T5 loadouts. Enter six target stats, mods, and Fragment changes; it enumerates real five-piece armor combinations and uses your owned armor to show what remains to farm.</p><p>Exotic Class Item mode locks its 30/25/20 armor archetype from the selected class and left/right-column perks, then calculates the true reachable range across that item and four Legendary Armor pieces. Tuning Mods, Armor Mods, and tertiary stats are evaluated per piece.</p><p>Base rules: each T5 piece has 30 primary, 25 secondary, 20 tertiary, and 5 Masterwork points in each remaining stat, for 90 total; five pieces provide 450. A Tuning Mod is either +5/-5 or +3; each piece takes one +5 or +10 Armor Mod; each stat ranges from 0–200.</p><p>12 armor archetypes: Siegebreaker, Bulwark, Brawler, Skirmisher, Grenadier, Demolitionist, Colossus, Paragon, Reaver, Specialist, Gunner, and Powerhouse.</p>',
     fragmentsHeading:'Fragment Stat Changes',
-    targetsHeading:'Target Stats',
+    targetsHeading:'Target Stats', resetTargetsButton:'Reset defaults',
     exoticModeLabel:'Enable <strong style="color:var(--accent);">Exotic Class Item mode</strong>',
     exoticModeDescription:'Lock the Exotic Class Item primary, secondary, and tertiary stat archetype, then solve the other four Legendary Armor pieces for the best result and six-stat limits. Tuning is assigned automatically.',
     exoticModeDetail:'Select a class and left/right-column perks to lock the matching 30/25/20 archetype. If the right perk conflicts with a primary or secondary stat, the next eligible stat in the game order is used.',
@@ -2219,8 +2897,8 @@ function getStatInputHTML(prefix, stat, val) {
   return `
     <div class="input-group ${prefix === 'target' ? 'target-stat-group' : ''}">
       <div class="stat-label" style="color:${STAT_COLORS[stat]};display:flex;align-items:center;justify-content:space-between;">
-        <span class="icon-text">${icon(stat)}${STAT_LABELS[stat]}</span>
-        ${prefix === 'target' ? `<label class="lock-control" style="font-size:10px;color:var(--text-dim);font-weight:400;display:flex;align-items:center;gap:5px;">
+        <span class="icon-text stat-name target-stat-name">${icon(stat)}<span>${STAT_LABELS[stat]}</span></span>
+        ${prefix === 'target' ? `<label class="lock-control">
           <input type="checkbox" id="targetLock_${stat}" aria-label="${STAT_LABELS[stat]} ${t('lock')}" style="accent-color:var(--accent);width:13px;height:13px;">${icon('lock', { size: 'sm' })}<span>${t('lock')}</span>
         </label>` : ''}
       </div>
@@ -2236,15 +2914,30 @@ function renderInputs() {
   targetGrid.innerHTML = STATS.map(s => getStatInputHTML('target', s, DEFAULT_TARGETS[s])).join('');
   const fragGrid = document.getElementById('fragmentGrid');
   fragGrid.innerHTML = STATS.map(s => `
-    <div class="input-group" style="align-items:center;">
-      <label class="icon-text" style="color:${STAT_COLORS[s]}">${icon(s)}${STAT_LABELS[s]}</label>
-      <div style="display:flex;align-items:center;gap:4px;">
-        <button type="button" class="icon-btn" onclick="adjFragment('${s}',-10)" aria-label="${STAT_LABELS[s]} -10" title="${STAT_LABELS[s]} -10" style="width:28px;height:28px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:4px;cursor:pointer;font-size:14px;line-height:1;">${icon('caret-down')}</button>
-        <span id="fragVal_${s}" style="min-width:32px;text-align:center;font-weight:700;font-size:15px;">0</span>
-        <button type="button" class="icon-btn" onclick="adjFragment('${s}',10)" aria-label="${STAT_LABELS[s]} +10" title="${STAT_LABELS[s]} +10" style="width:28px;height:28px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:4px;cursor:pointer;font-size:14px;line-height:1;">${icon('caret-up')}</button>
+    <div class="input-group fragment-stat-control">
+      <label class="icon-text stat-name fragment-stat-name" style="color:${STAT_COLORS[s]}">${icon(s)}<span>${STAT_LABELS[s]}</span></label>
+      <div class="fragment-stepper">
+        <button type="button" class="icon-btn" onclick="adjFragment('${s}',-10)" aria-label="${STAT_LABELS[s]} -10" title="${STAT_LABELS[s]} -10">${icon('caret-down')}</button>
+        <span id="fragVal_${s}" class="fragment-value">0</span>
+        <button type="button" class="icon-btn" onclick="adjFragment('${s}',10)" aria-label="${STAT_LABELS[s]} +10" title="${STAT_LABELS[s]} +10">${icon('caret-up')}</button>
       </div>
     </div>`).join('');
   updateBudget();
+}
+
+function resetTargetStats() {
+  for (const stat of STATS) {
+    const input = document.getElementById('target_' + stat);
+    if (input) {
+      input.value = DEFAULT_TARGETS[stat];
+      input.style.borderColor = DEFAULT_TARGETS[stat] !== 0 ? STAT_COLORS[stat] : 'var(--border)';
+    }
+    const lock = document.getElementById('targetLock_' + stat);
+    if (lock) lock.checked = false;
+  }
+  updateBudget();
+  scheduleRealtimeRanges();
+  saveCurrentDraft();
 }
 
 function adjFragment(stat, delta) {
@@ -2268,9 +2961,9 @@ function updateBudget() {
   const budget = 450 + n3 * 3 + n5 * 5 + n10 * 10;
   const modBudget = n3 * 3 + n5 * 5 + n10 * 10;
   document.getElementById('budgetInfo').innerHTML = l(
-    `属性总预算：<strong>${budget}</strong>（基础450 + 模组${modBudget}）`,
-    `數值總預算：<strong>${budget}</strong>（基礎450 + 模組${modBudget}）`,
-    `Total stat budget: <strong>${budget}</strong> (450 base + ${modBudget} from mods)`
+    `<span>属性总预算</span><strong>${budget}</strong><small>基础 450 + 模组 ${modBudget}</small>`,
+    `<span>數值總預算</span><strong>${budget}</strong><small>基礎 450 + 模組 ${modBudget}</small>`,
+    `<span>Total stat budget</span><strong>${budget}</strong><small>450 base + ${modBudget} from mods</small>`
   );
 
   // Compute armor needed vs budget (with fragments factored in)
@@ -2289,7 +2982,7 @@ function updateBudget() {
     // The solver needs armorNeeded === budget. Rather than telling the user to
     // do the arithmetic, offer the fix as a button.
     const fixBtn = diff === 0 ? '' :
-      `<button class="btn" onclick="balanceTargetsToBudget()" style="margin-top:8px;font-size:12px;">`
+      `<button class="btn budget-fix-btn" onclick="balanceTargetsToBudget()">`
       + `${icon('refresh')}${l(
           diff > 0 ? `自动降低 ${diff} 点` : `自动补足 ${-diff} 点`,
           diff > 0 ? `自動降低 ${diff} 點` : `自動補足 ${-diff} 點`,
@@ -2322,11 +3015,8 @@ function updateBudget() {
         `Armor must provide <strong>${armorNeeded}</strong> = budget <strong>${budget}</strong>, exact`
       );
     }
-    sumEl.innerHTML = `<div style="display:flex;align-items:flex-start;gap:.55em;padding:10px 14px;border-radius:8px;`
-      + `background:color-mix(in oklab, var(--${tone}) 11%, var(--card));`
-      + `border:1px solid color-mix(in oklab, var(--${tone}) 34%, var(--border));font-size:13px;">`
-      + `<span style="color:var(--${tone});margin-top:.15em;">${icon(mark)}</span>`
-      + `<span>${body}${fixBtn}</span></div>`;
+    sumEl.innerHTML = `<div class="budget-balance is-${tone}">`
+      + `${icon(mark)}<div>${body}${fixBtn}</div></div>`;
     sumEl.style.cssText = 'display:block;';
   } else {
     sumEl.style.display = 'none';
@@ -2358,11 +3048,15 @@ function updateBudget() {
     const tval = getVal('target_' + s);
     const below = tval > 0 && tval < finalMin;
     lines.push(l(
-      `<span style="color:${STAT_COLORS[s]}">${STAT_LABELS[s]}</span>最低<strong>${finalMin}</strong>${below ? ` <span style="color:var(--health);">（你设了${tval}，过低！）</span>` : ''}`,
-      `<span style="color:${STAT_COLORS[s]}">${STAT_LABELS[s]}</span>最低<strong>${finalMin}</strong>${below ? ` <span style="color:var(--health);">（你設定${tval}，過低！）</span>` : ''}`,
-      `<span style="color:${STAT_COLORS[s]}">${STAT_LABELS[s]}</span> min <strong>${finalMin}</strong>${below ? ` <span style="color:var(--health);">(target ${tval} is too low)</span>` : ''}`
+      `<span class="minimum-stat${below ? ' is-invalid' : ''}"><span style="color:${STAT_COLORS[s]}">${STAT_LABELS[s]}</span><strong>${finalMin}</strong>${below ? `<em>目标 ${tval} 过低</em>` : ''}</span>`,
+      `<span class="minimum-stat${below ? ' is-invalid' : ''}"><span style="color:${STAT_COLORS[s]}">${STAT_LABELS[s]}</span><strong>${finalMin}</strong>${below ? `<em>目標 ${tval} 過低</em>` : ''}</span>`,
+      `<span class="minimum-stat${below ? ' is-invalid' : ''}"><span style="color:${STAT_COLORS[s]}">${STAT_LABELS[s]}</span><strong>${finalMin}</strong>${below ? `<em>target ${tval} is too low</em>` : ''}</span>`
     ));
   }
+  const hasBelowMinimum = STATS.some(s => {
+    const tval = getVal('target_' + s);
+    return tval > 0 && tval < Math.max(0, armorBase + getFragVal(s));
+  });
   const baseExplain = n3 > 0
     ? l(
       `每件+3护甲：大师杰作5 + 免费1 = <strong>6点</strong>，${n3}件 × 6 = <strong>${armorBase}点</strong>。`,
@@ -2374,13 +3068,19 @@ function updateBudget() {
       `未啟用+3模式，+5/-5調整可將數值降至0，防具基礎最低<strong>0點</strong>。`,
       `Without +3 mode, +5/-5 Tuning can reduce a stat to 0; the minimum armor base is <strong>0</strong>.`
     );
+  const needsAttention = hasBelowMinimum || !slotsOK;
   minsDiv.innerHTML = `
-    <details open>
-      <summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--accent);">${l('各属性最低可达值（点击收起）','各數值最低可達值（點擊收合）','Minimum Reachable Stats (click to collapse)')}</summary>
-      <div style="margin-top:6px;padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid var(--border);font-size:12px;line-height:1.7;">
-        <div style="color:var(--text-dim);">${baseExplain}</div>
-        <div style="margin-top:4px;">${l('加上碎片后：','加上碎片後：','After Fragments: ')}${lines.join(' | ')}</div>
-        <div style="margin-top:8px;padding:6px 10px;background:color-mix(in oklab, var(--warning) 9%, var(--card));border:1px solid color-mix(in oklab, var(--warning) 34%, var(--border));border-radius:4px;color:var(--warning);">
+    <details class="minimum-details" ${needsAttention ? 'open' : ''}>
+      <summary>
+        <span class="minimum-summary-label">${l('各属性最低可达值','各數值最低可達值','Minimum reachable stats')}</span>
+        <span class="minimum-summary-status${needsAttention ? ' is-warning' : ''}">${needsAttention
+          ? l('需要检查','需要檢查','Needs attention')
+          : l('按需展开','按需展開','Expand for details')}</span>
+      </summary>
+      <div class="minimum-content">
+        <div>${baseExplain}</div>
+        <div class="minimum-stat-list">${lines.join('')}</div>
+        <div class="tuning-slot-status${!slotsOK ? ' is-error' : ''}">
           ${(() => {
             if (availSlots === 0) return icon('hint') + ' ' + l(
               `全部5件使用+3模式，无-5调整槽可用。所有属性最低为护甲基础${armorBase}点+碎片。`,
@@ -2466,7 +3166,7 @@ function balanceTargetsToBudget() {
 
 function togglePlus3() {
   const checked = document.getElementById('usePlus3')?.checked;
-  document.getElementById('plus3CountRow').style.display = checked ? 'block' : 'none';
+  document.getElementById('plus3CountRow').style.display = checked ? 'flex' : 'none';
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();
@@ -2637,50 +3337,6 @@ function updateExoticTertiaryOptions() {
 
 function buildExoticConstraints(settings, fragments) {
   return settings ? {} : null;
-}
-
-function calculateAbsoluteRanges(fixedPiece, numPlus5, numPlus10, numPlus3, fragments) {
-  const ranges = {};
-  const modTotal = numPlus5 * 5 + numPlus10 * 10;
-  const masks = [];
-  for (let mask = 0; mask < 32; mask++) {
-    let bits = 0;
-    for (let i = 0; i < 5; i++) if ((mask >> i) & 1) bits++;
-    if (bits === numPlus3) masks.push(mask);
-  }
-  if (masks.length === 0) masks.push(0);
-
-  for (const stat of STATS) {
-    let absoluteMin = Infinity;
-    let absoluteMax = -Infinity;
-    for (const mask of masks) {
-      let maskMin = 0;
-      let maskMax = 0;
-      for (let slot = 0; slot < 5; slot++) {
-        const plus3 = ((mask >> slot) & 1) === 1;
-        const candidates = slot === 0 && fixedPiece ? [fixedPiece] : BASE_CONFIGS;
-        let slotMin = Infinity;
-        let slotMax = -Infinity;
-        for (const piece of candidates) {
-          const isMasterworkStat = stat !== piece.primary && stat !== piece.secondary && stat !== piece.tertiary;
-          const tuneMin = plus3 ? (isMasterworkStat ? 1 : 0) : -5;
-          const tuneMax = plus3 ? (isMasterworkStat ? 1 : 0) : 5;
-          slotMin = Math.min(slotMin, piece.baseStats[stat] + tuneMin);
-          slotMax = Math.max(slotMax, piece.baseStats[stat] + tuneMax);
-        }
-        maskMin += slotMin;
-        maskMax += slotMax;
-      }
-      absoluteMin = Math.min(absoluteMin, maskMin);
-      absoluteMax = Math.max(absoluteMax, maskMax + modTotal);
-    }
-    const fragment = fragments[stat] || 0;
-    ranges[stat] = {
-      min: Math.max(0, Math.min(200, absoluteMin + fragment)),
-      max: Math.max(0, Math.min(200, absoluteMax + fragment)),
-    };
-  }
-  return ranges;
 }
 
 function calculateExoticRanges(exoticConfig, numPlus5, numPlus10, numPlus3, fragments) {
@@ -3094,6 +3750,7 @@ function collectDraftState() {
     language: getPageLanguage(),
     targets: Object.fromEntries(STATS.map(s => [s, getVal('target_' + s)])),
     targetLocks: Object.fromEntries(STATS.map(s => [s, document.getElementById('targetLock_' + s)?.checked || false])),
+    targetLocksExplicit: true,
     fragments: Object.fromEntries(STATS.map(s => [s, getFragVal(s)])),
     numPlus5: getVal('numPlus5'),
     numPlus10: getVal('numPlus10'),
@@ -3136,7 +3793,11 @@ function loadCurrentDraft() {
       document.getElementById('target_' + stat).value = draft.targets[stat];
     }
     const lock = document.getElementById('targetLock_' + stat);
-    if (lock) lock.checked = !!draft.targetLocks?.[stat];
+    if (lock) {
+      // Drafts saved before manual-lock behavior may contain locks that were
+      // added automatically while typing. Do not restore those accidental locks.
+      lock.checked = draft.targetLocksExplicit ? !!draft.targetLocks?.[stat] : false;
+    }
     const fragment = document.getElementById('fragVal_' + stat);
     if (fragment && draft.fragments && draft.fragments[stat] !== undefined) {
       fragment.textContent = draft.fragments[stat];
@@ -3170,6 +3831,30 @@ function clearRangeHints() {
     if (!hint) continue;
     hint.textContent = '';
     hint.className = 'stat-range-hint';
+  }
+}
+
+function showInvalidCombinationHints(invalidStats) {
+  for (const stat of STATS) {
+    const hint = document.getElementById('rangeHint_' + stat);
+    if (!hint) continue;
+    if (!invalidStats.includes(stat)) {
+      hint.textContent = '';
+      hint.className = 'stat-range-hint';
+      hint.title = '';
+      continue;
+    }
+    hint.textContent = l(
+      '当前锁定组合不可达',
+      '目前鎖定組合不可達',
+      'Locked combination is unreachable'
+    );
+    hint.className = 'stat-range-hint is-active is-outside';
+    hint.title = l(
+      '该数值与其他锁定属性无法组成真实护甲方案',
+      '此數值與其他鎖定數值無法組成真實防具方案',
+      'This value cannot form a real armor combination with the other locked stats'
+    );
   }
 }
 
@@ -3369,14 +4054,11 @@ function updateRealtimeRanges() {
     nearestTargetSuggestion = getNearestTargetSuggestion(
       exoticSettings, numPlus5, numPlus10, numPlus3, fragments
     );
-    const fallbackRanges = calculateAbsoluteRanges(
-      exoticSettings.config, numPlus5, numPlus10, numPlus3, fragments
-    );
-    updateInlineRangeHints(fallbackRanges, locks, locks);
+    showInvalidCombinationHints(locks);
     summary.innerHTML = `<div class="range-panel">
       <div class="range-panel-head">
         <div class="range-panel-title">${l('当前六维组合不可达','目前六維組合不可達','Current six-stat target is unreachable')}</div>
-        <div class="range-panel-caption">${l('以下范围来自实际护甲组合','以下範圍來自實際防具組合','Ranges come from real armor combinations')}</div>
+        <div class="range-panel-caption">${l('请调整锁定值或应用下方建议','請調整鎖定值或套用下方建議','Adjust the locked values or apply the suggestion below')}</div>
       </div>
       <div class="msg error" style="margin:0;">
         ${l(
@@ -3654,8 +4336,13 @@ function solve() {
 
 function buildRefineCard(targets, finalTotals) {
   // Grid: [stat name, exact, <=100, force minimum, current diff]
-  let html = '<div style="display:grid;grid-template-columns:auto repeat(3,70px) auto;gap:6px 10px;align-items:center;font-size:13px;">';
-  html += `<div></div><div style="font-size:11px;color:var(--text-dim);text-align:center;">${l('精确达成','精確達成','Exact')}</div><div style="font-size:11px;color:var(--text-dim);text-align:center;">${l('不超过100','不超過100','≤100')}</div><div style="font-size:11px;color:var(--text-dim);text-align:center;">${l('强制最低','強制最低','Force minimum')}</div><div></div>`;
+  let html = '<div class="constraint-matrix" role="table"><div class="constraint-grid" role="rowgroup">';
+  html += `
+    <div role="columnheader">${l('属性','數值','Stat')}</div>
+    <div role="columnheader">${l('精确达成','精確達成','Exact')}<small>${l('锁定当前目标','鎖定目前目標','Match target')}</small></div>
+    <div role="columnheader">${l('不超过 100','不超過 100','At most 100')}<small>${l('限制属性上限','限制數值上限','Cap the result')}</small></div>
+    <div role="columnheader">${l('强制最低','強制最低','Force minimum')}<small>${l('压到可达最低值','降至可達最低值','Use reachable min')}</small></div>
+    <div role="columnheader">${l('当前结果','目前結果','Current')}<small>${l('相对目标','相對目標','vs target')}</small></div>`;
 
   for (const s of STATS) {
     const diff = finalTotals[s] - targets[s];
@@ -3665,18 +4352,44 @@ function buildRefineCard(targets, finalTotals) {
     const armorBase = (document.getElementById('usePlus3')?.checked ? (parseInt(document.getElementById('plus3CountVal')?.textContent) || 0) : 0) * 6;
     const statMin = Math.max(0, armorBase + (parseInt(document.getElementById('fragVal_' + s)?.textContent) || 0));
     const atMinimum = finalTotals[s] === statMin;
+    const exactLabel = l(
+      `${STAT_LABELS[s]}：精确达成目标 ${targets[s]}`,
+      `${STAT_LABELS[s]}：精確達成目標 ${targets[s]}`,
+      `${STAT_LABELS[s]}: exactly match ${targets[s]}`
+    );
+    const capLabel = l(
+      `${STAT_LABELS[s]}：不超过 100`,
+      `${STAT_LABELS[s]}：不超過 100`,
+      `${STAT_LABELS[s]}: stay at or below 100`
+    );
+    const minLabel = l(
+      `${STAT_LABELS[s]}：强制为最低可达值 ${statMin}`,
+      `${STAT_LABELS[s]}：強制為最低可達值 ${statMin}`,
+      `${STAT_LABELS[s]}: force reachable minimum ${statMin}`
+    );
+    const status = notExact
+      ? `<span class="constraint-status">${l('差','差','Off by')} ${diff > 0 ? '+' : ''}${diff}</span>`
+      : `<span class="constraint-status is-met">${icon('check', { size: 'sm' })}${l('已达成','已達成','Met')}</span>`;
 
     html += `
-      <div style="color:${STAT_COLORS[s]};font-weight:600;">${STAT_LABELS[s]}</div>
-      <div style="text-align:center;"><input type="checkbox" id="prio_${s}" ${notExact ? '' : 'checked'} style="accent-color:${STAT_COLORS[s]};"></div>
-      <div style="text-align:center;"><input type="checkbox" id="le100_${s}" ${notOver100 ? 'checked' : ''} style="accent-color:var(--accent);"></div>
-      <div style="text-align:center;"><input type="checkbox" id="force0_${s}" ${atMinimum ? 'checked' : ''} style="accent-color:var(--accent);"></div>
-      <div style="font-size:11px;color:${notExact?'var(--text-dim)':'var(--success)'};">${notExact ? l('差','差','off by ') + (diff>0?'+':'') + diff : icon('check', { size: 'sm', label: l('已达成','已達成','met') })}</div>`;
+      <div class="constraint-cell constraint-stat" role="rowheader" style="color:${STAT_COLORS[s]};">
+        <span>${STAT_LABELS[s]}</span><small>${l('目标','目標','Target')} ${targets[s]} · ${l('当前','目前','Now')} ${finalTotals[s]}</small>
+      </div>
+      <label class="constraint-cell constraint-toggle" role="cell" title="${exactLabel}">
+        <input type="checkbox" id="prio_${s}" aria-label="${exactLabel}" ${notExact ? '' : 'checked'} onchange="updateRefineActionState()" style="accent-color:${STAT_COLORS[s]};">
+      </label>
+      <label class="constraint-cell constraint-toggle" role="cell" title="${capLabel}">
+        <input type="checkbox" id="le100_${s}" aria-label="${capLabel}" ${notOver100 ? 'checked' : ''} onchange="updateRefineActionState()" style="accent-color:var(--accent);">
+      </label>
+      <label class="constraint-cell constraint-toggle" role="cell" title="${minLabel}">
+        <input type="checkbox" id="force0_${s}" aria-label="${minLabel}" ${atMinimum ? 'checked' : ''} onchange="updateRefineActionState()" style="accent-color:var(--accent);">
+      </label>
+      <div class="constraint-cell constraint-result" role="cell">${status}</div>`;
   }
-  html += '</div>';
-  html += `<button class="btn" onclick="resetConstraints()" style="margin-top:8px;font-size:11px;">${l('清空全部勾选','清除全部勾選','Clear all selections')}</button>`;
+  html += '</div></div>';
   document.getElementById('refineCheckboxes').innerHTML = html;
   document.getElementById('refineCost').innerHTML = '';
+  updateRefineActionState();
 }
 
 function resetConstraints() {
@@ -3688,6 +4401,14 @@ function resetConstraints() {
     if (le100) le100.checked = false;
     if (force0) force0.checked = false;
   }
+  updateRefineActionState();
+}
+
+function updateRefineActionState() {
+  const button = document.getElementById('btnRefine');
+  if (!button) return;
+  const hasSelection = document.querySelector('#refineCheckboxes input[type="checkbox"]:checked');
+  button.disabled = !hasSelection;
 }
 
 function readConstraints() {
@@ -3823,6 +4544,198 @@ function generateExoticRecommendation(result) {
   html += '</table>'; return html;
 }
 
+function requirementCounts(values) {
+  const counts = {};
+  for (const value of values) counts[value] = (counts[value] || 0) + 1;
+  return counts;
+}
+
+function requirementsCanCoverPieces(candidates, property, requirements) {
+  if (candidates.length > requirements.length) return false;
+  const available = requirementCounts(requirements);
+  for (const candidate of candidates) {
+    const value = candidate.piece[property];
+    if (!value) continue;
+    if (!available[value]) return false;
+    available[value]--;
+  }
+  return true;
+}
+
+function getValidTertiaryAssignments(armorSlots, requiredTerts) {
+  const remaining = requirementCounts(requiredTerts);
+  const values = Object.keys(remaining);
+  const assignments = [];
+
+  function visit(slotIndex, current) {
+    if (slotIndex === armorSlots.length) {
+      assignments.push([...current]);
+      return;
+    }
+    const slot = armorSlots[slotIndex];
+    for (const value of values) {
+      if (!remaining[value] || value === slot.primary || value === slot.secondary) continue;
+      remaining[value]--;
+      current.push(value);
+      visit(slotIndex + 1, current);
+      current.pop();
+      remaining[value]++;
+    }
+  }
+
+  visit(0, []);
+  return assignments;
+}
+
+function tertiaryAssignmentCanCoverPieces(candidates, armorSlots, assignment) {
+  const availableByArchetype = {};
+  for (let index = 0; index < armorSlots.length; index++) {
+    const name = armorSlots[index].name;
+    if (!availableByArchetype[name]) availableByArchetype[name] = {};
+    const value = assignment[index];
+    availableByArchetype[name][value] = (availableByArchetype[name][value] || 0) + 1;
+  }
+  for (const candidate of candidates) {
+    const value = candidate.piece.tertiary;
+    if (!value) continue;
+    const available = availableByArchetype[candidate.name];
+    if (!available?.[value]) return false;
+    available[value]--;
+  }
+  return true;
+}
+
+function assignTertiaries(candidates, armorSlots, assignment) {
+  const remainingByArchetype = {};
+  for (let index = 0; index < armorSlots.length; index++) {
+    const name = armorSlots[index].name;
+    if (!remainingByArchetype[name]) remainingByArchetype[name] = [];
+    remainingByArchetype[name].push(assignment[index]);
+  }
+
+  const assignments = new Map();
+  const specified = candidates.filter(candidate => candidate.piece.tertiary);
+  const unspecified = candidates.filter(candidate => !candidate.piece.tertiary);
+  for (const candidate of specified) {
+    const remaining = remainingByArchetype[candidate.name];
+    const index = remaining.indexOf(candidate.piece.tertiary);
+    assignments.set(candidate, remaining[index]);
+    remaining.splice(index, 1);
+  }
+  for (const candidate of unspecified) {
+    assignments.set(candidate, remainingByArchetype[candidate.name].shift());
+  }
+
+  return {
+    assignments,
+    remaining: Object.values(remainingByArchetype).flat()
+  };
+}
+
+function assignGlobalRequirements(candidates, property, requirements) {
+  const remaining = [...requirements];
+  const assignments = new Map();
+  const specified = candidates.filter(candidate => candidate.piece[property]);
+  const unspecified = candidates.filter(candidate => !candidate.piece[property]);
+  for (const candidate of specified) {
+    const index = remaining.indexOf(candidate.piece[property]);
+    assignments.set(candidate, remaining[index]);
+    remaining.splice(index, 1);
+  }
+  for (const candidate of unspecified) assignments.set(candidate, remaining.shift());
+  return { assignments, remaining };
+}
+
+function getTertiaryOptionsByArchetype(armorSlots, requiredTerts) {
+  const options = {};
+  for (const assignment of getValidTertiaryAssignments(armorSlots, requiredTerts)) {
+    for (let index = 0; index < armorSlots.length; index++) {
+      const name = armorSlots[index].name;
+      if (!options[name]) options[name] = new Set();
+      options[name].add(assignment[index]);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(options).map(([name, values]) => [name, [...values]])
+  );
+}
+
+function selectOwnedArmorMatches(armorSlots, ownedState, requiredTerts, requiredTunes, requireSpecifiedTertiary = false) {
+  const archCount = {};
+  for (const slot of armorSlots) archCount[slot.name] = (archCount[slot.name] || 0) + 1;
+  const candidates = [];
+  for (const [name, needed] of Object.entries(archCount)) {
+    const state = ownedState[name] || { count: 0, pieces: [] };
+    const owned = Math.min(state.count || 0, needed);
+    for (let index = 0; index < owned; index++) {
+      const piece = state.pieces[index] || {};
+      if (requireSpecifiedTertiary && !piece.tertiary) continue;
+      candidates.push({ name, index, piece });
+    }
+  }
+
+  let best = [];
+  let bestTertiaryAssignment = null;
+  let bestSpecificity = -1;
+  for (const tertiaryAssignment of getValidTertiaryAssignments(armorSlots, requiredTerts)) {
+    for (let mask = 0; mask < (1 << candidates.length); mask++) {
+      const selected = candidates.filter((_, index) => mask & (1 << index));
+      if (selected.length < best.length) continue;
+      if (!tertiaryAssignmentCanCoverPieces(selected, armorSlots, tertiaryAssignment) ||
+          !requirementsCanCoverPieces(selected, 'tuneTo', requiredTunes)) continue;
+      const specificity = selected.reduce(
+        (score, candidate) => score + (candidate.piece.tertiary ? 1 : 0) + (candidate.piece.tuneTo ? 1 : 0),
+        0
+      );
+      if (selected.length > best.length || specificity > bestSpecificity) {
+        best = selected;
+        bestTertiaryAssignment = tertiaryAssignment;
+        bestSpecificity = specificity;
+      }
+    }
+  }
+
+  const fallbackAssignment = getValidTertiaryAssignments(armorSlots, requiredTerts)[0] || [];
+  const tertiaryResult = assignTertiaries(best, armorSlots, bestTertiaryAssignment || fallbackAssignment);
+  const tuningResult = assignGlobalRequirements(best, 'tuneTo', requiredTunes);
+  const selectedSet = new Set(best);
+  const remainingArchCount = { ...archCount };
+  const matches = best.map(candidate => {
+    remainingArchCount[candidate.name]--;
+    return {
+      ...candidate,
+      tertiary: tertiaryResult.assignments.get(candidate),
+      tuning: tuningResult.assignments.get(candidate)
+    };
+  });
+  const remainingSlots = [...armorSlots];
+  for (const match of matches) {
+    const slotIndex = remainingSlots.findIndex(slot => slot.name === match.name);
+    remainingSlots.splice(slotIndex, 1);
+  }
+
+  return {
+    matches,
+    mismatches: candidates.filter(candidate => !selectedSet.has(candidate)),
+    remainingArchCount,
+    remainingTerts: tertiaryResult.remaining,
+    remainingTunes: tuningResult.remaining,
+    tertiaryOptions: getTertiaryOptionsByArchetype(remainingSlots, tertiaryResult.remaining)
+  };
+}
+
+function formatRequirementCounts(values, formatValue) {
+  return Object.entries(requirementCounts(values))
+    .map(([value, count]) => `${formatValue(value)} ×${count}`)
+    .join(l('，','，',', '));
+}
+
+function formatTuningRequirement(value) {
+  return value === '+3'
+    ? l('+3模式','+3模式','+3 mode')
+    : `+5 ${STAT_LABELS[value]}`;
+}
+
 function displayPieceResults(result, fragments) {
   const piecesOutput = document.getElementById('piecesOutput');
   let piecesHTML = '';
@@ -3853,8 +4766,8 @@ function displayPieceResults(result, fragments) {
   }
   piecesHTML += '</div>';
 
-  // === Section 2: Flexible assignments (can be on any piece) ===
-  piecesHTML += `<h3 style="color:var(--text);margin-bottom:8px;">${l('灵活分配（不绑定具体护甲）','彈性分配（不綁定特定防具）','Flexible assignments (not tied to a specific piece)')}</h3>`;
+  // === Section 2: Flexible counts (tertiary stats must remain compatible with each archetype) ===
+  piecesHTML += `<h3 style="color:var(--text);margin-bottom:8px;">${l('灵活分配（第三属性须兼容框架）','彈性分配（第三屬性須相容原型）','Flexible assignments (tertiary stats must fit the archetype)')}</h3>`;
   piecesHTML += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px;">';
 
   // Tertiary stats
@@ -3912,75 +4825,49 @@ function displayPieceResults(result, fragments) {
   piecesHTML += '</div>';
 
   // === Section 3: What still needs farming (dynamic based on owned gear) ===
-  let needFarm = false;
   const farmLines = [], mismatchLines = [], correctLines = [];
-  for (const [name, needed] of Object.entries(archCount)) {
-    const st = ownedGearState[name] || { count: 0, pieces: [] };
-    const owned = Math.min(st.count || 0, needed);
-    const remaining = Math.max(0, needed - owned);
+  const armorSlots = [];
+  const requiredTerts = [];
+  const requiredTunes = [];
+  for (let i = 0; i < 5; i++) {
+    if (i === result.exoticIndex) continue;
+    const tune = result.tuningAssignments[i];
+    armorSlots.push({
+      name: result.config[i].archetype,
+      primary: result.config[i].primary,
+      secondary: result.config[i].secondary
+    });
+    requiredTerts.push(result.config[i].tertiary);
+    requiredTunes.push(tune.mode === '+5-5' ? tune.to : '+3');
+  }
+  const ownedMatch = selectOwnedArmorMatches(armorSlots, ownedGearState, requiredTerts, requiredTunes);
 
-    // Collect all tertiary+tuning pairs (order-independent matching)
-    const needPairs = [];
-    for (let i = 0; i < 5; i++) {
-      if (i === result.exoticIndex) continue;
-      if (result.config[i].archetype === name) {
-        const tune = result.tuningAssignments[i];
-        needPairs.push({
-          tert: result.config[i].tertiary,
-          tune: tune.mode === '+5-5' ? tune.to : (tune.mode === '+3' ? '+3' : null)
-        });
-      }
-    }
-
-    // Stage 1: Match by tertiary (tuning is freely assignable)
-    const unmatchedTerts = needPairs.map(p => p.tert);
-    const unmatchedTunes = needPairs.map(p => p.tune);
-    for (let p = 0; p < owned; p++) {
-      const piece = st.pieces[p] || {};
-      let matchIdx = -1;
-      // Match by tertiary only
-      for (let n = 0; n < unmatchedTerts.length; n++) {
-        if (!piece.tertiary || piece.tertiary === unmatchedTerts[n]) { matchIdx = n; break; }
-      }
-      if (matchIdx >= 0) {
-        const reqTert = unmatchedTerts[matchIdx];
-        const reqTune = unmatchedTunes[matchIdx];
-        let desc = t('tertiaryStat') + STAT_LABELS[reqTert];
-        // Check tuning
-        if (piece.tuneTo && reqTune && reqTune !== '+3' && piece.tuneTo !== reqTune) {
-          desc += l('，+5调整你选的','，+5調整你選的','; your +5 Tuning is ') + STAT_LABELS[piece.tuneTo] + l('，方案需','，方案需要',' but the plan needs ') + STAT_LABELS[reqTune];
-          mismatchLines.push('' + getArchetypeLabel(name) + l('第','第',' piece ') + (p+1) + l('件：','件：',': ') + desc);
-        } else if (reqTune === '+3') {
-          desc += l('，调整+3','，調整+3',', +3 Tuning');
-          correctLines.push('' + getArchetypeLabel(name) + l('第','第',' piece ') + (p+1) + l('件：','件：',': ') + desc);
-        } else if (reqTune) {
-          desc += l('，调整+5','，調整+5','; +5 Tuning ') + STAT_LABELS[reqTune];
-          correctLines.push('' + getArchetypeLabel(name) + l('第','第',' piece ') + (p+1) + l('件：','件：',': ') + desc);
-        } else {
-          correctLines.push('' + getArchetypeLabel(name) + l('第','第',' piece ') + (p+1) + l('件：','件：',': ') + desc);
-        }
-        unmatchedTerts.splice(matchIdx, 1);
-        unmatchedTunes.splice(matchIdx, 1);
-      } else {
-        const parts = [];
-        if (!piece.tertiary) {
-          parts.push(t('tertiaryStat') + l('需','需',' needed: ') + [...new Set(unmatchedTerts)].map(t => STAT_LABELS[t]).join(l('或','或',' or ')));
-        } else {
-          parts.push(t('tertiaryStat') + l('你选的','你選的',' selected: ') + STAT_LABELS[piece.tertiary] + l('，需要选','，需要選','; choose ') + [...new Set(unmatchedTerts)].map(t => STAT_LABELS[t]).join(l('或','或',' or ')));
-        }
-        const topts = [...new Set(unmatchedTunes.filter(t => t && t !== '+3'))];
-        if (topts.length > 0) {
-          parts.push(l('调整+5需','調整+5需','+5 Tuning needs ') + topts.map(t => STAT_LABELS[t]).join(l('或','或',' or ')));
-        }
-        if (parts.length > 0) mismatchLines.push('' + getArchetypeLabel(name) + l('第','第',' piece ') + (p+1) + l('件：','件：',': ') + parts.join(l('，','，',', ')));
-      }
-    }
-    // Remaining unmatched = still to farm
-    for (let i = 0; i < unmatchedTerts.length; i++) {
-      let line = t('tertiaryStat') + STAT_LABELS[unmatchedTerts[i]];
-      if (unmatchedTunes[i] && unmatchedTunes[i] !== '+3') line += l('，调整+5','，調整+5','; +5 Tuning ') + STAT_LABELS[unmatchedTunes[i]];
-      farmLines.push(`<div style="margin-bottom:4px;">${getArchetypeLabel(name)}${l('还需1件：','還需1件：',' needs 1 more piece: ')}${line}</div>`);
-    }
+  for (const match of ownedMatch.matches) {
+    const desc = t('tertiaryStat') + STAT_LABELS[match.tertiary] +
+      l('，调整','，調整',', Tuning ') + formatTuningRequirement(match.tuning);
+    correctLines.push(
+      getArchetypeLabel(match.name) + l('第','第',' piece ') + (match.index + 1) + l('件：','件：',': ') + desc
+    );
+  }
+  for (const mismatch of ownedMatch.mismatches) {
+    const tertOptions = (ownedMatch.tertiaryOptions[mismatch.name] || [])
+      .map(stat => STAT_LABELS[stat]).join(l('、','、',', '));
+    const tuneOptions = [...new Set(ownedMatch.remainingTunes)].map(formatTuningRequirement).join(l('、','、',', '));
+    mismatchLines.push(
+      getArchetypeLabel(mismatch.name) + l('第','第',' piece ') + (mismatch.index + 1) +
+      l('件可接受：','件可接受：',' accepts: ') +
+      t('tertiaryStat') + tertOptions +
+      l('；调整','；調整','; Tuning ') + tuneOptions
+    );
+  }
+  for (const [name, remaining] of Object.entries(ownedMatch.remainingArchCount)) {
+    if (remaining <= 0) continue;
+    const tertiaryOptions = (ownedMatch.tertiaryOptions[name] || [])
+      .map(stat => STAT_LABELS[stat]).join(l('、','、',', '));
+    farmLines.push(
+      `<div><strong>${getArchetypeLabel(name)} ×${remaining}${l('件','件',' piece(s)')}</strong>` +
+      `<span style="color:var(--text-dim);">${l('，第三属性可选：','，第三屬性可選：',', tertiary: ')}${tertiaryOptions}</span></div>`
+    );
   }
 
   if (correctLines.length > 0) {
@@ -3992,8 +4879,18 @@ function displayPieceResults(result, fragments) {
       `<div style="font-weight:700;font-size:14px;color:#ff8888;margin-bottom:4px;">${l('已有护甲不匹配','已有防具不匹配','Owned armor mismatch')}</div>` + mismatchLines.join('<br>') + '</div>';
   }
   if (farmLines.length > 0) {
+    const tertiaryRequirements = formatRequirementCounts(ownedMatch.remainingTerts, stat => STAT_LABELS[stat]);
+    const tuningRequirements = formatRequirementCounts(ownedMatch.remainingTunes, formatTuningRequirement);
     piecesHTML += '<div style="margin-top:14px;padding:12px 16px;border-radius:8px;background:rgba(244,181,61,0.1);border:2px solid rgba(244,181,61,0.35);font-size:13px;line-height:2;">' +
-      `<div style="font-weight:700;font-size:14px;color:#ffd866;margin-bottom:6px;">${l('还需刷取','還需取得','Still to farm')}</div>` + farmLines.join('<br>') + '</div>';
+      `<div style="font-weight:700;font-size:14px;color:#ffd866;margin-bottom:6px;">${l('还需刷取','還需取得','Still to farm')}</div>
+      <div style="margin-bottom:6px;">${farmLines.join('')}</div>
+      <div>${t('tertiaryStat')}：${tertiaryRequirements}</div>
+      <div>${t('tuningMod')}：${tuningRequirements}</div>
+      <div style="color:var(--text-dim);line-height:1.6;margin-top:4px;">${l(
+        '第三属性须从对应框架行内的可选项中选择，不能与该框架的主属性或副属性重复；调整属性不绑定框架。两项无需逐件对应，最终总数符合即可。',
+        '第三屬性須從對應原型行內的可選項中選擇，不能與該原型的主要屬性或次要屬性重複；調整屬性不綁定原型。兩項無需逐件對應，最終總數符合即可。',
+        'Choose a tertiary stat from the options shown for that archetype; it cannot duplicate the archetype primary or secondary stat. Tuning is not tied to an archetype. The two fields do not need to be paired per piece; only the final totals matter.'
+      )}</div></div>`;
   }
 
   piecesOutput.innerHTML = piecesHTML;
@@ -4199,6 +5096,10 @@ function switchSolution(realIdx) {
 // Global owned gear state (persists across solution switches)
 let ownedGearState = {}; // { 'archetypeName': { count: N, pieces: [{tertiary: 'stat', tuneTo: 'stat'}, ...] } }
 
+function ownedGearControlId(name) {
+  return name.replace(/[^a-zA-Z一-鿿]/g, '_');
+}
+
 function buildOwnedGearSection(finalTotals, targets) {
   const section = document.getElementById('ownedGearSection');
   // Get all archetypes across ALL solutions
@@ -4218,62 +5119,110 @@ function buildOwnedGearSection(finalTotals, targets) {
   }
   if (allArchs.size <= 1) { section.style.display = 'none'; return; }
 
-  let html2 = `<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">${l('已有护甲（会记住你填的内容，切换方案不丢失）：','已有防具（會記住你填的內容，切換方案不遺失）：','Owned armor (your entries persist when switching solutions):')}</div>`;
+  const totalOwned = [...allArchs].reduce(
+    (sum, name) => sum + (ownedGearState[name]?.count || 0), 0
+  );
+  let html2 = `<div class="owned-gear-header">
+    <div>
+      <h3 class="owned-gear-title">${l('匹配已有护甲','匹配已有防具','Match owned armor')}</h3>
+      <p class="owned-gear-copy">${l(
+        '录入已有框架与属性，再按匹配度重新排序方案。切换方案时会保留这些内容。',
+        '輸入已有原型與屬性，再依匹配度重新排序方案。切換方案時會保留這些內容。',
+        'Enter the archetypes and stats you own, then re-sort solutions by fit. Your entries persist when switching solutions.'
+      )}</p>
+    </div>
+    <div class="owned-gear-summary">${l('已录入','已輸入','Entered')} <strong>${totalOwned}</strong> ${l('件','件','piece(s)')}</div>
+  </div><div class="owned-gear-list">`;
 
   for (const name of [...allArchs].sort()) {
     const needed = archMax[name] || 1;
     // Init state if needed
     if (!ownedGearState[name]) ownedGearState[name] = { count: 0, pieces: [] };
     const st = ownedGearState[name];
+    const controlId = ownedGearControlId(name);
+    const archetypeLabel = getArchetypeLabel(name);
+    const decreaseLabel = l(`减少${archetypeLabel}已有数量`,`減少${archetypeLabel}已有數量`,`Decrease owned ${archetypeLabel}`);
+    const increaseLabel = l(`增加${archetypeLabel}已有数量`,`增加${archetypeLabel}已有數量`,`Increase owned ${archetypeLabel}`);
+    const countLabel = l(`${archetypeLabel}已有数量`,`${archetypeLabel}已有數量`,`Owned ${archetypeLabel} count`);
 
-    html2 += '<div style="margin-bottom:8px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);">';
-    html2 += '<span style="color:#d4956b;font-weight:600;">' + getArchetypeLabel(name) + '</span> ' + l('最多需要','最多需要','need up to ') + '<strong>' + needed + '</strong>' + l('件，已有 ','件，已有 ',' piece(s), own ') + '<input type="number" id="ownedCnt_' + name.replace(/[^a-zA-Z一-鿿]/g,'_') + '" value="' + st.count + '" min="0" max="' + needed + '" onchange="updateOwnedCount(\'' + name + '\',this.value)" style="width:40px;padding:2px 4px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:#fff;font-size:12px;text-align:center;"> ' + l('件','件','piece(s)');
+    html2 += `<div class="owned-gear-row${st.count > 0 ? ' is-active' : ''}">
+      <div class="owned-gear-row-head">
+        <div class="owned-gear-identity">
+          <span class="owned-gear-archetype">${archetypeLabel}</span>
+          <span class="owned-gear-needed">${l('方案最多需要','方案最多需要','Solution needs up to')} <strong>${needed}</strong> ${l('件','件','piece(s)')}</span>
+        </div>
+        <div class="owned-count-control">
+          <span>${l('已有','已有','Owned')}</span>
+          <div class="owned-count-stepper">
+            <button type="button" aria-label="${decreaseLabel}" onclick="changeOwnedCount('${name}',-1,${needed})" ${st.count <= 0 ? 'disabled' : ''}>−</button>
+            <input type="number" id="ownedCnt_${controlId}" value="${st.count}" min="0" max="${needed}"
+              inputmode="numeric" aria-label="${countLabel}" onchange="updateOwnedCount('${name}',this.value,${needed})">
+            <button type="button" aria-label="${increaseLabel}" onclick="changeOwnedCount('${name}',1,${needed})" ${st.count >= needed ? 'disabled' : ''}>+</button>
+          </div>
+          <span>${l('件','件','piece(s)')}</span>
+        </div>
+      </div>`;
 
     // Show owned piece details if count > 0
     if (st.count > 0) {
-      html2 += '<div style="margin-top:4px;margin-left:8px;font-size:11px;color:var(--text-dim);">';
+      html2 += '<div class="owned-piece-list">';
       for (let p = 0; p < Math.min(st.count, needed); p++) {
         if (!st.pieces[p]) st.pieces[p] = { tertiary: '', tuneTo: '' };
-        html2 += l('第','第','Piece ') + (p+1) + l('件：','件：',': ') + t('tertiaryStat') + ' <select id="ownedTert_' + name.replace(/[^a-zA-Z一-鿿]/g,'_') + '_' + p + '" onchange="updateOwnedPiece(\'' + name + '\',' + p + ')" style="padding:1px 4px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:11px;">';
-        html2 += '<option value="">-</option>';
+        const pieceLabel = l(`${archetypeLabel}第${p + 1}件`,`${archetypeLabel}第${p + 1}件`,`${archetypeLabel} piece ${p + 1}`);
+        html2 += `<div class="owned-piece-row" role="group" aria-label="${pieceLabel}">
+          <span class="owned-piece-index" aria-hidden="true">${String(p + 1).padStart(2, '0')}</span>
+          <label class="owned-piece-field"><span>${t('tertiaryStat')}</span>
+          <select id="ownedTert_${controlId}_${p}" onchange="updateOwnedPiece('${name}',${p})">`;
+        html2 += `<option value="">${l('未填写','未填寫','Not set')}</option>`;
         for (const s of STATS) {
           html2 += '<option value="' + s + '" ' + (st.pieces[p].tertiary === s ? 'selected' : '') + '>' + STAT_LABELS[s] + '</option>';
         }
-        html2 += '</select>';
-        html2 += ' ' + l('+5调整','+5調整','+5 Tuning') + ' <select id="ownedTune_' + name.replace(/[^a-zA-Z一-鿿]/g,'_') + '_' + p + '" onchange="updateOwnedPiece2(\'' + name + '\',' + p + ')" style="padding:1px 4px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:11px;">';
-        html2 += '<option value="">-</option>';
+        html2 += `</select></label>
+          <label class="owned-piece-field"><span>${l('+5调整属性','+5調整屬性','+5 Tuning stat')}</span>
+          <select id="ownedTune_${controlId}_${p}" onchange="updateOwnedPiece2('${name}',${p})">`;
+        html2 += `<option value="">${l('未填写','未填寫','Not set')}</option>`;
         for (const s of STATS) {
           html2 += '<option value="' + s + '" ' + (st.pieces[p].tuneTo === s ? 'selected' : '') + '>' + STAT_LABELS[s] + '</option>';
         }
-        html2 += '</select><br>';
+        html2 += '</select></label></div>';
       }
       html2 += '</div>';
     }
     html2 += '</div>';
   }
 
-  html2 += `<button class="btn" onclick="resortByOwned()" style="font-size:12px;padding:4px 12px;">${l('按已有护甲重新排序','按已有防具重新排序','Re-sort by owned armor')}</button> `;
-  html2 += `<button class="btn" onclick="clearOwnedGear()" style="font-size:12px;padding:4px 12px;">${l('清空','清除','Clear')}</button>`;
+  html2 += `</div><div class="owned-gear-actions">
+    <button class="btn" type="button" onclick="clearOwnedGear()" ${totalOwned === 0 ? 'disabled' : ''}>
+      ${icon('trash')}${l('清空录入','清除輸入','Clear entries')}
+    </button>
+    <button class="btn owned-gear-apply" type="button" onclick="resortByOwned()" ${totalOwned === 0 ? 'disabled' : ''}>
+      ${icon('refresh')}${l('按已有护甲排序方案','按已有防具排序方案','Sort solutions by owned armor')}
+    </button>
+  </div>`;
   section.innerHTML = html2;
   section.style.display = 'block';
 }
 
-function updateOwnedCount(name, val) {
-  const n = Math.max(0, Math.min(5, parseInt(val) || 0));
+function updateOwnedCount(name, val, max = 5) {
+  const n = Math.max(0, Math.min(max, parseInt(val) || 0));
   if (!ownedGearState[name]) ownedGearState[name] = { count: 0, pieces: [] };
   ownedGearState[name].count = n;
   while (ownedGearState[name].pieces.length < n) ownedGearState[name].pieces.push({ tertiary: '', tuneTo: '' });
   // Rebuild the form to show/hide piece detail dropdowns, but don't refresh the solution
   buildOwnedGearSection(null, null);
 }
+function changeOwnedCount(name, delta, max) {
+  const current = ownedGearState[name]?.count || 0;
+  updateOwnedCount(name, current + delta, max);
+}
 function updateOwnedPiece(name, idx) {
-  const el = document.getElementById('ownedTert_' + name.replace(/[^a-zA-Z一-鿿]/g,'_') + '_' + idx);
+  const el = document.getElementById('ownedTert_' + ownedGearControlId(name) + '_' + idx);
   if (el && ownedGearState[name] && ownedGearState[name].pieces[idx]) {
     ownedGearState[name].pieces[idx].tertiary = el.value;
   }
 }
 function updateOwnedPiece2(name, idx) {
-  const el = document.getElementById('ownedTune_' + name.replace(/[^a-zA-Z一-鿿]/g,'_') + '_' + idx);
+  const el = document.getElementById('ownedTune_' + ownedGearControlId(name) + '_' + idx);
   if (el && ownedGearState[name] && ownedGearState[name].pieces[idx]) {
     ownedGearState[name].pieces[idx].tuneTo = el.value;
   }
@@ -4298,37 +5247,24 @@ function resortByOwned() {
 
   // Count how many owned pieces match a solution (archetype + tertiary + tuning)
   function countOwnedMatches(sol, requireSpecifiedTertiary = false) {
-    const needs = {};
+    const armorSlots = [];
+    const requiredTerts = [];
+    const requiredTunes = [];
     for (let i = 0; i < 5; i++) {
       if (i === sol.exoticIndex) continue;
       const name = sol.config[i].archetype;
-      if (!needs[name]) needs[name] = { terts: [], tunes: [] };
+      armorSlots.push({
+        name,
+        primary: sol.config[i].primary,
+        secondary: sol.config[i].secondary
+      });
       const tune = sol.tuningAssignments[i];
-      needs[name].terts.push(sol.config[i].tertiary);
-      needs[name].tunes.push(tune.mode === '+5-5' ? tune.to : (tune.mode === '+3' ? '+3' : null));
+      requiredTerts.push(sol.config[i].tertiary);
+      requiredTunes.push(tune.mode === '+5-5' ? tune.to : '+3');
     }
-    let matched = 0;
-    for (const [name, req] of Object.entries(needs)) {
-      const st = ownedGearState[name];
-      if (!st || !st.count) continue;
-      const terts = [...req.terts];
-      const tunes = [...req.tunes];
-      const ownedPieces = st.pieces.slice(0, st.count || 0);
-      for (const piece of ownedPieces) {
-        if (requireSpecifiedTertiary && !piece.tertiary) continue;
-        let matchIdx = -1;
-        for (let n = 0; n < terts.length; n++) {
-          const tuneMatches = !piece.tuneTo || !tunes[n] || piece.tuneTo === tunes[n];
-          if ((!piece.tertiary || piece.tertiary === terts[n]) && tuneMatches) {
-            matchIdx = n;
-            break;
-          }
-        }
-        if (matchIdx >= 0) { matched++; terts.splice(matchIdx, 1); tunes.splice(matchIdx, 1); }
-        if (terts.length === 0) break;
-      }
-    }
-    return matched;
+    return selectOwnedArmorMatches(
+      armorSlots, ownedGearState, requiredTerts, requiredTunes, requireSpecifiedTertiary
+    ).matches.length;
   }
 
   const activeFullyMatches = countOwnedMatches(activeSolution, true) === totalOwned;
@@ -4478,12 +5414,14 @@ function renderSavedBuilds() {
   builds.forEach((b, i) => {
     const d = new Date(b.savedAt);
     const dateStr = d.toLocaleString(localeCode(), { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
-    const sum = Object.values(b.targets).reduce((a,b)=>a+b,0);
+    const statSummary = STATS
+      .map(stat => `${STAT_LABELS[stat]}${b.targets?.[stat] ?? 0}`)
+      .join(' | ');
     const deleteLabel = l('删除', '刪除', 'Delete') + ' ' + b.name;
     html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);font-size:12px;">' +
-      '<button onclick="loadBuild(getSavedBuilds()[' + i + '])" style="cursor:pointer;border:none;background:none;color:var(--accent);font-weight:600;font-size:12px;font-family:inherit;text-align:left;">' +
+      '<button onclick="loadBuild(getSavedBuilds()[' + i + '])" style="flex:1;min-width:0;cursor:pointer;border:none;background:none;color:var(--accent);font-weight:600;font-size:12px;line-height:1.6;font-family:inherit;text-align:left;">' +
       b.name +
-      ' <span style="color:var(--text-dim);font-weight:400;">' + dateStr + ' | ' + l('总和','總和','Total ') + sum + ' | ' + (b.n3Enabled?'+3×'+b.numPlus3:l('无+3','無+3','No +3')) + ' | +5×' + b.numPlus5 + ' +10×' + b.numPlus10 + '</span>' +
+      ' <span style="color:var(--text-dim);font-weight:400;">' + dateStr + ' | ' + statSummary + '</span>' +
       '</button>' +
       '<button class="icon-btn" onclick="deleteBuild(' + i + ')" style="cursor:pointer;border:none;background:none;color:var(--health);font-size:14px;padding:0 4px;" title="' + deleteLabel + '" aria-label="' + deleteLabel + '">' + icon('close') + '</button>' +
       '</div>';
@@ -4497,12 +5435,7 @@ function renderSavedBuilds() {
 initializePageLanguage();
 renderInputs();
 renderExoticInputs();
-document.getElementById('inputCard').addEventListener('input', (event) => {
-  if (event.target?.id?.startsWith('target_')) {
-    const stat = event.target.id.slice('target_'.length);
-    const lock = document.getElementById('targetLock_' + stat);
-    if (lock) lock.checked = true;
-  }
+document.getElementById('inputCard').addEventListener('input', () => {
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();

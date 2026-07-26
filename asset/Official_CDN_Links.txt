@@ -1,0 +1,19 @@
+Destiny 2 Armor 3.0 六维属性 — Bungie 官方 CDN 路径
+
+武器 / Weapons | Stat Hash: 2996146975
+https://www.bungie.net/common/destiny2_content/icons/bc69675acdae9e6b9a68a02fb4d62e07.png
+
+生命 / Health | Stat Hash: 392767087
+https://www.bungie.net/common/destiny2_content/icons/717b8b218cc14325a54869bef21d2964.png
+
+职业 / Class | Stat Hash: 1943323491
+https://www.bungie.net/common/destiny2_content/icons/7eb845acb5b3a4a9b7e0b2f05f5c43f1.png
+
+近战 / Melee | Stat Hash: 4244567218
+https://www.bungie.net/common/destiny2_content/icons/fa534aca76d7f2d7e7b4ba4df4271b42.png
+
+手雷 / Grenade | Stat Hash: 1735777505
+https://www.bungie.net/common/destiny2_content/icons/065cdaabef560e5808e821cefaeaa22c.png
+
+超能 / Super | Stat Hash: 144602215
+https://www.bungie.net/common/destiny2_content/icons/585ae4ede9c3da96b34086fccccdc8cd.png
