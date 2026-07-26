@@ -3,6 +3,7 @@
 [![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/docs/Web/HTML)
 [![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
 [![No build step](https://img.shields.io/badge/build-none-2ea44f)](#getting-started)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Overview
 
@@ -88,7 +89,7 @@ d2-armor-solver/
 
 ## License
 
-仓库当前未声明许可证。除非项目维护者另行授权，请不要将代码用于再发布、商业分发或其他需要明确许可的场景。
+本项目使用 [MIT License](LICENSE) 发布。你可以自由使用、复制、修改、合并、发布、分发、再许可和销售本软件，但须在副本中保留版权和许可声明。
 
 ## Acknowledgements
 
