@@ -552,6 +552,8 @@
     box-shadow: none !important;
   }
   .footer {
+    display: grid;
+    gap: 6px;
     max-width: 72ch;
     margin: 18px auto 0;
     padding: 24px 0 0;
@@ -560,7 +562,25 @@
     font-size: 11px;
     line-height: 1.7;
   }
-  .footer a { color: var(--accent) !important; }
+  .footer-title {
+    color: var(--text);
+    font-weight: 650;
+  }
+  .footer-credit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+  }
+  .footer-role {
+    color: var(--text);
+    font-weight: 700;
+  }
+  .footer a {
+    color: var(--accent) !important;
+    text-underline-offset: .18em;
+  }
   @media (max-width: 900px) {
     .workspace-grid { grid-template-columns: 1fr; }
     .card--fragments { position: static; }
@@ -1965,8 +1985,9 @@
   </div>
 
   <div class="footer" data-i18n-html="footerContent">
-    命运2 T5配装求解器 · 最终版本（马拉松杀死了命运2）<br>
-    B站UID: 57597346 &nbsp;|&nbsp; QQ群: 1050912445 &nbsp;|&nbsp; <a href="https://space.bilibili.com/57597346" target="_blank" style="color:#4a9ed9;text-decoration:underline;">作者B站主页</a>
+    <div class="footer-title">命运2 T5配装求解器 · 最终版本（马拉松杀死了命运2）</div>
+    <div class="footer-credit"><span class="footer-role">原作者</span><span>B站 UID: 57597346</span><span>QQ群: 1050912445</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者B站主页</a></div>
+    <div class="footer-credit"><span class="footer-role">贡献者</span><span>MIGO-OvO</span><span>B站 UID: 23930138</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub主页</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">B站主页</a></div>
   </div>
 </main>
 
@@ -2061,7 +2082,7 @@ const UI_TEXT = {
     refineButton:'重新优化', recommendedBuildHeading:'推荐配装方案',
     exoticRecommendationHeading:'异域护甲推荐',
     exoticRecommendationDescription:'普通模式按方案推荐异域护甲框架；异域职业物品模式严格使用你锁定的属性框架。',
-    footerContent:'命运2 T5配装求解器 · 最终版本（马拉松杀死了命运2）<br>B站UID: 57597346 &nbsp;|&nbsp; QQ群: 1050912445 &nbsp;|&nbsp; <a href="https://space.bilibili.com/57597346" target="_blank" style="color:#4a9ed9;text-decoration:underline;">作者B站主页</a>',
+    footerContent:'<div class="footer-title">命运2 T5配装求解器 · 最终版本（马拉松杀死了命运2）</div><div class="footer-credit"><span class="footer-role">原作者</span><span>B站 UID: 57597346</span><span>QQ群: 1050912445</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者B站主页</a></div><div class="footer-credit"><span class="footer-role">贡献者</span><span>MIGO-OvO</span><span>B站 UID: 23930138</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub主页</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">B站主页</a></div>',
     lock:'锁定', none:'不设置', viewLightgg:'查看 light.gg',
     exoticClassItem:'异域职业物品', legendaryArmor:'传说护甲', exoticArmor:'异域护甲', armor:'护甲',
     armorArchetype:'护甲框架', fragments:'碎片', perk:'特性', tuning:'调整', tuningMod:'调整模组', armorMod:'护甲模组',
@@ -2095,7 +2116,7 @@ const UI_TEXT = {
     refineButton:'重新最佳化', recommendedBuildHeading:'推薦配裝方案',
     exoticRecommendationHeading:'異域防具推薦',
     exoticRecommendationDescription:'一般模式依方案推薦異域防具原型；異域職業物品模式嚴格使用你鎖定的數值原型。',
-    footerContent:'天命2 T5配裝求解器 · 最終版本（Marathon殺死了天命2）<br>Bilibili UID: 57597346 &nbsp;|&nbsp; QQ群: 1050912445 &nbsp;|&nbsp; <a href="https://space.bilibili.com/57597346" target="_blank" style="color:#4a9ed9;text-decoration:underline;">作者Bilibili主頁</a>',
+    footerContent:'<div class="footer-title">天命2 T5配裝求解器 · 最終版本（Marathon殺死了天命2）</div><div class="footer-credit"><span class="footer-role">原作者</span><span>Bilibili UID: 57597346</span><span>QQ群: 1050912445</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者 Bilibili 主頁</a></div><div class="footer-credit"><span class="footer-role">貢獻者</span><span>MIGO-OvO</span><span>Bilibili UID: 23930138</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub 主頁</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">Bilibili 主頁</a></div>',
     lock:'鎖定', none:'不設定', viewLightgg:'查看 light.gg',
     exoticClassItem:'異域職業物品', legendaryArmor:'傳說防具', exoticArmor:'異域防具', armor:'防具',
     armorArchetype:'防具原型', fragments:'碎片', perk:'特長', tuning:'調整', tuningMod:'調整模組', armorMod:'防具模組',
@@ -2129,7 +2150,7 @@ const UI_TEXT = {
     refineButton:'Optimize Again', recommendedBuildHeading:'Recommended Loadout',
     exoticRecommendationHeading:'Exotic Armor Recommendation',
     exoticRecommendationDescription:'Standard mode recommends an Exotic Armor archetype; Exotic Class Item mode strictly uses the locked stat archetype.',
-    footerContent:'Destiny 2 T5 Armor Solver · Final Edition (Marathon killed Destiny 2)<br>Bilibili UID: 57597346 &nbsp;|&nbsp; QQ group: 1050912445 &nbsp;|&nbsp; <a href="https://space.bilibili.com/57597346" target="_blank" style="color:#4a9ed9;text-decoration:underline;">Author on Bilibili</a>',
+    footerContent:'<div class="footer-title">Destiny 2 T5 Armor Solver · Final Edition (Marathon killed Destiny 2)</div><div class="footer-credit"><span class="footer-role">Original author</span><span>Bilibili UID: 57597346</span><span>QQ group: 1050912445</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">Bilibili profile</a></div><div class="footer-credit"><span class="footer-role">Contributor</span><span>MIGO-OvO</span><span>Bilibili UID: 23930138</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub profile</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">Bilibili profile</a></div>',
     lock:'Lock', none:'None', viewLightgg:'View on light.gg',
     exoticClassItem:'Exotic Class Item', legendaryArmor:'Legendary Armor', exoticArmor:'Exotic Armor', armor:'Armor',
     armorArchetype:'Armor Archetype', fragments:'Fragments', perk:'Perk', tuning:'Tuning', tuningMod:'Tuning Mod', armorMod:'Armor Mod',
