@@ -97,6 +97,11 @@ d2-armor-solver/
 - Web 平台原生 HTML、CSS 和 JavaScript；
 - [Shields.io](https://shields.io/) 提供 README 徽章。
 
+## Contributors
+
+- **[liheng-Huang](https://github.com/liheng-Huang)** — 此前版本及源仓库作者。
+- **[MIGO-OvO](https://github.com/MIGO-OvO)** — fork 维护者及后续贡献者，负责异域装备求解、可达范围分析、响应式 UI/UX 优化、多语言、已有护甲流程、无障碍改进、项目文档和 MIT 许可等工作。
+
 ## Contact
 
 项目维护者：[@MIGO-OvO](https://github.com/MIGO-OvO)
