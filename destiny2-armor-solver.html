@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>命运2 T5配装求解器</title>
 <style>
   :root {
@@ -621,6 +621,9 @@
      Workbench reliability pass
      ============================================================ */
   :root {
+    --font-ui: "Segoe UI Variable Text", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
+    --font-display: "Segoe UI Variable Display", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
+    --font-numeric: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
     --type-body: 1rem;
     --type-label: .8125rem;
     --type-meta: .8125rem;
@@ -637,12 +640,19 @@
   }
   body {
     overflow-x: hidden;
-    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family: var(--font-ui);
     font-size: var(--type-body);
+    font-weight: 400;
     font-kerning: normal;
+    letter-spacing: .01em;
     line-height: 1.6;
+    text-rendering: optimizeLegibility;
     padding-bottom: env(safe-area-inset-bottom);
   }
+  button,
+  input,
+  select,
+  textarea { font-family: var(--font-ui); }
   input[type="number"],
   .comp-item .stat-values,
   .range-item-value,
@@ -654,7 +664,7 @@
   #fragVal_weapons,
   #plus3CountVal,
   #budgetInfo strong {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-family: var(--font-numeric);
     font-variant-numeric: tabular-nums;
   }
   .skip-link {
@@ -1794,6 +1804,937 @@
     .refine-actions .btn,
     .refine-actions .btn-solve { width: 100%; }
   }
+
+  /* Existing-loadout optimizer */
+  .solver-mode-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 4px;
+    margin: 0 0 24px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-quiet);
+    box-sizing: border-box;
+  }
+  .solver-mode-switch button {
+    min-height: 48px;
+    padding: 10px 18px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 750;
+    letter-spacing: .0125em;
+    line-height: 1.25;
+    cursor: pointer;
+    transition: background-color 160ms ease-out, color 160ms ease-out, box-shadow 160ms ease-out;
+  }
+  .solver-mode-switch button:hover:not([aria-pressed="true"]) {
+    background: color-mix(in oklab, var(--text) 5%, transparent);
+    color: var(--text);
+  }
+  .solver-mode-switch button[aria-pressed="true"] {
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface-quiet));
+    color: var(--accent-strong);
+    font-weight: 800;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 58%, transparent);
+  }
+  .solver-mode-switch button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .upgrade-build-card[hidden],
+  .upgrade-results[hidden] { display: none !important; }
+  .upgrade-card-header {
+    margin-bottom: 16px;
+  }
+  .upgrade-card-header h2 {
+    margin-bottom: 6px;
+    font-size: 1.125rem;
+    font-weight: 700;
+  }
+  .upgrade-card-copy {
+    max-width: 50rem;
+    color: var(--text-dim);
+    font-size: .9375rem;
+    line-height: 1.7;
+    text-wrap: pretty;
+  }
+  .upgrade-live-summary {
+    display: grid;
+    grid-template-columns: minmax(136px, .65fr) minmax(0, 3.35fr);
+    align-items: stretch;
+    margin-top: 14px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .upgrade-live-heading {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 12px 16px 12px 0;
+  }
+  .upgrade-live-title {
+    color: var(--text);
+    font-size: .875rem;
+    font-weight: 700;
+  }
+  .upgrade-live-total {
+    color: var(--text-dim);
+    font-size: .8125rem;
+    line-height: 1.5;
+  }
+  .upgrade-live-total strong {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .upgrade-live-stats {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    min-width: 0;
+  }
+  .upgrade-live-stat {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 11px 10px;
+    border-left: 1px solid var(--border);
+  }
+  .upgrade-live-stat-label {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 5px;
+    font-size: .8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .upgrade-live-stat output {
+    color: var(--text);
+    font-family: var(--font-numeric);
+    font-size: 1.125rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .upgrade-piece-list {
+    border-top: 1px solid var(--border);
+  }
+  .upgrade-piece-row {
+    border-bottom: 1px solid var(--border);
+  }
+  .upgrade-piece-row summary {
+    display: grid;
+    grid-template-columns: minmax(120px, .75fr) minmax(240px, 1.55fr) auto 24px;
+    align-items: center;
+    gap: 20px;
+    min-height: 64px;
+    padding: 10px 6px;
+    cursor: pointer;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", var(--font-ui);
+    list-style: none;
+  }
+  .upgrade-piece-row summary::-webkit-details-marker { display: none; }
+  .upgrade-piece-row summary::after {
+    content: "⌄";
+    grid-column: 4;
+    color: color-mix(in oklab, var(--text) 78%, var(--text-dim));
+    font-family: var(--font-numeric);
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1;
+    transition: transform 160ms ease-out;
+  }
+  .upgrade-piece-row[open] summary::after { transform: rotate(180deg); }
+  .upgrade-piece-slot {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    color: var(--text);
+    font-size: 1.0625rem;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+  .upgrade-piece-slot small {
+    display: inline-block;
+    width: 26px;
+    color: color-mix(in oklab, var(--text) 74%, var(--text-dim));
+    font-family: var(--font-numeric);
+    font-size: .875rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .035em;
+  }
+  .upgrade-piece-identity {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--archetype);
+    font-size: .9375rem;
+    font-weight: 650;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .upgrade-piece-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: color-mix(in oklab, var(--text) 72%, var(--text-dim));
+    font-size: .875rem;
+    font-weight: 500;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .upgrade-piece-status svg {
+    width: 1rem;
+    height: 1rem;
+    flex: 0 0 auto;
+  }
+  .upgrade-piece-status.is-locked { color: var(--warning); }
+  .upgrade-piece-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 16px;
+    padding: 12px 4px 20px 28px;
+  }
+  .upgrade-piece-fields .input-group { min-width: 0; }
+  .upgrade-piece-flags {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    grid-column: 1 / -1;
+    padding-top: 4px;
+  }
+  .upgrade-piece-flags label,
+  .upgrade-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--touch-target);
+    color: var(--text);
+    font-size: .875rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .upgrade-piece-flags input,
+  .upgrade-options input { flex: 0 0 auto; }
+  .upgrade-options {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .upgrade-budget-summary {
+    color: var(--text-dim);
+    font-size: .8125rem;
+    line-height: 1.55;
+    text-align: right;
+  }
+  .upgrade-budget-summary strong { color: var(--text); }
+  .is-upgrade-mode #inputCard .exotic-settings,
+  .is-upgrade-mode #inputCard .armor-budget-workbench,
+  .is-upgrade-mode #inputCard .lock-control,
+  .is-upgrade-mode #inputCard .stat-range-hint,
+  .is-upgrade-mode #realtimeRangeSummary { display: none !important; }
+  .upgrade-target-hint {
+    display: none;
+    margin: -4px 0 12px;
+    color: var(--text-dim);
+    font-size: .875rem;
+    line-height: 1.65;
+  }
+  .is-upgrade-mode .upgrade-target-hint { display: block; }
+  .is-upgrade-mode .msg {
+    font-size: .875rem;
+    line-height: 1.5;
+  }
+  .upgrade-results { margin: 0 0 18px; }
+  .upgrade-results {
+    font-size: 1rem;
+  }
+  .upgrade-results > h2 {
+    margin-bottom: 1.125rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+  .upgrade-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(220px, .8fr);
+    gap: 24px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .upgrade-eyebrow {
+    color: var(--text-dim);
+    font-size: .875rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+  .upgrade-recommendation {
+    margin: 6px 0 9px;
+    color: var(--accent);
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+  }
+  .upgrade-recommendation-copy {
+    max-width: 60ch;
+    color: var(--text-dim);
+    font-size: 1rem;
+    line-height: 1.7;
+    text-wrap: pretty;
+  }
+  .upgrade-outcome {
+    display: grid;
+    align-content: center;
+    gap: 8px;
+    padding-left: 20px;
+    border-left: 1px solid var(--border);
+  }
+  .upgrade-outcome strong {
+    color: var(--success);
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+  .upgrade-outcome span {
+    color: var(--text-dim);
+    font-size: .9375rem;
+    line-height: 1.55;
+  }
+  .upgrade-stat-comparison {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 18px;
+  }
+  .upgrade-stat {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface-quiet);
+  }
+  .upgrade-stat-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .875rem;
+    font-weight: 650;
+    line-height: 1.35;
+  }
+  .upgrade-stat-label > .icon {
+    width: 1.5rem;
+    height: 1.5rem;
+    flex: 0 0 1.5rem;
+    margin: 0;
+    vertical-align: 0;
+  }
+  .upgrade-stat-values {
+    margin-top: 8px;
+    color: var(--text);
+    font-family: var(--font-numeric);
+    font-size: 1.125rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .upgrade-stat-values small {
+    color: var(--text-dim);
+    font-size: .875rem;
+    font-weight: 400;
+  }
+  .upgrade-stat-delta {
+    display: block;
+    margin-top: 5px;
+    color: var(--text-dim);
+    font-size: .875rem;
+    line-height: 1.5;
+  }
+  .upgrade-stat-delta.is-target-met { color: var(--success); }
+  .upgrade-stat-delta.is-shortfall { color: var(--health); }
+  .upgrade-requirement {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 24px;
+    margin-top: 18px;
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .upgrade-requirement div {
+    color: var(--text-dim);
+    font-size: .75rem;
+    line-height: 1.65;
+  }
+  .upgrade-requirement strong { color: var(--text); }
+  .upgrade-baseline-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--border));
+    background: color-mix(in oklab, var(--accent) 6%, transparent);
+    color: var(--text-dim);
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+  .upgrade-baseline-note > .icon {
+    width: 1rem;
+    height: 1rem;
+    flex: 0 0 1rem;
+    margin-top: .3rem;
+    vertical-align: 0;
+  }
+  .upgrade-baseline-note strong {
+    color: var(--text);
+  }
+  .upgrade-plan-flow { margin-top: 20px; }
+  .upgrade-plan-flow h3 {
+    margin-bottom: 6px;
+    color: var(--text);
+    font-size: 1.125rem;
+    font-weight: 700;
+  }
+  .upgrade-plan-copy {
+    max-width: 68ch;
+    color: var(--text-dim);
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+  .upgrade-plan-steps {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .upgrade-plan-step {
+    display: grid;
+    grid-template-columns: 36px minmax(260px, 1.15fr) minmax(230px, .9fr) minmax(245px, .95fr);
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .upgrade-plan-number {
+    display: inline-grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border: 1px solid color-mix(in oklab, var(--accent) 48%, var(--border));
+    border-radius: 50%;
+    color: var(--accent);
+    font-family: var(--font-numeric);
+    font-size: .875rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .upgrade-plan-change,
+  .upgrade-plan-setup,
+  .upgrade-plan-progress {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+  .upgrade-plan-change {
+    gap: 6px;
+  }
+  .upgrade-plan-slot {
+    color: var(--text);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+  .upgrade-plan-swap {
+    display: grid;
+    grid-template-columns: minmax(0, auto) 18px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .upgrade-plan-config {
+    min-width: 0;
+    font-size: .9375rem;
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+  .upgrade-plan-config--before {
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .upgrade-plan-config--after {
+    color: var(--text);
+    font-weight: 650;
+  }
+  .upgrade-plan-arrow {
+    color: var(--accent);
+    font-size: .875rem;
+    text-align: center;
+  }
+  .upgrade-plan-setup {
+    gap: 7px;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+  }
+  .upgrade-plan-setup span {
+    display: grid;
+    grid-template-columns: minmax(4.5rem, auto) minmax(0, 1fr);
+    gap: 10px;
+    color: var(--text-dim);
+    font-size: .9375rem;
+    line-height: 1.5;
+  }
+  .upgrade-plan-setup strong {
+    color: var(--text);
+    font-size: .9375rem;
+    font-weight: 650;
+  }
+  .upgrade-plan-progress > strong {
+    color: var(--text);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+  .upgrade-plan-progress > span {
+    color: var(--text-dim);
+    font-size: .875rem;
+    line-height: 1.65;
+  }
+  .upgrade-plan-progress {
+    gap: 6px;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+    text-align: left;
+  }
+  .upgrade-plan-progress.is-complete strong { color: var(--success); }
+  .upgrade-plan-totals {
+    display: grid;
+    grid-template-columns: repeat(3, max-content);
+    justify-content: start;
+    gap: 3px 12px;
+  }
+  .upgrade-plan-totals span {
+    color: var(--text-dim);
+    font-family: var(--font-numeric);
+    font-size: .9375rem;
+    line-height: 1.55;
+    white-space: nowrap;
+  }
+  .upgrade-assignment-details,
+  .upgrade-ranking { margin-top: 16px; }
+  .upgrade-assignment-details summary {
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .upgrade-assignment-list {
+    display: grid;
+    gap: 0;
+    margin-top: 12px;
+  }
+  .upgrade-assignment-row,
+  .upgrade-ranking-row {
+    display: grid;
+    grid-template-columns: minmax(7rem, .45fr) minmax(12rem, 1fr) minmax(15rem, 1.05fr);
+    align-items: center;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+    color: var(--text-dim);
+    font-size: .9375rem;
+    line-height: 1.55;
+  }
+  .upgrade-assignment-row > :last-child {
+    font-variant-numeric: tabular-nums;
+  }
+  .upgrade-assignment-row strong,
+  .upgrade-ranking-row strong {
+    color: var(--text);
+    font-size: 1rem;
+  }
+  .upgrade-ranking h3 {
+    margin-bottom: 5px;
+    color: var(--text);
+    font-size: 1rem;
+  }
+  .upgrade-ranking-row.is-best strong:first-child { color: var(--accent); }
+  .upgrade-empty {
+    padding: 12px 0 2px;
+    color: var(--text-dim);
+    font-size: .875rem;
+    line-height: 1.7;
+  }
+  @media (max-width: 900px) {
+    .upgrade-live-summary { grid-template-columns: 1fr; }
+    .upgrade-live-heading {
+      flex-direction: row;
+      align-items: baseline;
+      justify-content: space-between;
+      padding-right: 0;
+    }
+    .upgrade-live-stat:first-child { border-left: 0; }
+    .upgrade-piece-row summary {
+      grid-template-columns: minmax(110px, .7fr) minmax(0, 1.4fr) auto 24px;
+    }
+    .upgrade-piece-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .upgrade-stat-comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .upgrade-plan-step {
+      grid-template-columns: 32px minmax(0, 1fr) minmax(180px, .8fr);
+      align-items: start;
+    }
+    .upgrade-plan-progress {
+      grid-column: 2 / -1;
+      text-align: left;
+    }
+    .upgrade-plan-totals { justify-content: start; }
+  }
+  @media (max-width: 680px) {
+    .solver-mode-switch {
+      display: grid;
+      width: 100%;
+    }
+    .solver-mode-switch button {
+      padding-inline: 10px;
+      font-size: .9375rem;
+    }
+    .upgrade-options,
+    .upgrade-hero {
+      align-items: stretch;
+      grid-template-columns: 1fr;
+      flex-direction: column;
+    }
+    .upgrade-recommendation { font-size: 1.5rem; }
+    .upgrade-live-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .upgrade-live-stat {
+      padding: 10px 8px;
+    }
+    .upgrade-live-stat:nth-child(4) {
+      border-left: 0;
+      border-top: 1px solid var(--border);
+    }
+    .upgrade-live-stat:nth-child(n+5) { border-top: 1px solid var(--border); }
+    .upgrade-piece-row summary {
+      grid-template-columns: minmax(108px, .8fr) minmax(0, 1.2fr) 22px;
+      gap: 7px 10px;
+      padding: 11px 2px;
+    }
+    .upgrade-piece-row summary::after {
+      grid-column: 3;
+      grid-row: 1 / span 2;
+    }
+    .upgrade-piece-status {
+      grid-column: 1 / -1;
+      padding-left: 24px;
+    }
+    .upgrade-piece-fields {
+      grid-template-columns: 1fr;
+      padding: 8px 2px 18px 24px;
+    }
+    .upgrade-budget-summary { text-align: left; }
+    .upgrade-outcome {
+      padding: 14px 0 0;
+      border-top: 1px solid var(--border);
+      border-left: 0;
+    }
+    .upgrade-stat-comparison { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .upgrade-requirement { grid-template-columns: 1fr; }
+    .upgrade-plan-step {
+      grid-template-columns: 32px minmax(0, 1fr);
+      align-items: start;
+    }
+    .upgrade-plan-swap {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2px;
+    }
+    .upgrade-plan-arrow {
+      justify-self: start;
+      margin-left: .2rem;
+      transform: rotate(90deg);
+    }
+    .upgrade-plan-setup {
+      grid-column: 2;
+      padding: 8px 0 0;
+      border-top: 1px solid var(--border);
+      border-left: 0;
+    }
+    .upgrade-plan-progress {
+      grid-column: 2;
+      text-align: left;
+    }
+    .upgrade-assignment-row,
+    .upgrade-ranking-row {
+      grid-template-columns: minmax(80px, .7fr) minmax(0, 1.3fr);
+    }
+    .upgrade-assignment-row > :last-child,
+    .upgrade-ranking-row > :last-child { grid-column: 1 / -1; }
+  }
+
+  /* ============================================================
+     Flagship polish pass
+     ============================================================ */
+  :root {
+    color-scheme: dark;
+    --surface-raised: oklch(0.225 0.022 270);
+    --border-subtle: color-mix(in oklab, var(--border) 76%, transparent);
+    --duration-fast: 120ms;
+    --duration-ui: 220ms;
+    --ease-out-quart: cubic-bezier(.25, 1, .5, 1);
+  }
+  html {
+    scrollbar-color: var(--border-strong) var(--bg);
+    scrollbar-gutter: stable;
+  }
+  body {
+    background:
+      radial-gradient(circle at 50% -12rem, oklch(0.245 0.032 270 / .42), transparent 31rem),
+      linear-gradient(180deg, oklch(0.17 0.02 270) 0, var(--bg) 20rem);
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 68%, var(--bg));
+    color: var(--text);
+  }
+  .container {
+    position: relative;
+    isolation: isolate;
+  }
+  .header h1 {
+    text-wrap: balance;
+  }
+  .header .subtitle {
+    max-width: 68ch;
+    color: color-mix(in oklab, var(--text-dim) 86%, var(--text));
+    text-wrap: pretty;
+  }
+  .card {
+    border-color: var(--border-subtle);
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / .025);
+  }
+  .card--intro,
+  .card--fragments {
+    background: color-mix(in oklab, var(--surface-quiet) 74%, var(--card));
+  }
+  .card--targets {
+    border-color: color-mix(in oklab, var(--border-strong) 84%, transparent);
+    background: color-mix(in oklab, var(--card) 96%, var(--accent) 4%);
+  }
+  .card--intro summary {
+    border-radius: 6px;
+    transition:
+      color var(--duration-fast) var(--ease-out-quart),
+      background-color var(--duration-fast) var(--ease-out-quart);
+  }
+  .solver-mode-switch {
+    gap: 6px;
+    border-color: var(--border-subtle);
+    background: color-mix(in oklab, var(--surface-quiet) 72%, var(--bg));
+  }
+  .solver-mode-switch button {
+    transition:
+      color var(--duration-fast) var(--ease-out-quart),
+      background-color var(--duration-fast) var(--ease-out-quart),
+      box-shadow var(--duration-fast) var(--ease-out-quart),
+      transform var(--duration-fast) var(--ease-out-quart);
+  }
+  .solver-mode-switch button:active {
+    transform: translateY(1px);
+  }
+  .target-stat-group {
+    border-color: var(--border-subtle);
+    background: color-mix(in oklab, var(--surface-quiet) 84%, var(--card));
+    transition:
+      border-color var(--duration-ui) var(--ease-out-quart),
+      background-color var(--duration-ui) var(--ease-out-quart);
+  }
+  .target-stat-group:focus-within {
+    background: var(--surface-raised);
+  }
+  .input-group input,
+  .input-group select,
+  .owned-piece-field select {
+    transition:
+      border-color var(--duration-fast) var(--ease-out-quart),
+      background-color var(--duration-fast) var(--ease-out-quart),
+      box-shadow var(--duration-fast) var(--ease-out-quart);
+  }
+  input[type="number"]:user-invalid,
+  select:user-invalid {
+    border-color: var(--health) !important;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--health) 18%, transparent);
+  }
+  .exotic-settings {
+    border-color: var(--border-subtle);
+    background: color-mix(in oklab, var(--surface-quiet) 82%, var(--card));
+    transition:
+      border-color var(--duration-ui) var(--ease-out-quart),
+      background-color var(--duration-ui) var(--ease-out-quart);
+  }
+  .exotic-settings:has(#useExoticMode:checked) {
+    border-color: color-mix(in oklab, var(--accent) 48%, var(--border));
+    background: color-mix(in oklab, var(--accent) 7%, var(--card));
+  }
+  .plus3-panel {
+    transition:
+      border-color var(--duration-ui) var(--ease-out-quart),
+      background-color var(--duration-ui) var(--ease-out-quart);
+  }
+  .plus3-panel:has(#usePlus3:checked) {
+    border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+    background: color-mix(in oklab, var(--accent) 6%, var(--surface-quiet));
+  }
+  .btn,
+  .btn-solve,
+  .fragment-stepper .icon-btn,
+  #plus3CountRow .icon-btn {
+    transition:
+      transform var(--duration-fast) var(--ease-out-quart),
+      border-color var(--duration-fast) var(--ease-out-quart),
+      background-color var(--duration-fast) var(--ease-out-quart),
+      color var(--duration-fast) var(--ease-out-quart);
+  }
+  .btn:active:not(:disabled),
+  .btn-solve:active:not(:disabled),
+  .fragment-stepper .icon-btn:active,
+  #plus3CountRow .icon-btn:active {
+    transform: translateY(1px) scale(.985);
+  }
+  .btn:focus-visible,
+  .btn-solve:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  summary:focus-visible,
+  button:focus-visible,
+  a:focus-visible {
+    outline: 3px solid color-mix(in oklab, var(--focus) 82%, var(--text));
+    outline-offset: 3px;
+  }
+  .footer a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+  }
+  @media (hover: hover) {
+    .card--intro summary:hover {
+      color: var(--accent-strong) !important;
+      background: color-mix(in oklab, var(--text) 4%, transparent);
+    }
+    .target-stat-group:hover {
+      border-color: color-mix(in oklab, var(--border-strong) 88%, transparent);
+      background: color-mix(in oklab, var(--surface-raised) 68%, var(--card));
+    }
+  }
+  @media (pointer: coarse) {
+    .footer a { min-height: var(--touch-target); }
+  }
+  @media (max-width: 680px) {
+    :root {
+      --type-label: .875rem;
+      --type-meta: .875rem;
+    }
+    .container {
+      padding-bottom: max(2rem, env(safe-area-inset-bottom));
+    }
+    .header {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 1rem;
+      padding-top: 0;
+      padding-bottom: 1.25rem;
+    }
+    .language-switcher {
+      position: static;
+      top: auto;
+      right: auto;
+      align-self: flex-end;
+      margin: 0 0 1rem;
+    }
+    .header .subtitle {
+      font-size: .9375rem;
+      line-height: 1.6;
+    }
+    .notice.notice--free {
+      gap: .5rem;
+    }
+    .notice.notice--free span:first-child,
+    .notice.notice--free span:last-child,
+    .language-switcher,
+    .language-switcher select {
+      font-size: .875rem !important;
+    }
+    .language-switcher select,
+    details > summary,
+    .footer a {
+      min-height: var(--touch-target);
+    }
+    .card--targets > h2 {
+      align-items: center;
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+    .target-reset-btn {
+      align-self: center;
+      margin-left: auto;
+    }
+    .card--targets .input-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .625rem;
+    }
+    .target-stat-group {
+      gap: .5rem;
+      padding: .625rem;
+    }
+    .target-stat-group > .stat-label {
+      min-height: var(--touch-target);
+      gap: .25rem;
+    }
+    .target-stat-group .lock-control {
+      min-height: var(--touch-target);
+      min-width: var(--touch-target);
+      justify-content: flex-end;
+      gap: .25rem;
+    }
+    .target-stat-group .lock-control > span {
+      /* The checkbox keeps its full localized aria-label; the compact lock
+         glyph prevents stat names from wrapping in the two-column layout. */
+      display: none;
+    }
+    .target-stat-group > input[type="number"] {
+      min-height: 3rem;
+    }
+    .footer {
+      font-size: .875rem;
+    }
+    .budget-toolbar .input-group label,
+    .budget-info > small,
+    .budget-equation,
+    .budget-guidance,
+    .minimum-details > summary,
+    .minimum-content,
+    .minimum-content span,
+    .minimum-content strong {
+      font-size: .875rem !important;
+    }
+    .minimum-details > summary {
+      min-height: var(--touch-target);
+    }
+    .budget-delta,
+    .plus3-toggle strong {
+      font-size: .875rem !important;
+    }
+  }
+  @media (max-width: 340px) {
+    .card--targets .input-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
 </style>
 </head>
 <body>
@@ -1889,16 +2830,16 @@
 <a class="skip-link" href="#inputCard" data-i18n="skipToTargets">跳到目标输入</a>
 <main class="container" aria-labelledby="pageTitle">
   <div class="header">
+    <div class="language-switcher">
+      <label for="pageLanguage" data-i18n="pageLanguageLabel">网页语言</label>
+      <select id="pageLanguage" onchange="changePageLanguage()">
+        <option value="zh-chs">简体中文</option>
+        <option value="zh-cht">繁體中文</option>
+        <option value="en">English</option>
+      </select>
+    </div>
     <h1 id="pageTitle" data-i18n-html="pageHeading">命运2 <span>T5</span> 配装求解器</h1>
-    <p class="subtitle" data-i18n="pageSubtitle">输入目标属性 -> 自动计算5件装备最佳配置 · 12种护甲框架 · 调整自动优化</p>
-  </div>
-  <div class="language-switcher">
-    <label for="pageLanguage" data-i18n="pageLanguageLabel">网页语言</label>
-    <select id="pageLanguage" onchange="changePageLanguage()">
-      <option value="zh-chs">简体中文</option>
-      <option value="zh-cht">繁體中文</option>
-      <option value="en">English</option>
-    </select>
+    <p class="subtitle" data-i18n="pageSubtitle">设置目标属性 → 计算 5 件护甲的最佳组合 · 12 种护甲框架 · 自动分配调整</p>
   </div>
 
   <!-- Free Notice -->
@@ -1910,10 +2851,37 @@
   <!-- Program Introduction -->
   <div class="card card--intro">
     <details>
-      <summary style="cursor:pointer;font-weight:700;font-size:15px;color:var(--accent);" data-i18n="introSummary">程序介绍（点击展开）</summary>
+      <summary style="cursor:pointer;font-weight:700;font-size:15px;color:var(--accent);" data-i18n="introSummary">程序介绍</summary>
       <div style="margin-top:12px;font-size:14px;color:var(--text-dim);line-height:1.8;" data-i18n-html="introContent"></div>
     </details>
   </div>
+
+  <div class="solver-mode-switch" role="group" aria-label="计算模式" data-i18n-aria="calculatorModeLabel">
+    <button type="button" id="modeSolveButton" aria-pressed="true" onclick="setCalculatorMode('solve')">
+      <span data-i18n="standardModeButton">从零求解</span>
+    </button>
+    <button type="button" id="modeUpgradeButton" aria-pressed="false" onclick="setCalculatorMode('upgrade')">
+      <span data-i18n="upgradeModeButton">优化现有配装</span>
+    </button>
+  </div>
+
+  <section class="card upgrade-build-card" id="upgradeBuildCard" hidden aria-labelledby="upgradeBuildHeading">
+    <div class="upgrade-card-header">
+      <h2 id="upgradeBuildHeading" data-i18n="upgradeBuildHeading">当前五件护甲</h2>
+      <p class="upgrade-card-copy" data-i18n="upgradeBuildDescription">
+        把正在用的 5 件 T5 护甲按装备栏填好。异域和不想换的护甲记得勾选“固定”。
+      </p>
+      <div class="upgrade-live-summary" id="upgradeLiveSummary" aria-live="polite" aria-atomic="true"></div>
+    </div>
+    <div id="upgradeBuildEditor"></div>
+    <div class="upgrade-options">
+      <label>
+        <input type="checkbox" id="upgradeReassignModifiers" checked onchange="updateUpgradeOption()">
+        <span data-i18n="upgradeReassignModifiers">允许重新分配五件护甲的调整与属性模组</span>
+      </label>
+      <div class="upgrade-budget-summary" id="upgradeBudgetSummary" aria-live="polite"></div>
+    </div>
+  </section>
 
   <div class="workspace-grid">
   <div class="card card--fragments" id="fragmentCard">
@@ -1928,6 +2896,7 @@
         <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="resetTargetsButton">恢复默认值</span>
       </button>
     </h2>
+    <p class="upgrade-target-hint" data-i18n="upgradeTargetHint">优化模式将每项输入视为最低目标；高于目标的属性不会判定为失败。</p>
     <div class="input-grid" id="targetGrid"></div>
     <div id="realtimeRangeSummary" style="margin-top:8px;display:none;" aria-live="polite"></div>
     <div class="exotic-settings">
@@ -1992,7 +2961,8 @@
 
   <div class="btn-row">
     <button class="btn-solve" id="btnSolve" onclick="solve()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="solveButton">求解最佳配装</span></button>
-    <button class="btn" onclick="saveBuild()" style="margin-left:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
+    <button class="btn-solve" id="btnUpgradeAnalyze" type="button" onclick="analyzeArmorUpgrades()" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="upgradeAnalyzeButton">分析优先替换</span></button>
+    <button class="btn" id="saveBuildButton" onclick="saveBuild()" style="margin-left:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
   </div>
 
   <!-- Floating jump button -->
@@ -2002,6 +2972,11 @@
   </div>
 
   <div id="messages" aria-live="polite" aria-atomic="false"></div>
+
+  <section class="card upgrade-results" id="upgradeResults" hidden aria-labelledby="upgradeResultsHeading">
+    <h2 id="upgradeResultsHeading" data-i18n="upgradeResultsHeading">护甲替换分析</h2>
+    <div id="upgradeResultsBody"></div>
+  </section>
 
   <div class="card" id="savedCard" style="display:none;">
     <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n-html="savedBuildsHeading">已保存配装 <span style="font-size:11px;color:var(--text-dim);">（点击名称加载，点 × 删除）</span></span></h2>
@@ -2126,13 +3101,19 @@ const UI_TEXT = {
   'zh-chs': {
     documentTitle:'命运2 T5配装求解器',
     pageHeading:'命运2 <span>T5</span> 配装求解器',
-    pageSubtitle:'输入目标属性 -> 自动计算5件护甲最佳配置 · 12种护甲框架 · 调整自动优化',
+    pageSubtitle:'设置目标属性 → 计算 5 件护甲的最佳组合 · 12 种护甲框架 · 自动分配调整',
     pageLanguageLabel:'网页语言',
     skipToTargets:'跳到目标输入',
     freeNotice:'本程序完全免费',
     fraudNotice:'如果你是付费购买的，说明你被骗了！',
-    introSummary:'程序介绍（点击展开）',
+    introSummary:'程序介绍',
     introContent:'<p>本程序用于命运2护甲3.0版的T5配装求解。输入目标六维属性、模组和碎片后，程序会枚举五件护甲的实际组合，并结合已有护甲判断还需刷取什么。</p><p>异域职业物品模式会根据职业及左右栏特性锁定30/25/20护甲框架，再计算异域职业物品与四件传说护甲的真实可达范围。调整模组、护甲模组和第三属性均参与逐件计算。</p><p>基础参数：每件T5护甲为主要属性30、次要属性25、第三属性20，其余三项大师杰作各5，共90点；五件共450点。调整模组可选+5/-5或+3；每件可装备一个+5或+10护甲模组；单项属性范围为0–200。</p><p>12种护甲框架：突围者、堡垒、搏击手、突击手、掷雷手、爆破专家、装甲兵、楷模典范、掠夺者、专家、枪手、高能者。</p>',
+    calculatorModeLabel:'计算模式', standardModeButton:'从零求解', upgradeModeButton:'优化现有配装',
+    upgradeBuildHeading:'当前五件护甲',
+    upgradeBuildDescription:'把正在用的 5 件 T5 护甲按装备栏填好。异域和不想换的护甲记得勾选“固定”。',
+    upgradeReassignModifiers:'计算时自动重排调整和属性模组',
+    upgradeTargetHint:'这里填最低目标。高出的属性会保留，不用刚好卡在目标值。',
+    upgradeAnalyzeButton:'规划替换顺序', upgradeResultsHeading:'护甲替换建议',
     fragmentsHeading:'碎片属性变化',
     targetsHeading:'目标六维属性', resetTargetsButton:'恢复默认值',
     exoticModeLabel:'启用<strong style="color:var(--accent);">异域职业物品模式</strong>',
@@ -2160,13 +3141,19 @@ const UI_TEXT = {
   'zh-cht': {
     documentTitle:'天命2 T5配裝求解器',
     pageHeading:'天命2 <span>T5</span> 配裝求解器',
-    pageSubtitle:'輸入目標數值 -> 自動計算5件防具最佳配置 · 12種防具原型 · 調整自動最佳化',
+    pageSubtitle:'設定目標數值 → 計算 5 件防具的最佳組合 · 12 種防具原型 · 自動分配調整',
     pageLanguageLabel:'網頁語言',
     skipToTargets:'跳至目標輸入',
     freeNotice:'本程式完全免費',
     fraudNotice:'如果你是付費購買的，代表你受騙了！',
-    introSummary:'程式介紹（點擊展開）',
+    introSummary:'程式介紹',
     introContent:'<p>本程式用於天命2防具3.0版的T5配裝求解。輸入目標六維數值、模組和碎片後，程式會列舉五件防具的實際組合，並結合已有防具判斷還需取得什麼。</p><p>異域職業物品模式會根據職業及左右欄特長鎖定30/25/20防具原型，再計算異域職業物品與四件傳說防具的真實可達範圍。調整模組、防具模組和第三數值均參與逐件計算。</p><p>基礎參數：每件T5防具為主要數值30、次要數值25、第三數值20，其餘三項傑作各5，共90點；五件共450點。調整模組可選+5/-5或+3；每件可裝備一個+5或+10防具模組；單項數值範圍為0–200。</p><p>12種防具原型：破圍者、堡壘、赤拳互鬥、衝突者、榴彈兵、爆破專家、巨神兵、至高典範、剝奪者、戰術家、槍手、發電站。</p>',
+    calculatorModeLabel:'計算模式', standardModeButton:'從零求解', upgradeModeButton:'最佳化現有配裝',
+    upgradeBuildHeading:'目前五件防具',
+    upgradeBuildDescription:'把正在用的 5 件 T5 防具按裝備欄填好。異域和不想換的防具記得勾選「固定」。',
+    upgradeReassignModifiers:'計算時自動重排調整和數值模組',
+    upgradeTargetHint:'這裡填最低目標。高出的數值會保留，不必剛好卡在目標值。',
+    upgradeAnalyzeButton:'規劃替換順序', upgradeResultsHeading:'防具替換建議',
     fragmentsHeading:'碎片數值變化',
     targetsHeading:'目標六維數值', resetTargetsButton:'恢復預設值',
     exoticModeLabel:'啟用<strong style="color:var(--accent);">異域職業物品模式</strong>',
@@ -2194,13 +3181,19 @@ const UI_TEXT = {
   en: {
     documentTitle:'Destiny 2 T5 Armor Solver',
     pageHeading:'Destiny 2 <span>T5</span> Armor Solver',
-    pageSubtitle:'Set target stats -> calculate the best five-piece loadout · 12 armor archetypes · automatic tuning',
+    pageSubtitle:'Set targets → calculate the best five-piece loadout · 12 armor archetypes · automatic tuning',
     pageLanguageLabel:'Page language',
     skipToTargets:'Skip to target inputs',
     freeNotice:'This tool is completely free',
     fraudNotice:'If you paid for it, you were scammed.',
-    introSummary:'About this tool (click to expand)',
+    introSummary:'About this tool',
     introContent:'<p>This tool solves Destiny 2 Armor 3.0 T5 loadouts. Enter six target stats, mods, and Fragment changes; it enumerates real five-piece armor combinations and uses your owned armor to show what remains to farm.</p><p>Exotic Class Item mode locks its 30/25/20 armor archetype from the selected class and left/right-column perks, then calculates the true reachable range across that item and four Legendary Armor pieces. Tuning Mods, Armor Mods, and tertiary stats are evaluated per piece.</p><p>Base rules: each T5 piece has 30 primary, 25 secondary, 20 tertiary, and 5 Masterwork points in each remaining stat, for 90 total; five pieces provide 450. A Tuning Mod is either +5/-5 or +3; each piece takes one +5 or +10 Armor Mod; each stat ranges from 0–200.</p><p>12 armor archetypes: Siegebreaker, Bulwark, Brawler, Skirmisher, Grenadier, Demolitionist, Colossus, Paragon, Reaver, Specialist, Gunner, and Powerhouse.</p>',
+    calculatorModeLabel:'Calculator mode', standardModeButton:'Build from Scratch', upgradeModeButton:'Optimize Current Loadout',
+    upgradeBuildHeading:'Current Five Armor Pieces',
+    upgradeBuildDescription:'Add the five T5 pieces you use now. Mark Exotics and anything you want to keep as fixed.',
+    upgradeReassignModifiers:'Rearrange Tuning and stat mods while calculating',
+    upgradeTargetHint:'Enter the minimum you want for each stat. Going over the target is fine.',
+    upgradeAnalyzeButton:'Plan Replacement Order', upgradeResultsHeading:'Armor Replacement Advice',
     fragmentsHeading:'Fragment Stat Changes',
     targetsHeading:'Target Stats', resetTargetsButton:'Reset defaults',
     exoticModeLabel:'Enable <strong style="color:var(--accent);">Exotic Class Item mode</strong>',
@@ -3028,6 +4021,7 @@ function resetTargetStats() {
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();
+  saveUpgradeDraft();
 }
 
 function adjFragment(stat, delta) {
@@ -3039,6 +4033,8 @@ function adjFragment(stat, delta) {
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();
+  saveUpgradeDraft();
+  updateUpgradeBudgetSummary();
 }
 
 function getVal(id) { return parseInt(document.getElementById(id)?.value) || 0; }
@@ -3345,8 +4341,9 @@ function getFragments() {
 
 function toggleExoticMode() {
   const enabled = document.getElementById('useExoticMode')?.checked;
-  document.getElementById('exoticSettingsBody').style.display = enabled ? 'block' : 'none';
-  if (enabled) updateExoticFramework();
+  const showSettings = enabled && calculatorMode !== 'upgrade';
+  document.getElementById('exoticSettingsBody').style.display = showSettings ? 'block' : 'none';
+  if (showSettings) updateExoticFramework();
 }
 
 function renderExoticInputs() {
@@ -3407,7 +4404,10 @@ function changePageLanguage() {
   updateBudget();
   updateRealtimeRanges();
   renderSavedBuilds();
+  renderUpgradeBuildEditor();
+  if (lastUpgradeAnalysis) renderUpgradeAnalysis(lastUpgradeAnalysis);
   saveCurrentDraft();
+  saveUpgradeDraft();
   if (allSolutions.length > 0 && lastTargets && lastFragments) {
     displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments);
   }
@@ -4163,15 +5163,26 @@ function buildNearestSuggestionHTML(suggestion) {
   </div>`;
 }
 
+function resetRealtimeRangeUI() {
+  const summary = document.getElementById('realtimeRangeSummary');
+  nearestTargetSuggestion = null;
+  clearRangeHints();
+  if (summary) {
+    summary.style.display = 'none';
+    summary.innerHTML = '';
+  }
+}
+
 function updateRealtimeRanges() {
   const summary = document.getElementById('realtimeRangeSummary');
   if (!summary) return;
+  if (calculatorMode === 'upgrade') {
+    resetRealtimeRangeUI();
+    return;
+  }
   const exoticSettings = getExoticSettings();
   if (!exoticSettings?.config) {
-    nearestTargetSuggestion = null;
-    clearRangeHints();
-    summary.style.display = 'none';
-    summary.innerHTML = '';
+    resetRealtimeRangeUI();
     return;
   }
 
@@ -4242,6 +5253,10 @@ function updateRealtimeRanges() {
 
 function scheduleRealtimeRanges() {
   clearTimeout(realtimeRangeTimer);
+  if (calculatorMode === 'upgrade') {
+    resetRealtimeRangeUI();
+    return;
+  }
   realtimeRangeTimer = setTimeout(updateRealtimeRanges, 180);
 }
 
@@ -5424,6 +6439,942 @@ function resortByOwned() {
 }
 
 // ============================================================
+// EXISTING LOADOUT OPTIMIZER
+// ============================================================
+const UPGRADE_STORAGE_KEY = 'd2_armor_upgrade_draft_v1';
+const CALCULATOR_MODE_STORAGE_KEY = 'd2_armor_calculator_mode_v1';
+const UPGRADE_SLOTS = [
+  { id:'helmet', labels:['头盔','頭盔','Helmet'] },
+  { id:'arms', labels:['臂铠','臂鎧','Arms'] },
+  { id:'chest', labels:['胸甲','胸甲','Chest'] },
+  { id:'legs', labels:['腿甲','腿甲','Legs'] },
+  { id:'classItem', labels:['职业物品','職業物品','Class Item'] },
+];
+const DEFAULT_UPGRADE_ARCHETYPES = ['Brawler', 'Grenadier', 'Paragon', 'Specialist', 'Gunner'];
+let calculatorMode = 'solve';
+let upgradeBuildState = [];
+let lastUpgradeAnalysis = null;
+
+function getUpgradeSlotLabel(slotIndex) {
+  const labels = UPGRADE_SLOTS[slotIndex]?.labels || UPGRADE_SLOTS[0].labels;
+  return l(labels[0], labels[1], labels[2]);
+}
+
+function createDefaultUpgradePiece(slotIndex) {
+  const archetypeId = DEFAULT_UPGRADE_ARCHETYPES[slotIndex] || ARCHETYPES[slotIndex]?.id || ARCHETYPES[0].id;
+  const archetype = ARCHETYPES.find(item => item.id === archetypeId) || ARCHETYPES[0];
+  const tertiary = STATS.find(stat => stat !== archetype.primary && stat !== archetype.secondary);
+  const tuningFrom = 'health';
+  const tuningTo = STATS.find(stat => stat !== tuningFrom);
+  return {
+    slot: UPGRADE_SLOTS[slotIndex].id,
+    archetypeId,
+    tertiary,
+    tuningMode: 'shift',
+    tuningFrom,
+    tuningTo,
+    armorModSize: 10,
+    armorModStat: archetype.secondary,
+    exotic: false,
+    locked: false,
+  };
+}
+
+function normalizeUpgradePiece(piece, slotIndex) {
+  const fallback = createDefaultUpgradePiece(slotIndex);
+  const normalized = { ...fallback, ...(piece || {}), slot: UPGRADE_SLOTS[slotIndex].id };
+  const archetype = ARCHETYPES.find(item => item.id === normalized.archetypeId) || ARCHETYPES[0];
+  normalized.archetypeId = archetype.id;
+  const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
+  if (!tertiaryOptions.includes(normalized.tertiary)) normalized.tertiary = tertiaryOptions[0];
+  if (!['shift', 'plus3'].includes(normalized.tuningMode)) normalized.tuningMode = 'shift';
+  if (!STATS.includes(normalized.tuningFrom)) normalized.tuningFrom = archetype.primary;
+  if (!STATS.includes(normalized.tuningTo) || normalized.tuningTo === normalized.tuningFrom) {
+    normalized.tuningTo = STATS.find(stat => stat !== normalized.tuningFrom);
+  }
+  normalized.armorModSize = [0, 5, 10].includes(Number(normalized.armorModSize))
+    ? Number(normalized.armorModSize) : 10;
+  if (!STATS.includes(normalized.armorModStat)) normalized.armorModStat = archetype.secondary;
+  normalized.exotic = Boolean(normalized.exotic);
+  normalized.locked = normalized.exotic || Boolean(normalized.locked);
+  return normalized;
+}
+
+function getUpgradeConfig(piece) {
+  const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
+  return BASE_CONFIGS.find(config =>
+    config.archetype === archetype.name && config.tertiary === piece.tertiary
+  ) || BASE_CONFIGS.find(config => config.archetype === archetype.name);
+}
+
+function getArchetypeIdForConfig(config) {
+  return ARCHETYPES.find(item => item.name === config.archetype)?.id || ARCHETYPES[0].id;
+}
+
+function getUpgradeStatOptions(selectedValue, excludedValue = '') {
+  return STATS
+    .filter(stat => stat !== excludedValue)
+    .map(stat => `<option value="${stat}" ${stat === selectedValue ? 'selected' : ''}>${STAT_LABELS[stat]}</option>`)
+    .join('');
+}
+
+function renderUpgradeBuildEditor(openIndex = null) {
+  const editor = document.getElementById('upgradeBuildEditor');
+  if (!editor) return;
+  if (upgradeBuildState.length !== UPGRADE_SLOTS.length) {
+    upgradeBuildState = UPGRADE_SLOTS.map((_, index) => normalizeUpgradePiece(upgradeBuildState[index], index));
+  }
+  const currentlyOpen = openIndex === null
+    ? [...editor.querySelectorAll('.upgrade-piece-row[open]')].map(row => Number(row.dataset.index))
+    : [openIndex];
+
+  editor.innerHTML = `<div class="upgrade-piece-list">${upgradeBuildState.map((piece, index) => {
+    const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
+    const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
+    const identity = `${getArchetypeLabel(archetype.id)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]}`;
+    const status = piece.exotic
+      ? l('异域固定件','異域固定件','Fixed Exotic')
+      : (piece.locked ? l('固定不替换','固定不替換','Fixed') : l('可替换','可替換','Replaceable'));
+    const isOpen = currentlyOpen.includes(index) || (currentlyOpen.length === 0 && index === 0);
+    return `<details class="upgrade-piece-row" data-index="${index}" ${isOpen ? 'open' : ''}>
+      <summary>
+        <span class="upgrade-piece-slot"><small>${String(index + 1).padStart(2, '0')}</small>${getUpgradeSlotLabel(index)}</span>
+        <span class="upgrade-piece-identity">${identity}</span>
+        <span class="upgrade-piece-status ${piece.locked ? 'is-locked' : ''}">${piece.locked ? icon('lock', { size:'sm' }) : ''}${status}</span>
+      </summary>
+      <div class="upgrade-piece-fields">
+        <label class="input-group">
+          <span>${t('armorArchetype')}</span>
+          <select onchange="updateUpgradePiece(${index},'archetypeId',this.value,true)">
+            ${ARCHETYPES.map(item => `<option value="${item.id}" ${item.id === piece.archetypeId ? 'selected' : ''}>${getArchetypeLabel(item.id)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="input-group">
+          <span>${t('tertiaryStat')}</span>
+          <select onchange="updateUpgradePiece(${index},'tertiary',this.value)">
+            ${tertiaryOptions.map(stat => `<option value="${stat}" ${stat === piece.tertiary ? 'selected' : ''}>${STAT_LABELS[stat]}</option>`).join('')}
+          </select>
+        </label>
+        <label class="input-group">
+          <span>${t('tuningMod')}</span>
+          <select onchange="updateUpgradePiece(${index},'tuningMode',this.value,true)">
+            <option value="shift" ${piece.tuningMode === 'shift' ? 'selected' : ''}>+5 / -5</option>
+            <option value="plus3" ${piece.tuningMode === 'plus3' ? 'selected' : ''}>+3</option>
+          </select>
+        </label>
+        ${piece.tuningMode === 'shift' ? `
+        <label class="input-group">
+          <span>${l('调整来源（-5）','調整來源（-5）','Tuning source (-5)')}</span>
+          <select onchange="updateUpgradePiece(${index},'tuningFrom',this.value,true)">
+            ${getUpgradeStatOptions(piece.tuningFrom)}
+          </select>
+        </label>
+        <label class="input-group">
+          <span>${l('调整去向（+5）','調整去向（+5）','Tuning target (+5)')}</span>
+          <select onchange="updateUpgradePiece(${index},'tuningTo',this.value)">
+            ${getUpgradeStatOptions(piece.tuningTo, piece.tuningFrom)}
+          </select>
+        </label>` : ''}
+        <label class="input-group">
+          <span>${t('armorMod')}</span>
+          <select onchange="updateUpgradePiece(${index},'armorModSize',Number(this.value),true)">
+            <option value="0" ${piece.armorModSize === 0 ? 'selected' : ''}>${t('none')}</option>
+            <option value="5" ${piece.armorModSize === 5 ? 'selected' : ''}>+5</option>
+            <option value="10" ${piece.armorModSize === 10 ? 'selected' : ''}>+10</option>
+          </select>
+        </label>
+        <label class="input-group">
+          <span>${l('模组属性','模組數值','Mod stat')}</span>
+          <select ${piece.armorModSize === 0 ? 'disabled' : ''} onchange="updateUpgradePiece(${index},'armorModStat',this.value)">
+            ${getUpgradeStatOptions(piece.armorModStat)}
+          </select>
+        </label>
+        <div class="upgrade-piece-flags">
+          <label>
+            <input type="checkbox" ${piece.exotic ? 'checked' : ''} onchange="updateUpgradePiece(${index},'exotic',this.checked,true)">
+            <span>${l('异域/必须保留','異域/必須保留','Exotic / must keep')}</span>
+          </label>
+          <label>
+            <input type="checkbox" ${piece.locked ? 'checked' : ''} ${piece.exotic ? 'disabled' : ''} onchange="updateUpgradePiece(${index},'locked',this.checked,true)">
+            <span>${l('固定此件，不参与替换','固定此件，不參與替換','Fix this piece; do not replace')}</span>
+          </label>
+        </div>
+      </div>
+    </details>`;
+  }).join('')}</div>`;
+  updateUpgradeBudgetSummary();
+}
+
+function updateUpgradePiece(index, field, value, rerender = false) {
+  if (!upgradeBuildState[index]) return;
+  upgradeBuildState[index][field] = value;
+  upgradeBuildState[index] = normalizeUpgradePiece(upgradeBuildState[index], index);
+  saveUpgradeDraft();
+  if (rerender || field === 'tertiary') renderUpgradeBuildEditor(index);
+  else updateUpgradeBudgetSummary();
+}
+
+function updateUpgradeOption() {
+  saveUpgradeDraft();
+  updateUpgradeBudgetSummary();
+}
+
+function getUpgradeFragments() {
+  return Object.fromEntries(STATS.map(stat => [stat, getFragVal(stat)]));
+}
+
+function getUpgradeTargets() {
+  return Object.fromEntries(STATS.map(stat => [stat, getVal('target_' + stat)]));
+}
+
+function applyManualUpgradeModifiers(config, piece) {
+  const totals = { ...config.baseStats };
+  if (piece.tuningMode === 'plus3') {
+    for (const stat of STATS) {
+      if (stat !== config.primary && stat !== config.secondary && stat !== config.tertiary) totals[stat] += 1;
+    }
+  } else {
+    totals[piece.tuningFrom] -= 5;
+    totals[piece.tuningTo] += 5;
+  }
+  if (piece.armorModSize > 0) totals[piece.armorModStat] += piece.armorModSize;
+  return totals;
+}
+
+function getManualUpgradeArmorTotals(pieces) {
+  const totals = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  pieces.forEach(piece => {
+    const pieceTotals = applyManualUpgradeModifiers(getUpgradeConfig(piece), piece);
+    for (const stat of STATS) totals[stat] += pieceTotals[stat];
+  });
+  return totals;
+}
+
+function finalizeUpgradeTotals(armorTotals, fragments) {
+  return Object.fromEntries(STATS.map(stat => [
+    stat,
+    Math.max(0, Math.min(200, armorTotals[stat] + (fragments[stat] || 0)))
+  ]));
+}
+
+function getUpgradeModifierBudget(pieces) {
+  return {
+    numPlus3: pieces.filter(piece => piece.tuningMode === 'plus3').length,
+    numPlus5: pieces.filter(piece => piece.armorModSize === 5).length,
+    numPlus10: pieces.filter(piece => piece.armorModSize === 10).length,
+  };
+}
+
+function updateUpgradeLiveSummary() {
+  const summary = document.getElementById('upgradeLiveSummary');
+  if (!summary || upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
+  const totals = finalizeUpgradeTotals(getManualUpgradeArmorTotals(upgradeBuildState), getUpgradeFragments());
+  const total = STATS.reduce((sum, stat) => sum + totals[stat], 0);
+  summary.innerHTML = `
+    <div class="upgrade-live-heading">
+      <span class="upgrade-live-title">${l('当前六维','目前六維','Current Stats')}</span>
+      <span class="upgrade-live-total">${l('已含碎片 · 总属性','已含碎片 · 總數值','Includes Fragments · Total')} <strong>${total}</strong></span>
+    </div>
+    <div class="upgrade-live-stats" role="list">
+      ${STATS.map(stat => `
+        <div class="upgrade-live-stat" role="listitem" aria-label="${STAT_LABELS[stat]} ${totals[stat]}">
+          <span class="upgrade-live-stat-label" style="color:${STAT_COLORS[stat]}">${icon(stat)}<span>${STAT_LABELS[stat]}</span></span>
+          <output>${totals[stat]}</output>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+function updateUpgradeBudgetSummary() {
+  const summary = document.getElementById('upgradeBudgetSummary');
+  if (!summary || upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
+  const budget = getUpgradeModifierBudget(upgradeBuildState);
+  updateUpgradeLiveSummary();
+  summary.innerHTML = l(
+    `现在用了：<strong>${budget.numPlus3}</strong> 件 +3 · <strong>${budget.numPlus5}</strong> 个 +5 · <strong>${budget.numPlus10}</strong> 个 +10`,
+    `目前用了：<strong>${budget.numPlus3}</strong> 件 +3 · <strong>${budget.numPlus5}</strong> 個 +5 · <strong>${budget.numPlus10}</strong> 個 +10`,
+    `In use: <strong>${budget.numPlus3}</strong> × +3 · <strong>${budget.numPlus5}</strong> × +5 · <strong>${budget.numPlus10}</strong> × +10`
+  );
+}
+
+function saveUpgradeDraft() {
+  if (upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
+  try {
+    localStorage.setItem(UPGRADE_STORAGE_KEY, JSON.stringify({
+      pieces: upgradeBuildState,
+      reassignModifiers: document.getElementById('upgradeReassignModifiers')?.checked ?? true,
+    }));
+  } catch (e) {}
+}
+
+function loadUpgradeDraft() {
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(UPGRADE_STORAGE_KEY)); } catch (e) {}
+  upgradeBuildState = UPGRADE_SLOTS.map((_, index) => normalizeUpgradePiece(draft?.pieces?.[index], index));
+  const reassign = document.getElementById('upgradeReassignModifiers');
+  if (reassign) reassign.checked = draft?.reassignModifiers !== false;
+  renderUpgradeBuildEditor();
+}
+
+function setCalculatorMode(mode, persist = true) {
+  calculatorMode = mode === 'upgrade' ? 'upgrade' : 'solve';
+  const isUpgrade = calculatorMode === 'upgrade';
+  document.body.classList.toggle('is-upgrade-mode', isUpgrade);
+  document.getElementById('modeSolveButton')?.setAttribute('aria-pressed', String(!isUpgrade));
+  document.getElementById('modeUpgradeButton')?.setAttribute('aria-pressed', String(isUpgrade));
+  document.getElementById('upgradeBuildCard').hidden = !isUpgrade;
+  document.getElementById('btnSolve').hidden = isUpgrade;
+  document.getElementById('btnUpgradeAnalyze').hidden = !isUpgrade;
+  document.getElementById('saveBuildButton').hidden = isUpgrade;
+  document.getElementById('upgradeResults').hidden = !isUpgrade || !lastUpgradeAnalysis;
+  document.getElementById('floatJump').style.display = 'none';
+  document.getElementById('messages').innerHTML = '';
+  if (isUpgrade) {
+    clearTimeout(realtimeRangeTimer);
+    resetRealtimeRangeUI();
+    toggleExoticMode();
+    document.getElementById('results').classList.remove('show');
+    document.getElementById('savedCard').style.display = 'none';
+    updateUpgradeBudgetSummary();
+  } else {
+    toggleExoticMode();
+    scheduleRealtimeRanges();
+    renderSavedBuilds();
+  }
+  if (persist) {
+    try { localStorage.setItem(CALCULATOR_MODE_STORAGE_KEY, calculatorMode); } catch (e) {}
+  }
+}
+
+function initializeUpgradeOptimizer() {
+  loadUpgradeDraft();
+  let storedMode = 'solve';
+  try { storedMode = localStorage.getItem(CALCULATOR_MODE_STORAGE_KEY) || 'solve'; } catch (e) {}
+  setCalculatorMode(storedMode, false);
+}
+
+function getUpgradeMetrics(finalTotals, targets, score = 0) {
+  const deficits = STATS.map(stat => Math.max(0, targets[stat] - finalTotals[stat]));
+  const excesses = STATS.map(stat => Math.max(0, finalTotals[stat] - targets[stat]));
+  const reachedCount = STATS.filter(stat => finalTotals[stat] >= targets[stat]).length;
+  const exactCount = STATS.filter(stat => finalTotals[stat] === targets[stat]).length;
+  return {
+    allReached: reachedCount === STATS.length,
+    shortfall: deficits.reduce((sum, value) => sum + value, 0),
+    maxShortfall: Math.max(...deficits),
+    reachedCount,
+    exactCount,
+    excess: excesses.reduce((sum, value) => sum + value, 0),
+    score,
+  };
+}
+
+function compareUpgradeMetrics(left, right) {
+  if (left.allReached !== right.allReached) return left.allReached ? -1 : 1;
+  if (left.shortfall !== right.shortfall) return left.shortfall - right.shortfall;
+  if (left.maxShortfall !== right.maxShortfall) return left.maxShortfall - right.maxShortfall;
+  if (left.reachedCount !== right.reachedCount) return right.reachedCount - left.reachedCount;
+  if (left.excess !== right.excess) return left.excess - right.excess;
+  if (left.exactCount !== right.exactCount) return right.exactCount - left.exactCount;
+  return left.score - right.score;
+}
+
+function evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers) {
+  const configs = pieces.map(getUpgradeConfig);
+  const armorTarget = Object.fromEntries(STATS.map(stat => [
+    stat,
+    Math.max(0, targets[stat] - (fragments[stat] || 0))
+  ]));
+  const manualArmorTotals = getManualUpgradeArmorTotals(pieces);
+  const manualEvaluation = {
+    totals: manualArmorTotals,
+    tuningAssignments: pieces.map(piece => piece.tuningMode === 'plus3'
+      ? { mode:'+3', from:null, to:null }
+      : { mode:'+5-5', from:piece.tuningFrom, to:piece.tuningTo }),
+    modAssignments: Object.fromEntries(pieces.map((piece, index) => [
+      index,
+      piece.armorModSize > 0 ? { size:piece.armorModSize, stat:piece.armorModStat } : null
+    ])),
+    score: scoreStats(manualArmorTotals, armorTarget, {}),
+  };
+  let evaluation = manualEvaluation;
+  if (reassignModifiers) {
+    const budget = getUpgradeModifierBudget(pieces);
+    const automaticEvaluation = evaluateConfig(
+      configs, armorTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, {}
+    );
+    const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
+    const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
+    const manualMetrics = getUpgradeMetrics(manualFinal, targets, manualEvaluation.score);
+    const automaticMetrics = getUpgradeMetrics(automaticFinal, targets, automaticEvaluation.score);
+    if (compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) evaluation = automaticEvaluation;
+  }
+  const finalTotals = finalizeUpgradeTotals(evaluation.totals, fragments);
+  return {
+    ...evaluation,
+    configs,
+    finalTotals,
+    metrics: getUpgradeMetrics(finalTotals, targets, evaluation.score),
+  };
+}
+
+function sameUpgradeConfig(left, right) {
+  return left?.archetype === right?.archetype && left?.tertiary === right?.tertiary;
+}
+
+function setUpgradePieceConfig(piece, slotIndex, config) {
+  return normalizeUpgradePiece({
+    ...piece,
+    archetypeId: getArchetypeIdForConfig(config),
+    tertiary: config.tertiary,
+  }, slotIndex);
+}
+
+function mapUpgradeConfigsToPieces(pieces, unlockedIndices, candidateConfigs) {
+  const mapped = pieces.map(piece => ({ ...piece }));
+  const remaining = [...candidateConfigs];
+  const unassignedSlots = [];
+
+  for (const slotIndex of unlockedIndices) {
+    const currentConfig = getUpgradeConfig(pieces[slotIndex]);
+    const matchIndex = remaining.findIndex(config => sameUpgradeConfig(config, currentConfig));
+    if (matchIndex >= 0) {
+      mapped[slotIndex] = setUpgradePieceConfig(mapped[slotIndex], slotIndex, remaining[matchIndex]);
+      remaining.splice(matchIndex, 1);
+    } else {
+      unassignedSlots.push(slotIndex);
+    }
+  }
+  unassignedSlots.forEach((slotIndex, index) => {
+    mapped[slotIndex] = setUpgradePieceConfig(mapped[slotIndex], slotIndex, remaining[index]);
+  });
+  return mapped;
+}
+
+function getUpgradeReplacements(beforePieces, afterPieces) {
+  const replacements = [];
+  for (let slotIndex = 0; slotIndex < beforePieces.length; slotIndex++) {
+    const beforeConfig = getUpgradeConfig(beforePieces[slotIndex]);
+    const afterConfig = getUpgradeConfig(afterPieces[slotIndex]);
+    if (!sameUpgradeConfig(beforeConfig, afterConfig)) {
+      replacements.push({
+        slotIndex,
+        beforePiece: { ...beforePieces[slotIndex] },
+        afterPiece: { ...afterPieces[slotIndex] },
+        beforeConfig,
+        afterConfig,
+      });
+    }
+  }
+  return replacements;
+}
+
+function compareUpgradePlans(left, right) {
+  if (!right) return -1;
+  if (left.metrics.allReached && right.metrics.allReached &&
+      left.replacementCount !== right.replacementCount) {
+    return left.replacementCount - right.replacementCount;
+  }
+  const metricOrder = compareUpgradeMetrics(left.metrics, right.metrics);
+  if (metricOrder !== 0) return metricOrder;
+  if (left.replacementCount !== right.replacementCount) {
+    return left.replacementCount - right.replacementCount;
+  }
+  return left.evaluation.score - right.evaluation.score;
+}
+
+function chooseUpgradeTertiaries(archetypeIndices, lockedConfigs, armorTarget) {
+  const selected = [];
+  const partialTotals = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  for (const config of lockedConfigs) {
+    for (const stat of STATS) partialTotals[stat] += config.baseStats[stat];
+  }
+
+  for (const archetypeIndex of archetypeIndices) {
+    let bestConfig = null;
+    let bestScore = Infinity;
+    for (let tertiaryIndex = 0; tertiaryIndex < 4; tertiaryIndex++) {
+      const config = BASE_CONFIGS[archetypeIndex * 4 + tertiaryIndex];
+      const completedCount = lockedConfigs.length + selected.length + 1;
+      const ratio = completedCount / 5;
+      let score = 0;
+      for (const stat of STATS) {
+        const actual = partialTotals[stat] + config.baseStats[stat];
+        const difference = actual - armorTarget[stat] * ratio;
+        score += difference < 0 ? difference * difference * 3 : difference * difference;
+      }
+      if (score < bestScore) {
+        bestScore = score;
+        bestConfig = config;
+      }
+    }
+    selected.push(bestConfig);
+    for (const stat of STATS) partialTotals[stat] += bestConfig.baseStats[stat];
+  }
+  return selected;
+}
+
+function refineUpgradePlanPieces(pieces, unlockedIndices, targets, fragments, reassignModifiers) {
+  let bestPieces = pieces.map(piece => ({ ...piece }));
+  let bestEvaluation = evaluateUpgradePieces(bestPieces, targets, fragments, reassignModifiers);
+  let improved = true;
+  let pass = 0;
+  while (improved && pass < 6) {
+    improved = false;
+    pass++;
+    for (const slotIndex of unlockedIndices) {
+      const currentConfig = getUpgradeConfig(bestPieces[slotIndex]);
+      const alternatives = BASE_CONFIGS.filter(config => config.archetype === currentConfig.archetype);
+      for (const alternative of alternatives) {
+        if (sameUpgradeConfig(alternative, currentConfig)) continue;
+        const trialPieces = bestPieces.map(piece => ({ ...piece }));
+        trialPieces[slotIndex] = setUpgradePieceConfig(trialPieces[slotIndex], slotIndex, alternative);
+        const trialEvaluation = evaluateUpgradePieces(
+          trialPieces, targets, fragments, reassignModifiers
+        );
+        if (compareUpgradeMetrics(trialEvaluation.metrics, bestEvaluation.metrics) < 0) {
+          bestPieces = trialPieces;
+          bestEvaluation = trialEvaluation;
+          improved = true;
+          break;
+        }
+      }
+      if (improved) break;
+    }
+  }
+  return { pieces: bestPieces, evaluation: bestEvaluation };
+}
+
+function buildUpgradePlanSteps(
+  originalPieces, finalPieces, targets, fragments, reassignModifiers
+) {
+  const remaining = getUpgradeReplacements(originalPieces, finalPieces);
+  const steps = [];
+  let currentPieces = originalPieces.map(piece => ({ ...piece }));
+
+  while (remaining.length > 0) {
+    let bestChoice = null;
+    for (let index = 0; index < remaining.length; index++) {
+      const replacement = remaining[index];
+      const trialPieces = currentPieces.map(piece => ({ ...piece }));
+      trialPieces[replacement.slotIndex] = { ...replacement.afterPiece };
+      const evaluation = evaluateUpgradePieces(
+        trialPieces, targets, fragments, reassignModifiers
+      );
+      if (!bestChoice ||
+          compareUpgradeMetrics(evaluation.metrics, bestChoice.evaluation.metrics) < 0) {
+        bestChoice = { index, replacement, pieces: trialPieces, evaluation };
+      }
+    }
+    steps.push({
+      ...bestChoice.replacement,
+      evaluation: bestChoice.evaluation,
+    });
+    currentPieces = bestChoice.pieces;
+    remaining.splice(bestChoice.index, 1);
+  }
+  return steps;
+}
+
+function findUpgradeCompletionPlan(
+  pieces, targets, fragments, reassignModifiers, baseline
+) {
+  const unlockedIndices = pieces
+    .map((piece, index) => piece.locked ? -1 : index)
+    .filter(index => index >= 0);
+  const lockedConfigs = pieces
+    .filter(piece => piece.locked)
+    .map(getUpgradeConfig);
+  const armorTarget = Object.fromEntries(STATS.map(stat => [
+    stat,
+    Math.max(0, targets[stat] - (fragments[stat] || 0))
+  ]));
+  const seedPlansByReplacementCount = new Map();
+  let bestPlan = null;
+
+  function evaluateArchetypeSet(archetypeIndices) {
+    const candidateConfigs = chooseUpgradeTertiaries(
+      archetypeIndices, lockedConfigs, armorTarget
+    );
+    const mappedPieces = mapUpgradeConfigsToPieces(
+      pieces, unlockedIndices, candidateConfigs
+    );
+    const evaluation = evaluateUpgradePieces(
+      mappedPieces, targets, fragments, reassignModifiers
+    );
+    const replacements = getUpgradeReplacements(pieces, mappedPieces);
+    const seedPlan = {
+      pieces: mappedPieces,
+      evaluation,
+      metrics: evaluation.metrics,
+      replacements,
+      replacementCount: replacements.length,
+    };
+    const seeds = seedPlansByReplacementCount.get(seedPlan.replacementCount) || [];
+    seeds.push(seedPlan);
+    seeds.sort(compareUpgradePlans);
+    if (seeds.length > 16) seeds.length = 16;
+    seedPlansByReplacementCount.set(seedPlan.replacementCount, seeds);
+  }
+
+  function enumerate(start, depth, archetypeIndices) {
+    if (depth === unlockedIndices.length) {
+      evaluateArchetypeSet(archetypeIndices);
+      return;
+    }
+    for (let archetypeIndex = start; archetypeIndex < ARCHETYPES.length; archetypeIndex++) {
+      archetypeIndices.push(archetypeIndex);
+      enumerate(archetypeIndex, depth + 1, archetypeIndices);
+      archetypeIndices.pop();
+    }
+  }
+
+  enumerate(0, 0, []);
+  for (const seeds of seedPlansByReplacementCount.values()) {
+    for (const seed of seeds) {
+      const refined = refineUpgradePlanPieces(
+        seed.pieces, unlockedIndices, targets, fragments, reassignModifiers
+      );
+      const replacements = getUpgradeReplacements(pieces, refined.pieces);
+      const plan = {
+        pieces: refined.pieces,
+        evaluation: refined.evaluation,
+        metrics: refined.evaluation.metrics,
+        replacements,
+        replacementCount: replacements.length,
+      };
+      if (compareUpgradePlans(plan, bestPlan) < 0) bestPlan = plan;
+    }
+  }
+  if (!bestPlan) return null;
+  if (!bestPlan.metrics.allReached &&
+      compareUpgradeMetrics(bestPlan.metrics, baseline.metrics) >= 0) {
+    return null;
+  }
+  bestPlan.steps = buildUpgradePlanSteps(
+    pieces, bestPlan.pieces, targets, fragments, reassignModifiers
+  );
+  return bestPlan;
+}
+
+function analyzeUpgradeCandidates(pieces, targets, fragments, reassignModifiers) {
+  const enteredBaseline = evaluateUpgradePieces(pieces, targets, fragments, false);
+  const baseline = evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers);
+  const rankings = [];
+  if (!baseline.metrics.allReached) {
+    for (let slotIndex = 0; slotIndex < pieces.length; slotIndex++) {
+      if (pieces[slotIndex].locked) continue;
+      const currentConfig = getUpgradeConfig(pieces[slotIndex]);
+      let bestForSlot = null;
+      for (const candidateConfig of BASE_CONFIGS) {
+        if (candidateConfig === currentConfig) continue;
+        const trialPieces = pieces.map(piece => ({ ...piece }));
+        trialPieces[slotIndex].archetypeId = getArchetypeIdForConfig(candidateConfig);
+        trialPieces[slotIndex].tertiary = candidateConfig.tertiary;
+        trialPieces[slotIndex] = normalizeUpgradePiece(trialPieces[slotIndex], slotIndex);
+        const evaluation = evaluateUpgradePieces(
+          trialPieces, targets, fragments, reassignModifiers
+        );
+        const candidate = {
+          slotIndex,
+          beforePiece: pieces[slotIndex],
+          afterPiece: trialPieces[slotIndex],
+          config: candidateConfig,
+          evaluation,
+          metrics: evaluation.metrics,
+          effectiveGain: baseline.metrics.shortfall - evaluation.metrics.shortfall,
+        };
+        if (!bestForSlot || compareUpgradeMetrics(candidate.metrics, bestForSlot.metrics) < 0) {
+          bestForSlot = candidate;
+        }
+      }
+      if (bestForSlot) rankings.push(bestForSlot);
+    }
+    rankings.sort((left, right) => compareUpgradeMetrics(left.metrics, right.metrics));
+  }
+  const bestCandidate = rankings[0] || null;
+  const best = bestCandidate && compareUpgradeMetrics(bestCandidate.metrics, baseline.metrics) < 0
+    ? bestCandidate : null;
+  const plan = baseline.metrics.allReached
+    ? null
+    : findUpgradeCompletionPlan(
+      pieces, targets, fragments, reassignModifiers, baseline
+    );
+  return {
+    pieces: pieces.map(piece => ({ ...piece })),
+    targets: { ...targets },
+    fragments: { ...fragments },
+    reassignModifiers,
+    enteredBaseline,
+    baseline,
+    rankings,
+    best,
+    plan,
+  };
+}
+
+function formatUpgradeTuning(assignment) {
+  if (!assignment) return t('none');
+  if (assignment.mode === '+3') return '+3';
+  const from = STAT_LABELS[assignment.from];
+  const to = STAT_LABELS[assignment.to];
+  return l(`-5${from}/+5${to}`, `-5${from}/+5${to}`, `-5 ${from} / +5 ${to}`);
+}
+
+function formatUpgradeArmorMod(assignment) {
+  return assignment ? `+${assignment.size} ${STAT_LABELS[assignment.stat]}` : t('none');
+}
+
+function formatUpgradeConfigSummary(config) {
+  const separator = l('：', '：', ': ');
+  return `${getArchetypeLabel(config.archetype)} · ${l('第三', '第三', 'Tertiary')}${separator}${STAT_LABELS[config.tertiary]}`;
+}
+
+function buildUpgradeStatComparison(analysis, afterTotals) {
+  return `<div class="upgrade-stat-comparison">${STATS.map(stat => {
+    const before = (analysis.enteredBaseline || analysis.baseline).finalTotals[stat];
+    const after = afterTotals[stat];
+    const delta = after - before;
+    const target = analysis.targets[stat];
+    const targetReached = after >= target;
+    const deltaClass = targetReached ? 'is-target-met' : 'is-shortfall';
+    const targetStatus = targetReached
+      ? l('达标','達標','met')
+      : l(`差 ${target - after}`, `差 ${target - after}`, `${target - after} short`);
+    return `<div class="upgrade-stat">
+      <div class="upgrade-stat-label" style="color:${STAT_COLORS[stat]}">${icon(stat)}${STAT_LABELS[stat]}</div>
+      <div class="upgrade-stat-values">${before} <small>→</small> ${after}</div>
+      <span class="upgrade-stat-delta ${deltaClass}">${delta > 0 ? '+' : ''}${delta} · ${l('目标','目標','target')} ${target} · ${targetStatus}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function buildUpgradeBaselineNote(analysis) {
+  if (!analysis.reassignModifiers || !analysis.enteredBaseline) return '';
+  const changedStats = STATS.filter(stat =>
+    analysis.enteredBaseline.finalTotals[stat] !== analysis.baseline.finalTotals[stat]
+  );
+  if (changedStats.length === 0) return '';
+  return `<div class="upgrade-baseline-note">
+    ${icon('refresh', { size:'sm' })}
+    <span><strong>${l('数值说明：','數值說明：','Stats:')}</strong>${l('', '', ' ')}${l(
+      '左侧为当前六维，右侧为替换并重配模组后的六维。',
+      '左側為目前六維，右側為替換並重配模組後的六維。',
+      'Left shows current stats; right shows the result after swaps and mod changes.'
+    )}</span>
+  </div>`;
+}
+
+function formatUpgradeTotals(totals) {
+  return STATS.map(stat => `<span>${STAT_LABELS[stat]} ${totals[stat]}</span>`).join('');
+}
+
+function buildUpgradePlanFlow(analysis, plan) {
+  if (!plan?.steps?.length) return '';
+  return `<div class="upgrade-plan-flow">
+    <h3>${l('替换顺序','替換順序','Replacement order')}</h3>
+    <p class="upgrade-plan-copy">${l(
+      '按顺序替换。每一步列出新护甲的第三属性、调谐槽、模组和替换后的六维。',
+      '按順序替換。每一步列出新防具的第三數值、調諧欄位、模組和替換後的六維。',
+      'Replace in order. Each step shows the new tertiary stat, tuning, mod, and resulting stats.'
+    )}</p>
+    <div class="upgrade-plan-steps">${plan.steps.map((step, index) => {
+      const complete = step.evaluation.metrics.allReached;
+      const finalTuning = plan.evaluation.tuningAssignments[step.slotIndex];
+      const finalArmorMod = plan.evaluation.modAssignments[step.slotIndex];
+      return `<div class="upgrade-plan-step">
+        <span class="upgrade-plan-number">${index + 1}</span>
+        <div class="upgrade-plan-change">
+          <strong class="upgrade-plan-slot">${getUpgradeSlotLabel(step.slotIndex)}</strong>
+          <div class="upgrade-plan-swap">
+            <span class="upgrade-plan-config upgrade-plan-config--before">${formatUpgradeConfigSummary(step.beforeConfig)}</span>
+            <span class="upgrade-plan-arrow" aria-hidden="true">→</span>
+            <strong class="upgrade-plan-config upgrade-plan-config--after">${formatUpgradeConfigSummary(step.afterConfig)}</strong>
+          </div>
+        </div>
+        <div class="upgrade-plan-setup">
+          <span><strong>${l('调谐槽','調諧欄位','Tuning')}</strong>${formatUpgradeTuning(finalTuning)}</span>
+          <span><strong>${t('armorMod')}</strong>${formatUpgradeArmorMod(finalArmorMod)}</span>
+        </div>
+        <div class="upgrade-plan-progress ${complete ? 'is-complete' : ''}">
+          <strong>${complete
+            ? l('换完后六维都达标','換完後六維都達標','All targets met after this step')
+            : l(`换完还差 ${step.evaluation.metrics.shortfall} 点`, `換完還差 ${step.evaluation.metrics.shortfall} 點`, `${step.evaluation.metrics.shortfall} points short after this step`)}</strong>
+          <div class="upgrade-plan-totals">${formatUpgradeTotals(step.evaluation.finalTotals)}</div>
+        </div>
+      </div>`;
+    }).join('')}</div>
+  </div>`;
+}
+
+function buildUpgradeAssignments(analysis, evaluation, open = false) {
+  return `<details class="upgrade-assignment-details" ${open ? 'open' : ''}>
+    <summary>${l('最终调谐与模组配置','最終調諧與模組配置','Final tuning and stat mods')}</summary>
+    <div class="upgrade-assignment-list">${evaluation.configs.map((config, index) => `
+      <div class="upgrade-assignment-row">
+        <strong>${getUpgradeSlotLabel(index)}</strong>
+        <span>${formatUpgradeConfigSummary(config)}</span>
+        <span>${formatUpgradeTuning(evaluation.tuningAssignments[index])} · ${formatUpgradeArmorMod(evaluation.modAssignments[index])}</span>
+      </div>`).join('')}
+    </div>
+  </details>`;
+}
+
+function buildUpgradeRanking(analysis) {
+  if (analysis.rankings.length === 0) return '';
+  return `<div class="upgrade-ranking">
+    <h3>${l('如果只想先换一件','如果只想先換一件','If you only want to replace one piece first')}</h3>
+    ${analysis.rankings.map((candidate, index) => `
+      <div class="upgrade-ranking-row ${index === 0 ? 'is-best' : ''}">
+        <strong>#${index + 1} ${getUpgradeSlotLabel(candidate.slotIndex)}</strong>
+        <span>${getArchetypeLabel(candidate.config.archetype)} · ${t('tertiaryStat')} ${STAT_LABELS[candidate.config.tertiary]}</span>
+        <span>${candidate.metrics.allReached
+          ? l('换这一件就够了','換這一件就夠了','This one replacement is enough')
+          : l(`换完还差 ${candidate.metrics.shortfall} 点 · 少 ${candidate.effectiveGain} 点`, `換完還差 ${candidate.metrics.shortfall} 點 · 少 ${candidate.effectiveGain} 點`, `${candidate.metrics.shortfall} short · improves by ${candidate.effectiveGain}`)}</span>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderUpgradeAnalysis(analysis, scroll = false) {
+  if (!analysis) return;
+  lastUpgradeAnalysis = analysis;
+  const section = document.getElementById('upgradeResults');
+  const body = document.getElementById('upgradeResultsBody');
+  section.hidden = calculatorMode !== 'upgrade';
+
+  if (analysis.baseline.metrics.allReached) {
+    const enteredAlreadyReached = analysis.enteredBaseline.metrics.allReached;
+    body.innerHTML = `<div class="upgrade-hero">
+      <div>
+        <div class="upgrade-eyebrow">${l('当前配装','目前配裝','Current loadout')}</div>
+        <div class="upgrade-recommendation">${enteredAlreadyReached
+          ? l('不用换护甲','不用換防具','Keep all five pieces')
+          : l('只要重配模组','只要重配模組','Just rearrange the mods')}</div>
+        <p class="upgrade-recommendation-copy">${l(
+          enteredAlreadyReached
+            ? '现在这套已经达标。下面是最后的模组分配，照着核对一遍就行。'
+            : '护甲都可以留下，把调整和属性模组按下面重新配一下就能达标。',
+          enteredAlreadyReached
+            ? '目前這套已經達標。下面是最後的模組分配，照著核對一遍就行。'
+            : '防具都可以留下，把調整和數值模組按下面重新配一下就能達標。',
+          enteredAlreadyReached
+            ? 'This loadout already meets every target. Check the final mod setup below and you are done.'
+            : 'You can keep every armor piece. Rearrange the Tuning and stat mods as shown below to meet every target.'
+        )}</p>
+      </div>
+      <div class="upgrade-outcome"><strong>${l('5 件都能留下','5 件都能留下','Keep all 5 pieces')}</strong><span>${l('不用再刷护甲','不用再刷防具','No armor farming needed')}</span></div>
+    </div>
+    ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
+    ${buildUpgradeBaselineNote(analysis)}
+    ${buildUpgradeAssignments(analysis, analysis.baseline, true)}`;
+  } else if (!analysis.plan) {
+    body.innerHTML = `<div class="upgrade-hero">
+      <div>
+        <div class="upgrade-eyebrow">${l('没有合适的替换','沒有合適的替換','No useful replacement found')}</div>
+        <div class="upgrade-recommendation">${l('暂时没有更好的换法','暫時沒有更好的換法','There is no better swap right now')}</div>
+        <p class="upgrade-recommendation-copy">${l(
+          '能换的框架都试过了。固定护甲和模组数量不变的话，缺口已经降不下去了。可以先降低一项目标，或放开一件固定护甲。',
+          '能換的原型都試過了。固定防具和模組數量不變的話，缺口已經降不下去了。可以先降低一項目標，或放開一件固定防具。',
+          'We tried every available archetype swap. With the same fixed pieces and mod count, the gap will not get any smaller. Lower one target or unlock a piece and try again.'
+        )}</p>
+      </div>
+      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('先调整目标或固定护甲','先調整目標或固定防具','Change a target or fixed piece first')}</span></div>
+    </div>
+    ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
+    ${buildUpgradeBaselineNote(analysis)}
+    ${buildUpgradeRanking(analysis)}`;
+  } else {
+    const plan = analysis.plan;
+    const reached = plan.metrics.allReached;
+    body.innerHTML = `<div class="upgrade-hero">
+      <div>
+        <div class="upgrade-eyebrow">${reached
+          ? l('推荐换法','推薦換法','Recommended swaps')
+          : l('最接近目标的换法','最接近目標的換法','Closest match found')}</div>
+        <div class="upgrade-recommendation">${reached
+          ? l(`换 ${plan.replacementCount} 件就能达标`, `換 ${plan.replacementCount} 件就能達標`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} to meet every target`)
+          : l(`换 ${plan.replacementCount} 件后还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件後還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} and remain ${plan.metrics.shortfall} short`)}</div>
+        <p class="upgrade-recommendation-copy">${reached
+          ? l(
+            '方案已按优先顺序排好，照着下面执行即可。',
+            '方案已按優先順序排好，照著下面執行即可。',
+            'The swaps are already prioritized. Follow the steps below.'
+          )
+          : l(
+            '目前没有一套能把六项都补齐。下面这套差得最少，可以先参考；想完全达标，还得降低目标或放开一件固定护甲。',
+            '目前沒有一套能把六項都補齊。下面這套差得最少，可以先參考；想完全達標，還得降低目標或放開一件固定防具。',
+            'Nothing we found fills all six targets. This is the closest setup; to hit everything, lower a target or unlock one fixed piece.'
+          )}</p>
+      </div>
+      <div class="upgrade-outcome">
+        <strong>${reached
+          ? l('六维都达标','六維都達標','All six targets met')
+          : l(`还差 ${plan.metrics.shortfall} 点`, `還差 ${plan.metrics.shortfall} 點`, `${plan.metrics.shortfall} points short`)}</strong>
+        <span>${l(
+          `留下现有护甲 ${5 - plan.replacementCount} / 5 件`,
+          `留下目前防具 ${5 - plan.replacementCount} / 5 件`,
+          `Keep ${5 - plan.replacementCount} / 5 current pieces`
+        )}</span>
+      </div>
+    </div>
+    ${buildUpgradeStatComparison(analysis, plan.evaluation.finalTotals)}
+    ${buildUpgradeBaselineNote(analysis)}
+    ${buildUpgradePlanFlow(analysis, plan)}
+    ${buildUpgradeAssignments(analysis, plan.evaluation, true)}`;
+  }
+  if (scroll) section.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+function analyzeArmorUpgrades() {
+  const button = document.getElementById('btnUpgradeAnalyze');
+  const loading = document.getElementById('loading');
+  const messages = document.getElementById('messages');
+  const targets = getUpgradeTargets();
+  const fragments = getUpgradeFragments();
+  const reassignModifiers = document.getElementById('upgradeReassignModifiers')?.checked !== false;
+  const unlockedCount = upgradeBuildState.filter(piece => !piece.locked).length;
+  messages.innerHTML = '';
+  if (unlockedCount === 0) {
+    messages.innerHTML = `<div class="msg error">${icon('block')}${l(
+      '5 件护甲都被固定了。至少放开一件，才能继续找替换方案。',
+      '5 件防具都被固定了。至少放開一件，才能繼續找替換方案。',
+      'All five pieces are fixed. Unlock at least one before looking for replacements.'
+    )}</div>`;
+    return;
+  }
+
+  button.disabled = true;
+  loading.querySelector('p').textContent = l('正在帮你排替换顺序...','正在幫你排替換順序...','Planning the replacement order...');
+  loading.classList.add('show');
+  loading.setAttribute('aria-busy', 'true');
+  saveUpgradeDraft();
+
+  setTimeout(() => {
+    try {
+      const analysis = analyzeUpgradeCandidates(
+        upgradeBuildState.map(piece => ({ ...piece })),
+        targets,
+        fragments,
+        reassignModifiers
+      );
+      renderUpgradeAnalysis(analysis, true);
+      messages.innerHTML = `<div class="msg info">${icon('check')}${analysis.baseline.metrics.allReached
+        ? l('算好了：现在这套不用换护甲。','算好了：目前這套不用換防具。','Done: you can keep the current armor.')
+        : (analysis.plan
+          ? (analysis.plan.metrics.allReached
+            ? l(`算好了：换 ${analysis.plan.replacementCount} 件就能达标。`, `算好了：換 ${analysis.plan.replacementCount} 件就能達標。`, `Done: replace ${analysis.plan.replacementCount} piece(s) to meet every target.`)
+            : l(`算好了：最接近的方案还差 ${analysis.plan.metrics.shortfall} 点。`, `算好了：最接近的方案還差 ${analysis.plan.metrics.shortfall} 點。`, `Done: the closest setup is still ${analysis.plan.metrics.shortfall} points short.`))
+          : l('没有找到能缩小缺口的替换方案。','沒有找到能縮小缺口的替換方案。','No replacement plan reduces the gap.'))}</div>`;
+    } finally {
+      button.disabled = false;
+      loading.classList.remove('show');
+      loading.setAttribute('aria-busy', 'false');
+      loading.querySelector('p').textContent = t('calculating');
+    }
+  }, 30);
+}
+
+// ============================================================
 // SAVED BUILDS (localStorage)
 // ============================================================
 
@@ -5576,14 +7527,17 @@ document.getElementById('inputCard').addEventListener('input', () => {
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();
+  saveUpgradeDraft();
 });
 document.getElementById('inputCard').addEventListener('change', () => {
   scheduleRealtimeRanges();
   saveCurrentDraft();
+  saveUpgradeDraft();
 });
 updateBudget();
 loadCurrentDraft();
 renderSavedBuilds();
+initializeUpgradeOptimizer();
 </script>
 </body>
 </html>
