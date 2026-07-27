@@ -1469,38 +1469,107 @@
     font-variant-numeric: tabular-nums;
   }
   .budget-balance {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 11px 13px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 11px;
+    padding: 13px 14px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-size: .79rem;
-    line-height: 1.55;
+    line-height: 1.45;
   }
   .budget-balance > .icon {
     flex: none;
-    margin-top: .18em;
+    margin-top: 3px;
+  }
+  .budget-balance-content {
+    min-width: 0;
+  }
+  .budget-balance-head,
+  .budget-balance-foot,
+  .budget-equation {
+    display: flex;
+    align-items: center;
+  }
+  .budget-balance-head {
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .budget-equation {
+    min-width: 0;
+    gap: 6px;
+    color: var(--text-dim);
+  }
+  .budget-equation strong {
+    color: var(--text);
+    font-size: .9rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .budget-equation-arrow {
+    color: var(--text-muted);
+  }
+  .budget-delta {
+    flex: none;
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: .72rem;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+  }
+  .budget-balance-foot {
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px solid color-mix(in oklab, currentColor 12%, transparent);
+  }
+  .budget-guidance {
+    color: var(--text-dim);
   }
   .budget-balance.is-health {
     border-color: color-mix(in oklab, var(--health) 34%, var(--border));
     background: color-mix(in oklab, var(--health) 10%, var(--card));
   }
   .budget-balance.is-health > .icon { color: var(--health); }
+  .budget-balance.is-health .budget-delta {
+    background: color-mix(in oklab, var(--health) 16%, transparent);
+    color: var(--health);
+  }
   .budget-balance.is-warning {
     border-color: color-mix(in oklab, var(--warning) 34%, var(--border));
     background: color-mix(in oklab, var(--warning) 9%, var(--card));
   }
   .budget-balance.is-warning > .icon { color: var(--warning); }
+  .budget-balance.is-warning .budget-delta {
+    background: color-mix(in oklab, var(--warning) 16%, transparent);
+    color: var(--warning);
+  }
   .budget-balance.is-success {
     border-color: color-mix(in oklab, var(--success) 34%, var(--border));
     background: color-mix(in oklab, var(--success) 9%, var(--card));
   }
   .budget-balance.is-success > .icon { color: var(--success); }
+  .budget-balance.is-success .budget-delta {
+    background: color-mix(in oklab, var(--success) 16%, transparent);
+    color: var(--success);
+  }
   .budget-fix-btn {
-    margin-top: 7px;
+    flex: none;
+    margin: 0;
     padding: 6px 10px;
     font-size: .72rem;
+  }
+  @media (max-width: 620px) {
+    .budget-balance-head,
+    .budget-balance-foot {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+    .budget-fix-btn {
+      width: 100%;
+      justify-content: center;
+    }
   }
   .minimum-details {
     border-top: 1px solid var(--border);
@@ -2975,6 +3044,71 @@ function adjFragment(stat, delta) {
 function getVal(id) { return parseInt(document.getElementById(id)?.value) || 0; }
 function getFragVal(stat) { return parseInt(document.getElementById('fragVal_' + stat)?.textContent) || 0; }
 
+function getArmorRequirement(target, fragment) {
+  return target === 0 ? 0 : Math.max(0, target - fragment);
+}
+
+// Find an exact budget match while ensuring every value changed by the
+// automatic action lands on a multiple of 5. A small dynamic program lets the
+// reductions stay balanced without falling back to one-point adjustments.
+function getBalancedTargetPlan(budget) {
+  const targets = Object.fromEntries(STATS.map(s => [s, getVal('target_' + s)]));
+  const fragments = Object.fromEntries(STATS.map(s => [s, getFragVal(s)]));
+  const armorNeeded = STATS.reduce(
+    (sum, s) => sum + getArmorRequirement(targets[s], fragments[s]), 0);
+  const requiredChange = Math.abs(armorNeeded - budget);
+  if (requiredChange === 0) return targets;
+
+  const trim = armorNeeded > budget;
+  const editable = STATS.filter(s =>
+    !document.getElementById('targetLock_' + s)?.checked && targets[s] > 0);
+  if (editable.length === 0) return null;
+
+  let states = new Map([[0, { values: {}, squareCost: 0, maxChange: 0 }]]);
+  for (const stat of editable) {
+    const current = targets[stat];
+    const currentRequirement = getArmorRequirement(current, fragments[stat]);
+    const candidates = [{ target: current, change: 0, progress: 0 }];
+    const first = trim
+      ? Math.floor((current - 1) / 5) * 5
+      : Math.ceil((current + 1) / 5) * 5;
+    const limit = trim ? 0 : 100;
+
+    for (let value = first; trim ? value >= limit : value <= limit; value += trim ? -5 : 5) {
+      const nextRequirement = getArmorRequirement(value, fragments[stat]);
+      const progress = trim
+        ? currentRequirement - nextRequirement
+        : nextRequirement - currentRequirement;
+      if (progress <= 0 || progress > requiredChange) continue;
+      candidates.push({ target: value, change: Math.abs(value - current), progress });
+    }
+
+    const nextStates = new Map();
+    for (const [achieved, state] of states) {
+      for (const candidate of candidates) {
+        const nextAchieved = achieved + candidate.progress;
+        if (nextAchieved > requiredChange) continue;
+        const nextState = {
+          values: { ...state.values, [stat]: candidate.target },
+          squareCost: state.squareCost + candidate.change * candidate.change,
+          maxChange: Math.max(state.maxChange, candidate.change),
+        };
+        const previous = nextStates.get(nextAchieved);
+        if (!previous ||
+            nextState.squareCost < previous.squareCost ||
+            (nextState.squareCost === previous.squareCost &&
+             nextState.maxChange < previous.maxChange)) {
+          nextStates.set(nextAchieved, nextState);
+        }
+      }
+    }
+    states = nextStates;
+  }
+
+  const exact = states.get(requiredChange);
+  return exact ? { ...targets, ...exact.values } : null;
+}
+
 function updateBudget() {
   const n5 = getVal('numPlus5');
   const n10 = getVal('numPlus10');
@@ -3000,44 +3134,57 @@ function updateBudget() {
   const diff = armorNeeded - budget;
   const sumEl = document.getElementById('targetSumDisplay');
   if (targetSum > 0) {
-    // The solver needs armorNeeded === budget. Rather than telling the user to
-    // do the arithmetic, offer the fix as a button.
+    const balancePlan = diff === 0 ? null : getBalancedTargetPlan(budget);
     const fixBtn = diff === 0 ? '' :
-      `<button class="btn budget-fix-btn" onclick="balanceTargetsToBudget()">`
+      `<button class="btn budget-fix-btn" onclick="balanceTargetsToBudget()"${balancePlan ? '' : ' disabled'}>`
       + `${icon('refresh')}${l(
-          diff > 0 ? `自动降低 ${diff} 点` : `自动补足 ${-diff} 点`,
-          diff > 0 ? `自動降低 ${diff} 點` : `自動補足 ${-diff} 點`,
-          diff > 0 ? `Trim ${diff} points` : `Fill ${-diff} points`
+          diff > 0 ? '自动降低至预算' : '自动补足至预算',
+          diff > 0 ? '自動降低至預算' : '自動補足至預算',
+          diff > 0 ? 'Trim to budget' : 'Fill to budget'
         )}</button>`;
 
-    let tone, mark, body;
+    let tone, mark, deltaLabel, guidance;
     if (diff > 0) {
       tone = 'health';
       mark = 'block';
-      body = l(
-        `护甲需提供 <strong>${armorNeeded}</strong> / 预算 <strong>${budget}</strong><br><span style="color:var(--health);font-weight:700;">超出 ${diff} 点</span> — 请降低目标或增加模组数量`,
-        `防具需提供 <strong>${armorNeeded}</strong> / 預算 <strong>${budget}</strong><br><span style="color:var(--health);font-weight:700;">超出 ${diff} 點</span> — 請降低目標或增加模組數量`,
-        `Armor must provide <strong>${armorNeeded}</strong> / budget <strong>${budget}</strong><br><span style="color:var(--health);font-weight:700;">${diff} points over</span> — lower targets or add mods`
+      deltaLabel = l(`超出 ${diff} 点`, `超出 ${diff} 點`, `${diff} points over`);
+      guidance = balancePlan ? l(
+        '按 5 点步进均匀降低未锁定目标',
+        '按 5 點步進平均降低未鎖定目標',
+        'Evenly trims unlocked targets in steps of 5'
+      ) : l(
+        '锁定项或预算尾数导致无法按 5 点步进自动匹配',
+        '鎖定項或預算尾數導致無法按 5 點步進自動匹配',
+        'Locks or the budget remainder prevent an exact step-of-5 match'
       );
     } else if (diff < 0) {
       tone = 'warning';
       mark = 'warn';
-      body = l(
-        `护甲需提供 <strong>${armorNeeded}</strong> / 预算 <strong>${budget}</strong><br><span style="color:var(--warning);font-weight:700;">低于 ${-diff} 点</span> — 还有点数未使用`,
-        `防具需提供 <strong>${armorNeeded}</strong> / 預算 <strong>${budget}</strong><br><span style="color:var(--warning);font-weight:700;">低於 ${-diff} 點</span> — 尚有數值未使用`,
-        `Armor must provide <strong>${armorNeeded}</strong> / budget <strong>${budget}</strong><br><span style="color:var(--warning);font-weight:700;">${-diff} points under</span> — some points remain unused`
+      deltaLabel = l(`剩余 ${-diff} 点`, `剩餘 ${-diff} 點`, `${-diff} points unused`);
+      guidance = balancePlan ? l(
+        '按 5 点步进均匀补足未锁定目标',
+        '按 5 點步進平均補足未鎖定目標',
+        'Evenly fills unlocked targets in steps of 5'
+      ) : l(
+        '锁定项或预算尾数导致无法按 5 点步进自动匹配',
+        '鎖定項或預算尾數導致無法按 5 點步進自動匹配',
+        'Locks or the budget remainder prevent an exact step-of-5 match'
       );
     } else {
       tone = 'success';
       mark = 'check';
-      body = l(
-        `护甲需提供 <strong>${armorNeeded}</strong> = 预算 <strong>${budget}</strong>，刚好`,
-        `防具需提供 <strong>${armorNeeded}</strong> = 預算 <strong>${budget}</strong>，剛好`,
-        `Armor must provide <strong>${armorNeeded}</strong> = budget <strong>${budget}</strong>, exact`
-      );
+      deltaLabel = l('刚好匹配', '剛好匹配', 'Exact match');
+      guidance = l('目标总值与当前预算一致', '目標總值與目前預算一致', 'Targets match the current budget');
     }
     sumEl.innerHTML = `<div class="budget-balance is-${tone}">`
-      + `${icon(mark)}<div>${body}${fixBtn}</div></div>`;
+      + `${icon(mark)}<div class="budget-balance-content">`
+      + `<div class="budget-balance-head"><div class="budget-equation">`
+      + `<span>${l('护甲需求', '防具需求', 'Armor need')}</span><strong>${armorNeeded}</strong>`
+      + `<span class="budget-equation-arrow" aria-hidden="true">→</span>`
+      + `<span>${l('预算', '預算', 'Budget')}</span><strong>${budget}</strong>`
+      + `</div><span class="budget-delta">${deltaLabel}</span></div>`
+      + `<div class="budget-balance-foot"><span class="budget-guidance">${guidance}</span>${fixBtn}</div>`
+      + `</div></div>`;
     sumEl.style.cssText = 'display:block;';
   } else {
     sumEl.style.display = 'none';
@@ -3142,39 +3289,8 @@ function balanceTargetsToBudget() {
   const n3 = document.getElementById('usePlus3')?.checked ? (getPlus3Count() || 0) : 0;
   const budget = 450 + n3 * 3 + n5 * 5 + n10 * 10;
 
-  const targets = {};
-  const frags = {};
-  let armorNeeded = 0;
-  for (const s of STATS) {
-    targets[s] = getVal('target_' + s);
-    frags[s] = getFragVal(s);
-    armorNeeded += (targets[s] === 0 || targets[s] - frags[s] < 0) ? 0 : targets[s] - frags[s];
-  }
-
-  // Stats we may touch: unlocked, and non-zero (zero means "don't care").
-  const editable = STATS.filter(s =>
-    !document.getElementById('targetLock_' + s)?.checked && targets[s] > 0);
-  if (editable.length === 0) return;
-
-  let remaining = armorNeeded - budget; // >0 means trim, <0 means add
-  // Round-robin one point at a time so the surplus spreads evenly and every
-  // stat stays inside its own limits.
-  for (let pass = 0; pass < 400 && remaining !== 0; pass++) {
-    let moved = false;
-    for (const s of editable) {
-      if (remaining === 0) break;
-      const step = remaining > 0 ? -1 : 1;
-      const next = targets[s] + step;
-      if (next < 0 || next > 200) continue;
-      // Only points above the fragment floor count against the armor budget.
-      const delta = Math.max(0, next - frags[s]) - Math.max(0, targets[s] - frags[s]);
-      if (delta === 0) continue;
-      targets[s] = next;
-      remaining += delta;
-      moved = true;
-    }
-    if (!moved) break;
-  }
+  const targets = getBalancedTargetPlan(budget);
+  if (!targets) return;
 
   for (const s of STATS) {
     const input = document.getElementById('target_' + s);
