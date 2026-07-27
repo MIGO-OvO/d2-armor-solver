@@ -1,8 +1,0 @@
-{
-  "files": [
-    "destiny2-armor-solver.html"
-  ],
-  "insertBefore": "</body>",
-  "commentSyntax": "html",
-  "cspChecked": true
-}

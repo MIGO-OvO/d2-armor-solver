@@ -71,8 +71,6 @@ python -m http.server 8000
 d2-armor-solver/
 ├── destiny2-armor-solver.html  # 完整的界面、数据和求解器逻辑
 ├── PRODUCT.md                   # 产品目标与设计约束
-├── .impeccable.md               # 视觉与交互设计说明
-├── .impeccable/                 # 设计参考截图与配置
 └── README.md                    # 项目说明
 ```
 
