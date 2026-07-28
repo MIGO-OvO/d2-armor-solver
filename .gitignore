@@ -1,3 +1,10 @@
 # Local design context and visual-review artifacts
 .impeccable.md
 .impeccable/
+
+# Local build and Cloudflare Wrangler state
+dist/
+node_modules/
+.wrangler/
+.dev.vars*
+!.dev.vars.example
