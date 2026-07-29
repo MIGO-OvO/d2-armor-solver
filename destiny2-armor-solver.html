@@ -1864,6 +1864,23 @@
     line-height: 1.7;
     text-wrap: pretty;
   }
+  .upgrade-infer-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 16px;
+    align-items: end;
+    margin-top: 14px;
+    padding: 12px 0 14px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .upgrade-infer-copy { color: var(--text-dim); font-size: .8125rem; line-height: 1.6; }
+  .upgrade-infer-copy strong { color: var(--text); }
+  .upgrade-infer-grid { display: grid; grid-template-columns: repeat(6, minmax(60px, 1fr)); gap: 7px; }
+  .upgrade-infer-grid label { display: grid; gap: 4px; color: var(--text-dim); font-size: .75rem; font-weight: 650; }
+  .upgrade-infer-grid input { width: 100%; min-width: 0; min-height: 36px; padding: 7px 6px; text-align: center; }
+  .upgrade-drag-handle { color: var(--text-dim); cursor: grab; user-select: none; }
+  .upgrade-piece-row.is-dragging { opacity: .45; }
   .upgrade-live-summary {
     display: grid;
     grid-template-columns: minmax(136px, .65fr) minmax(0, 3.35fr);
@@ -2414,6 +2431,8 @@
     }
     .upgrade-recommendation { font-size: 1.5rem; }
     .upgrade-live-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .upgrade-infer-panel { grid-template-columns: 1fr; }
+    .upgrade-infer-grid { grid-template-columns: repeat(3, minmax(60px, 1fr)); }
     .upgrade-live-stat {
       padding: 10px 8px;
     }
@@ -2871,6 +2890,13 @@
       <p class="upgrade-card-copy" data-i18n="upgradeBuildDescription">
         把正在用的 5 件 T5 护甲按装备栏填好。异域和不想换的护甲记得勾选“固定”。
       </p>
+      <div class="upgrade-infer-panel">
+        <div>
+          <div class="upgrade-infer-copy"><strong>快速录入当前六维</strong>：填入游戏里看到的六维，系统会反推一套最接近的护甲框架；之后仍可逐件微调。框架顺序不确定时，可拖动装备行交换。</div>
+          <div class="upgrade-infer-grid" id="upgradeInferGrid"></div>
+        </div>
+        <button type="button" class="btn" onclick="inferUpgradeArmor()">反推护甲</button>
+      </div>
       <div class="upgrade-live-summary" id="upgradeLiveSummary" aria-live="polite" aria-atomic="true"></div>
     </div>
     <div id="upgradeBuildEditor"></div>
@@ -3481,7 +3507,10 @@ const BASE_CONFIGS = [];
 // ============================================================
 
 
-function applySingleTuning(totals, target, constraints, forcedFromHits) {
+// fixedTo pins the +5 side of a tuning mod. On armor you already own, the +5
+// stat is rolled with the piece and cannot be re-picked; only the -5 source is
+// free. Pass null (the from-scratch solver) to let both sides be chosen.
+function applySingleTuning(totals, target, constraints, forcedFromHits, fixedTo = null) {
   const hasAdvancedConstraints = (constraints?.priorityOrder?.length || 0) > 0 ||
     Object.values(constraints?.minimums || {}).some(v => v > 0) ||
     Object.values(constraints?.exact || {}).some(Boolean);
@@ -3491,12 +3520,14 @@ function applySingleTuning(totals, target, constraints, forcedFromHits) {
     for (const s of STATS) gaps[s] = totals[s] - target[s];
     let fromStat = null;
     for (const s of STATS) {
+      if (s === fixedTo) continue;
       if (hits[s] > 0 && gaps[s] > 0) { fromStat = s; hits[s]--; break; }
     }
     if (fromStat === null) {
       let bestExcess = -Infinity;
-      fromStat = STATS[0];
+      fromStat = STATS.find(s => s !== fixedTo);
       for (const s of STATS) {
+        if (s === fixedTo) continue;
         const excess = gaps[s];
         const isPriority = constraints?.priorities && constraints.priorities[s];
         const adjustedExcess = isPriority ? excess - 999 : excess;
@@ -3507,6 +3538,7 @@ function applySingleTuning(totals, target, constraints, forcedFromHits) {
         }
       }
     }
+    if (fixedTo) return { from: fromStat, to: fixedTo };
     let bestDeficit = Infinity;
     let toStat = null;
     for (const s of STATS) {
@@ -3531,12 +3563,14 @@ function applySingleTuning(totals, target, constraints, forcedFromHits) {
   const minimums = constraints?.minimums || {};
   const exact = constraints?.exact || {};
   const forcedCandidates = STATS.filter(s => (forcedFromHits[s] || 0) > 0 && totals[s] > target[s]);
-  const fromCandidates = forcedCandidates.length > 0 ? forcedCandidates : STATS;
+  const fromCandidates = (forcedCandidates.length > 0 ? forcedCandidates : STATS)
+    .filter(s => s !== fixedTo);
+  const toCandidates = fixedTo ? [fixedTo] : STATS;
   let best = null;
   let bestImprovement = -Infinity;
 
   for (const from of fromCandidates) {
-    for (const to of STATS) {
+    for (const to of toCandidates) {
       if (to === from) continue;
       const fromRank = priorityOrder.indexOf(from);
       const toRank = priorityOrder.indexOf(to);
@@ -3553,10 +3587,18 @@ function applySingleTuning(totals, target, constraints, forcedFromHits) {
       }
     }
   }
-  return best || { from: STATS[0], to: STATS[1] };
+  return best || { from: STATS.find(s => s !== fixedTo), to: fixedTo || STATS[1] };
 }
 
-function evaluateConfig(baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints) {
+// fixedTuningTargets describes armor you already own: entry i is the stat piece
+// i's tuning mod rolled on its +5 side, or null when that piece runs a +3 mod.
+// Both the +5 stat and the mode come with the piece, so only the -5 source and
+// the armor mods get re-picked. Pass null — as the from-scratch solver does — to
+// let the evaluator choose modes and both tuning sides freely, since armor being
+// farmed can roll anything.
+function evaluateConfig(
+  baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints, fixedTuningTargets = null
+) {
   const baseTotals = {};
   for (const s of STATS) baseTotals[s] = 0;
   for (let i = 0; i < 5; i++) {
@@ -3579,12 +3621,20 @@ function evaluateConfig(baseConfigs, target, numPlus5, numPlus10, numPlus3, cons
   let bestOverall = null;
   let bestScore = Infinity;
 
-  // Generate masks with exactly numPlus3 bits set
+  // Generate masks with exactly numPlus3 bits set. With fixedTuningTargets the
+  // per-piece mode is already known (null entry = that piece runs +3), so the
+  // single matching mask is used instead of trying every distribution.
   const masks = [];
-  for (let m = 0; m < 32; m++) {
-    let bits = 0;
-    for (let b = 0; b < 5; b++) if ((m >> b) & 1) bits++;
-    if (bits === numPlus3) masks.push(m);
+  if (fixedTuningTargets) {
+    let fixedMask = 0;
+    for (let i = 0; i < 5; i++) if (!fixedTuningTargets[i]) fixedMask |= (1 << i);
+    masks.push(fixedMask);
+  } else {
+    for (let m = 0; m < 32; m++) {
+      let bits = 0;
+      for (let b = 0; b < 5; b++) if ((m >> b) & 1) bits++;
+      if (bits === numPlus3) masks.push(m);
+    }
   }
   if (masks.length === 0) masks.push(0);
 
@@ -3604,7 +3654,9 @@ function evaluateConfig(baseConfigs, target, numPlus5, numPlus10, numPlus3, cons
     const hitsRemaining = { ...forcedFromHits };
     for (let i = 0; i < 5; i++) {
       if (tuningAssignments[i] !== null) continue;
-      const t = applySingleTuning(totals, target, constraints, hitsRemaining);
+      const t = applySingleTuning(
+        totals, target, constraints, hitsRemaining, fixedTuningTargets?.[i] || null
+      );
       tuningAssignments[i] = { mode: '+5-5', from: t.from, to: t.to };
       totals[t.from] -= 5;
       totals[t.to] += 5;
@@ -3678,8 +3730,15 @@ function evaluateConfig(baseConfigs, target, numPlus5, numPlus10, numPlus3, cons
         if (bestOverall.tuningAssignments[i].mode !== '+5-5') continue;
         const curFrom = bestOverall.tuningAssignments[i].from;
         const curTo = bestOverall.tuningAssignments[i].to;
-        for (const altTo of STATS) {
-          if (altTo === curTo || altTo === curFrom) continue;
+        // With a pinned +5 (owned armor) only the -5 source can be retried;
+        // otherwise the +5 target is the thing worth varying.
+        const pinnedTo = fixedTuningTargets?.[i] || null;
+        const variants = pinnedTo
+          ? STATS.filter(s => s !== curFrom && s !== pinnedTo).map(altFrom => ({ from: altFrom, to: pinnedTo }))
+          : STATS.filter(s => s !== curTo && s !== curFrom).map(altTo => ({ from: curFrom, to: altTo }));
+        for (const variant of variants) {
+          const altFrom = variant.from;
+          const altTo = variant.to;
           // Build trial totals
           const trialTotals = { ...baseTotals };
           // Apply +3 pieces
@@ -3693,7 +3752,7 @@ function evaluateConfig(baseConfigs, target, numPlus5, numPlus10, numPlus3, cons
             const t = bestOverall.tuningAssignments[j];
             if (t.mode !== '+5-5') continue;
             if (j === i) {
-              trialTotals[curFrom] -= 5;
+              trialTotals[altFrom] -= 5;
               trialTotals[altTo] += 5;
             } else {
               trialTotals[t.from] -= 5;
@@ -3728,7 +3787,7 @@ function evaluateConfig(baseConfigs, target, numPlus5, numPlus10, numPlus3, cons
             bestScore = trialScore;
             bestOverall = {
               totals: { ...trialTotals },
-              tuningAssignments: bestOverall.tuningAssignments.map((t2, j) => j === i ? { mode: '+5-5', from: curFrom, to: altTo } : { ...t2 }),
+              tuningAssignments: bestOverall.tuningAssignments.map((t2, j) => j === i ? { mode: '+5-5', from: altFrom, to: altTo } : { ...t2 }),
               modAssignments: { ...trialMods },
               score: trialScore,
             };
@@ -4404,6 +4463,7 @@ function changePageLanguage() {
   updateBudget();
   updateRealtimeRanges();
   renderSavedBuilds();
+  renderUpgradeInferInputs();
   renderUpgradeBuildEditor();
   if (lastUpgradeAnalysis) renderUpgradeAnalysis(lastUpgradeAnalysis);
   saveCurrentDraft();
@@ -6518,6 +6578,25 @@ function getUpgradeStatOptions(selectedValue, excludedValue = '') {
     .join('');
 }
 
+function updateUpgradeTuningChoice(index, value) {
+  if (value === 'plus3') {
+    updateUpgradePiece(index, 'tuningMode', 'plus3', true);
+    return;
+  }
+  const [, tuningTo] = String(value).split(':');
+  updateUpgradePiece(index, 'tuningMode', 'shift');
+  updateUpgradePiece(index, 'tuningTo', STATS.includes(tuningTo) ? tuningTo : STATS[0], true);
+}
+
+function renderUpgradeInferInputs() {
+  const grid = document.getElementById('upgradeInferGrid');
+  if (!grid) return;
+  const totals = upgradeBuildState.length === UPGRADE_SLOTS.length
+    ? finalizeUpgradeTotals(getManualUpgradeArmorTotals(upgradeBuildState), getUpgradeFragments())
+    : Object.fromEntries(STATS.map(stat => [stat, 0]));
+  grid.innerHTML = STATS.map(stat => `<label>${STAT_LABELS[stat]}<input id="upgradeInfer_${stat}" type="number" min="0" max="200" step="1" value="${totals[stat]}"></label>`).join('');
+}
+
 function renderUpgradeBuildEditor(openIndex = null) {
   const editor = document.getElementById('upgradeBuildEditor');
   if (!editor) return;
@@ -6531,14 +6610,15 @@ function renderUpgradeBuildEditor(openIndex = null) {
   editor.innerHTML = `<div class="upgrade-piece-list">${upgradeBuildState.map((piece, index) => {
     const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
     const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
-    const identity = `${getArchetypeLabel(archetype.id)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]}`;
+    const tuning = piece.tuningMode === 'plus3' ? '+3' : `+5 ${STAT_LABELS[piece.tuningTo]}`;
+    const identity = `${getArchetypeLabel(archetype.id)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${t('tuning')} ${tuning}`;
     const status = piece.exotic
       ? l('异域固定件','異域固定件','Fixed Exotic')
       : (piece.locked ? l('固定不替换','固定不替換','Fixed') : l('可替换','可替換','Replaceable'));
     const isOpen = currentlyOpen.includes(index) || (currentlyOpen.length === 0 && index === 0);
-    return `<details class="upgrade-piece-row" data-index="${index}" ${isOpen ? 'open' : ''}>
+    return `<details class="upgrade-piece-row" data-index="${index}" ondragover="event.preventDefault()" ondrop="handleUpgradeDrop(event,${index})" ${isOpen ? 'open' : ''}>
       <summary>
-        <span class="upgrade-piece-slot"><small>${String(index + 1).padStart(2, '0')}</small>${getUpgradeSlotLabel(index)}</span>
+        <span class="upgrade-piece-slot"><span class="upgrade-drag-handle" draggable="true" ondragstart="handleUpgradeDragStart(event,${index})" ondragend="handleUpgradeDragEnd(event)" title="${l('拖动交换框架','拖曳交換原型','Drag to swap archetypes')}" aria-hidden="true">⋮⋮</span><small>${String(index + 1).padStart(2, '0')}</small>${getUpgradeSlotLabel(index)}</span>
         <span class="upgrade-piece-identity">${identity}</span>
         <span class="upgrade-piece-status ${piece.locked ? 'is-locked' : ''}">${piece.locked ? icon('lock', { size:'sm' }) : ''}${status}</span>
       </summary>
@@ -6557,22 +6637,16 @@ function renderUpgradeBuildEditor(openIndex = null) {
         </label>
         <label class="input-group">
           <span>${t('tuningMod')}</span>
-          <select onchange="updateUpgradePiece(${index},'tuningMode',this.value,true)">
-            <option value="shift" ${piece.tuningMode === 'shift' ? 'selected' : ''}>+5 / -5</option>
+          <select onchange="updateUpgradeTuningChoice(${index},this.value)">
             <option value="plus3" ${piece.tuningMode === 'plus3' ? 'selected' : ''}>+3</option>
+            ${STATS.map(stat => `<option value="plus5:${stat}" ${piece.tuningMode !== 'plus3' && piece.tuningTo === stat ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
           </select>
         </label>
         ${piece.tuningMode === 'shift' ? `
         <label class="input-group">
-          <span>${l('调整来源（-5）','調整來源（-5）','Tuning source (-5)')}</span>
+          <span>${l('调整来源（-5，可自选）','調整來源（-5，可自選）','Tuning source (-5, your pick)')}</span>
           <select onchange="updateUpgradePiece(${index},'tuningFrom',this.value,true)">
-            ${getUpgradeStatOptions(piece.tuningFrom)}
-          </select>
-        </label>
-        <label class="input-group">
-          <span>${l('调整去向（+5）','調整去向（+5）','Tuning target (+5)')}</span>
-          <select onchange="updateUpgradePiece(${index},'tuningTo',this.value)">
-            ${getUpgradeStatOptions(piece.tuningTo, piece.tuningFrom)}
+            ${getUpgradeStatOptions(piece.tuningFrom, piece.tuningTo)}
           </select>
         </label>` : ''}
         <label class="input-group">
@@ -6603,6 +6677,95 @@ function renderUpgradeBuildEditor(openIndex = null) {
     </details>`;
   }).join('')}</div>`;
   updateUpgradeBudgetSummary();
+}
+
+let upgradeDragIndex = null;
+function handleUpgradeDragStart(event, index) {
+  upgradeDragIndex = index;
+  event.currentTarget.classList.add('is-dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', String(index));
+}
+function handleUpgradeDragEnd(event) {
+  event.currentTarget.classList.remove('is-dragging');
+  upgradeDragIndex = null;
+}
+function handleUpgradeDrop(event, targetIndex) {
+  event.preventDefault();
+  const sourceIndex = upgradeDragIndex ?? Number(event.dataTransfer.getData('text/plain'));
+  if (!Number.isInteger(sourceIndex) || sourceIndex === targetIndex) return;
+  [upgradeBuildState[sourceIndex], upgradeBuildState[targetIndex]] = [upgradeBuildState[targetIndex], upgradeBuildState[sourceIndex]];
+  upgradeBuildState = upgradeBuildState.map((piece, index) => normalizeUpgradePiece(piece, index));
+  saveUpgradeDraft();
+  renderUpgradeBuildEditor(targetIndex);
+}
+
+function getUpgradeInferenceBudgets(armorTotal) {
+  const current = getUpgradeModifierBudget(upgradeBuildState);
+  const candidates = [];
+  for (let numPlus3 = 0; numPlus3 <= 5; numPlus3++) {
+    for (let numPlus10 = 0; numPlus10 <= 5; numPlus10++) {
+      for (let numPlus5 = 0; numPlus5 + numPlus10 <= 5; numPlus5++) {
+        const total = 450 + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
+        const budgetChange = Math.abs(numPlus3 - current.numPlus3) +
+          Math.abs(numPlus5 - current.numPlus5) + Math.abs(numPlus10 - current.numPlus10);
+        candidates.push({ numPlus3, numPlus5, numPlus10, total, budgetChange });
+      }
+    }
+  }
+  candidates.sort((left, right) =>
+    Math.abs(left.total - armorTotal) - Math.abs(right.total - armorTotal) ||
+    left.budgetChange - right.budgetChange
+  );
+  return candidates.slice(0, 4);
+}
+
+function inferUpgradeArmor() {
+  const fragments = getUpgradeFragments();
+  const observed = Object.fromEntries(STATS.map(stat => [
+    stat, Math.max(0, Math.min(200, Number(document.getElementById(`upgradeInfer_${stat}`)?.value) || 0))
+  ]));
+  const armorTarget = Object.fromEntries(STATS.map(stat => [
+    stat, Math.max(0, observed[stat] - (fragments[stat] || 0))
+  ]));
+  const armorTotal = STATS.reduce((sum, stat) => sum + armorTarget[stat], 0);
+  const button = document.querySelector('.upgrade-infer-panel .btn');
+  const originalText = button?.textContent;
+  if (button) { button.disabled = true; button.textContent = l('反推中…','反推中…','Inferring…'); }
+
+  setTimeout(() => {
+    let best = null;
+    for (const budget of getUpgradeInferenceBudgets(armorTotal)) {
+      const result = runSolver(
+        armorTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, {}, null, { fastMode:true }
+      )[0];
+      if (!result) continue;
+      const finalTotals = finalizeUpgradeTotals(result.totals, fragments);
+      const distance = STATS.reduce((sum, stat) => sum + Math.abs(finalTotals[stat] - observed[stat]), 0);
+      if (!best || distance < best.distance || (distance === best.distance && result.score < best.result.score)) {
+        best = { result, distance };
+      }
+    }
+    if (best) {
+      upgradeBuildState = best.result.config.map((config, index) => {
+        const tuning = best.result.tuningAssignments[index];
+        const mod = best.result.modAssignments[index];
+        return normalizeUpgradePiece({
+          ...upgradeBuildState[index], archetypeId: getArchetypeIdForConfig(config), tertiary: config.tertiary,
+          tuningMode: tuning.mode === '+3' ? 'plus3' : 'shift',
+          tuningFrom: tuning.from || upgradeBuildState[index].tuningFrom,
+          tuningTo: tuning.to || upgradeBuildState[index].tuningTo,
+          armorModSize: mod?.size || 0, armorModStat: mod?.stat || upgradeBuildState[index].armorModStat,
+        }, index);
+      });
+      saveUpgradeDraft();
+      renderUpgradeBuildEditor();
+      document.getElementById('messages').innerHTML = `<div class="msg info">${icon('check')}${best.distance === 0
+        ? l('已按六维反推出一套完全匹配的护甲，可继续微调或拖动交换框架。','已依六維反推出一套完全符合的防具，可繼續微調或拖曳交換原型。','Found an exact armor match. Fine-tune it or drag rows to swap archetypes.')
+        : l(`已生成最接近的护甲，六维合计偏差 ${best.distance} 点；请按实际装备微调。`,`已產生最接近的防具，六維合計偏差 ${best.distance} 點；請依實際裝備微調。`,`Generated the closest armor match (${best.distance} total stat difference). Fine-tune it to your actual gear.`)}</div>`;
+    }
+    if (button) { button.disabled = false; button.textContent = originalText; }
+  }, 20);
 }
 
 function updateUpgradePiece(index, field, value, rerender = false) {
@@ -6748,6 +6911,7 @@ function setCalculatorMode(mode, persist = true) {
 
 function initializeUpgradeOptimizer() {
   loadUpgradeDraft();
+  renderUpgradeInferInputs();
   let storedMode = 'solve';
   try { storedMode = localStorage.getItem(CALCULATOR_MODE_STORAGE_KEY) || 'solve'; } catch (e) {}
   setCalculatorMode(storedMode, false);
@@ -6800,8 +6964,13 @@ function evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers) {
   let evaluation = manualEvaluation;
   if (reassignModifiers) {
     const budget = getUpgradeModifierBudget(pieces);
+    // Both the tuning mode and the +5 stat come with each owned piece, so they
+    // stay pinned; only the -5 source and the armor mods get re-picked.
+    const fixedTuningTargets = pieces.map(piece =>
+      piece.tuningMode === 'plus3' ? null : piece.tuningTo);
     const automaticEvaluation = evaluateConfig(
-      configs, armorTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, {}
+      configs, armorTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, {},
+      fixedTuningTargets
     );
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
     const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
@@ -6816,6 +6985,26 @@ function evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers) {
     finalTotals,
     metrics: getUpgradeMetrics(finalTotals, targets, evaluation.score),
   };
+}
+
+// A piece's identity for "do I already own this?" purposes. The +5 tuning side
+// is rolled onto the armor, so changing it means farming a new piece — it
+// belongs here alongside the archetype and tertiary stat.
+function getUpgradePieceIdentity(piece) {
+  const config = getUpgradeConfig(piece);
+  return {
+    archetype: config.archetype,
+    tertiary: config.tertiary,
+    tuningTo: piece.tuningMode === 'plus3' ? null : piece.tuningTo,
+    tuningMode: piece.tuningMode,
+  };
+}
+
+function sameUpgradeIdentity(left, right) {
+  return left.archetype === right.archetype &&
+    left.tertiary === right.tertiary &&
+    left.tuningMode === right.tuningMode &&
+    left.tuningTo === right.tuningTo;
 }
 
 function sameUpgradeConfig(left, right) {
@@ -6854,15 +7043,23 @@ function mapUpgradeConfigsToPieces(pieces, unlockedIndices, candidateConfigs) {
 function getUpgradeReplacements(beforePieces, afterPieces) {
   const replacements = [];
   for (let slotIndex = 0; slotIndex < beforePieces.length; slotIndex++) {
-    const beforeConfig = getUpgradeConfig(beforePieces[slotIndex]);
-    const afterConfig = getUpgradeConfig(afterPieces[slotIndex]);
-    if (!sameUpgradeConfig(beforeConfig, afterConfig)) {
+    const beforeIdentity = getUpgradePieceIdentity(beforePieces[slotIndex]);
+    const afterIdentity = getUpgradePieceIdentity(afterPieces[slotIndex]);
+    if (!sameUpgradeIdentity(beforeIdentity, afterIdentity)) {
       replacements.push({
         slotIndex,
         beforePiece: { ...beforePieces[slotIndex] },
         afterPiece: { ...afterPieces[slotIndex] },
-        beforeConfig,
-        afterConfig,
+        beforeConfig: getUpgradeConfig(beforePieces[slotIndex]),
+        afterConfig: getUpgradeConfig(afterPieces[slotIndex]),
+        beforeIdentity,
+        afterIdentity,
+        // The archetype and tertiary already match, so only the rolled +5 stat
+        // differs: same armor type, but a new roll has to be farmed.
+        tuningOnly: sameUpgradeConfig(
+          getUpgradeConfig(beforePieces[slotIndex]),
+          getUpgradeConfig(afterPieces[slotIndex])
+        ),
       });
     }
   }
@@ -6914,6 +7111,25 @@ function chooseUpgradeTertiaries(archetypeIndices, lockedConfigs, armorTarget) {
   return selected;
 }
 
+// Every piece variant worth trying in a replaceable slot: each tertiary stat of
+// the same archetype, crossed with each rolled +5 tuning stat (or the +3 mod).
+// The +5 stat has to be enumerated here because it cannot be re-picked later —
+// it comes with the piece.
+function getUpgradeSlotVariants(piece, slotIndex, archetypeFilter) {
+  const variants = [];
+  for (const config of BASE_CONFIGS) {
+    if (archetypeFilter && config.archetype !== archetypeFilter) continue;
+    const configured = setUpgradePieceConfig(piece, slotIndex, config);
+    variants.push(normalizeUpgradePiece({ ...configured, tuningMode: 'plus3' }, slotIndex));
+    for (const tuningTo of STATS) {
+      variants.push(normalizeUpgradePiece({
+        ...configured, tuningMode: 'shift', tuningTo,
+      }, slotIndex));
+    }
+  }
+  return variants;
+}
+
 function refineUpgradePlanPieces(pieces, unlockedIndices, targets, fragments, reassignModifiers) {
   let bestPieces = pieces.map(piece => ({ ...piece }));
   let bestEvaluation = evaluateUpgradePieces(bestPieces, targets, fragments, reassignModifiers);
@@ -6923,12 +7139,14 @@ function refineUpgradePlanPieces(pieces, unlockedIndices, targets, fragments, re
     improved = false;
     pass++;
     for (const slotIndex of unlockedIndices) {
-      const currentConfig = getUpgradeConfig(bestPieces[slotIndex]);
-      const alternatives = BASE_CONFIGS.filter(config => config.archetype === currentConfig.archetype);
-      for (const alternative of alternatives) {
-        if (sameUpgradeConfig(alternative, currentConfig)) continue;
+      const currentIdentity = getUpgradePieceIdentity(bestPieces[slotIndex]);
+      const variants = getUpgradeSlotVariants(
+        bestPieces[slotIndex], slotIndex, getUpgradeConfig(bestPieces[slotIndex]).archetype
+      );
+      for (const variant of variants) {
+        if (sameUpgradeIdentity(getUpgradePieceIdentity(variant), currentIdentity)) continue;
         const trialPieces = bestPieces.map(piece => ({ ...piece }));
-        trialPieces[slotIndex] = setUpgradePieceConfig(trialPieces[slotIndex], slotIndex, alternative);
+        trialPieces[slotIndex] = variant;
         const trialEvaluation = evaluateUpgradePieces(
           trialPieces, targets, fragments, reassignModifiers
         );
@@ -6945,22 +7163,51 @@ function refineUpgradePlanPieces(pieces, unlockedIndices, targets, fragments, re
   return { pieces: bestPieces, evaluation: bestEvaluation };
 }
 
+// Write an evaluation's tuning and mod choices back onto the pieces, so the
+// numbers we print can be reproduced by following the printed configuration.
+function applyUpgradeEvaluationToPieces(pieces, evaluation) {
+  return pieces.map((piece, index) => {
+    const tuning = evaluation.tuningAssignments[index];
+    const mod = evaluation.modAssignments[index];
+    return normalizeUpgradePiece({
+      ...piece,
+      tuningMode: tuning && tuning.mode === '+3' ? 'plus3' : 'shift',
+      tuningFrom: tuning && tuning.from ? tuning.from : piece.tuningFrom,
+      tuningTo: tuning && tuning.to ? tuning.to : piece.tuningTo,
+      armorModSize: mod ? mod.size : 0,
+      armorModStat: mod ? mod.stat : piece.armorModStat,
+    }, index);
+  });
+}
+
 function buildUpgradePlanSteps(
-  originalPieces, finalPieces, targets, fragments, reassignModifiers
+  originalPieces, finalPieces, targets, fragments, finalEvaluation
 ) {
   const remaining = getUpgradeReplacements(originalPieces, finalPieces);
   const steps = [];
-  let currentPieces = originalPieces.map(piece => ({ ...piece }));
+  // The plan's final tuning/mod layout is slotted in from the start, so each
+  // step's stats are exactly what the player sees after doing that one swap.
+  // Re-optimizing the mods per step instead would print numbers that no
+  // printed configuration can reproduce.
+  const configuredFinal = applyUpgradeEvaluationToPieces(finalPieces, finalEvaluation);
+  // Slots not yet swapped keep the piece the player actually owns — its
+  // archetype, tertiary, tuning mode, and rolled +5 — and only inherit the
+  // freely-assignable parts: the -5 source and the armor mod.
+  let currentPieces = originalPieces.map((piece, index) => normalizeUpgradePiece({
+    ...configuredFinal[index],
+    archetypeId: piece.archetypeId,
+    tertiary: piece.tertiary,
+    tuningMode: piece.tuningMode,
+    tuningTo: piece.tuningTo,
+  }, index));
 
   while (remaining.length > 0) {
     let bestChoice = null;
     for (let index = 0; index < remaining.length; index++) {
       const replacement = remaining[index];
       const trialPieces = currentPieces.map(piece => ({ ...piece }));
-      trialPieces[replacement.slotIndex] = { ...replacement.afterPiece };
-      const evaluation = evaluateUpgradePieces(
-        trialPieces, targets, fragments, reassignModifiers
-      );
+      trialPieces[replacement.slotIndex] = { ...configuredFinal[replacement.slotIndex] };
+      const evaluation = evaluateUpgradePieces(trialPieces, targets, fragments, false);
       if (!bestChoice ||
           compareUpgradeMetrics(evaluation.metrics, bestChoice.evaluation.metrics) < 0) {
         bestChoice = { index, replacement, pieces: trialPieces, evaluation };
@@ -6977,7 +7224,7 @@ function buildUpgradePlanSteps(
 }
 
 function findUpgradeCompletionPlan(
-  pieces, targets, fragments, reassignModifiers, baseline
+  pieces, targets, fragments, reassignModifiers, baseline, extraSeedPieces = []
 ) {
   const unlockedIndices = pieces
     .map((piece, index) => piece.locked ? -1 : index)
@@ -6992,13 +7239,7 @@ function findUpgradeCompletionPlan(
   const seedPlansByReplacementCount = new Map();
   let bestPlan = null;
 
-  function evaluateArchetypeSet(archetypeIndices) {
-    const candidateConfigs = chooseUpgradeTertiaries(
-      archetypeIndices, lockedConfigs, armorTarget
-    );
-    const mappedPieces = mapUpgradeConfigsToPieces(
-      pieces, unlockedIndices, candidateConfigs
-    );
+  function addSeed(mappedPieces) {
     const evaluation = evaluateUpgradePieces(
       mappedPieces, targets, fragments, reassignModifiers
     );
@@ -7017,6 +7258,13 @@ function findUpgradeCompletionPlan(
     seedPlansByReplacementCount.set(seedPlan.replacementCount, seeds);
   }
 
+  function evaluateArchetypeSet(archetypeIndices) {
+    const candidateConfigs = chooseUpgradeTertiaries(
+      archetypeIndices, lockedConfigs, armorTarget
+    );
+    addSeed(mapUpgradeConfigsToPieces(pieces, unlockedIndices, candidateConfigs));
+  }
+
   function enumerate(start, depth, archetypeIndices) {
     if (depth === unlockedIndices.length) {
       evaluateArchetypeSet(archetypeIndices);
@@ -7030,6 +7278,10 @@ function findUpgradeCompletionPlan(
   }
 
   enumerate(0, 0, []);
+  // The archetype sweep replaces every unlocked slot, so it never proposes
+  // "keep this piece's archetype, just farm a different rolled +5". Those
+  // single-slot candidates come in as extra seeds.
+  for (const seedPieces of extraSeedPieces) addSeed(seedPieces);
   for (const seeds of seedPlansByReplacementCount.values()) {
     for (const seed of seeds) {
       const refined = refineUpgradePlanPieces(
@@ -7052,7 +7304,7 @@ function findUpgradeCompletionPlan(
     return null;
   }
   bestPlan.steps = buildUpgradePlanSteps(
-    pieces, bestPlan.pieces, targets, fragments, reassignModifiers
+    pieces, bestPlan.pieces, targets, fragments, bestPlan.evaluation
   );
   return bestPlan;
 }
@@ -7064,22 +7316,25 @@ function analyzeUpgradeCandidates(pieces, targets, fragments, reassignModifiers)
   if (!baseline.metrics.allReached) {
     for (let slotIndex = 0; slotIndex < pieces.length; slotIndex++) {
       if (pieces[slotIndex].locked) continue;
-      const currentConfig = getUpgradeConfig(pieces[slotIndex]);
+      const currentIdentity = getUpgradePieceIdentity(pieces[slotIndex]);
       let bestForSlot = null;
-      for (const candidateConfig of BASE_CONFIGS) {
-        if (candidateConfig === currentConfig) continue;
+      // Every archetype, tertiary, and rolled +5 stat is a distinct piece to
+      // farm, so all three vary here.
+      for (const variant of getUpgradeSlotVariants(pieces[slotIndex], slotIndex, null)) {
+        const variantIdentity = getUpgradePieceIdentity(variant);
+        if (sameUpgradeIdentity(variantIdentity, currentIdentity)) continue;
         const trialPieces = pieces.map(piece => ({ ...piece }));
-        trialPieces[slotIndex].archetypeId = getArchetypeIdForConfig(candidateConfig);
-        trialPieces[slotIndex].tertiary = candidateConfig.tertiary;
-        trialPieces[slotIndex] = normalizeUpgradePiece(trialPieces[slotIndex], slotIndex);
+        trialPieces[slotIndex] = variant;
         const evaluation = evaluateUpgradePieces(
           trialPieces, targets, fragments, reassignModifiers
         );
         const candidate = {
           slotIndex,
           beforePiece: pieces[slotIndex],
-          afterPiece: trialPieces[slotIndex],
-          config: candidateConfig,
+          afterPiece: variant,
+          config: getUpgradeConfig(variant),
+          identity: variantIdentity,
+          tuningOnly: sameUpgradeConfig(getUpgradeConfig(variant), getUpgradeConfig(pieces[slotIndex])),
           evaluation,
           metrics: evaluation.metrics,
           effectiveGain: baseline.metrics.shortfall - evaluation.metrics.shortfall,
@@ -7095,10 +7350,15 @@ function analyzeUpgradeCandidates(pieces, targets, fragments, reassignModifiers)
   const bestCandidate = rankings[0] || null;
   const best = bestCandidate && compareUpgradeMetrics(bestCandidate.metrics, baseline.metrics) < 0
     ? bestCandidate : null;
+  // Feed the best single-slot swaps in as plan seeds so a one-piece fix — often
+  // just a different rolled +5 — is not missed by the archetype sweep.
+  const singleSwapSeeds = rankings.slice(0, 8).map(candidate =>
+    pieces.map((piece, index) => index === candidate.slotIndex
+      ? { ...candidate.afterPiece } : { ...piece }));
   const plan = baseline.metrics.allReached
     ? null
     : findUpgradeCompletionPlan(
-      pieces, targets, fragments, reassignModifiers, baseline
+      pieces, targets, fragments, reassignModifiers, baseline, singleSwapSeeds
     );
   return {
     pieces: pieces.map(piece => ({ ...piece })),
@@ -7128,6 +7388,16 @@ function formatUpgradeArmorMod(assignment) {
 function formatUpgradeConfigSummary(config) {
   const separator = l('：', '：', ': ');
   return `${getArchetypeLabel(config.archetype)} · ${l('第三', '第三', 'Tertiary')}${separator}${STAT_LABELS[config.tertiary]}`;
+}
+
+// The rolled +5 stat is part of the piece, so a swap description has to name it —
+// otherwise a "+5 stat only" replacement looks like no change at all.
+function formatUpgradePieceSummary(piece) {
+  const config = getUpgradeConfig(piece);
+  const roll = piece.tuningMode === 'plus3'
+    ? l('调谐 +3', '調諧 +3', 'tuning +3')
+    : l(`调谐 +5${STAT_LABELS[piece.tuningTo]}`, `調諧 +5${STAT_LABELS[piece.tuningTo]}`, `tuning +5 ${STAT_LABELS[piece.tuningTo]}`);
+  return `${formatUpgradeConfigSummary(config)} · ${roll}`;
 }
 
 function buildUpgradeStatComparison(analysis, afterTotals) {
@@ -7174,9 +7444,9 @@ function buildUpgradePlanFlow(analysis, plan) {
   return `<div class="upgrade-plan-flow">
     <h3>${l('替换顺序','替換順序','Replacement order')}</h3>
     <p class="upgrade-plan-copy">${l(
-      '按顺序替换。每一步列出新护甲的第三属性、调谐槽、模组和替换后的六维。',
-      '按順序替換。每一步列出新防具的第三數值、調諧欄位、模組和替換後的六維。',
-      'Replace in order. Each step shows the new tertiary stat, tuning, mod, and resulting stats.'
+      '每一步都要刷到一件新护甲：框架、第三属性和调谐 +5 属性都必须对上（+5 属性是随护甲刷出来的，装上后不能改，只有 -5 来源可选）。刷到后按这一行的调谐和模组配好，六维就是这一步显示的数值。',
+      '每一步都要刷到一件新防具：原型、第三數值和調諧 +5 數值都必須對上（+5 數值是隨防具刷出來的，裝上後不能改，只有 -5 來源可選）。取得後按這一行的調諧和模組配好，六維就是這一步顯示的數值。',
+      'Each step needs a newly farmed piece whose archetype, tertiary stat, and rolled +5 tuning stat all match — the +5 side comes with the armor and cannot be changed, only the -5 source is yours to pick. Set it up as the row shows and you get the stats listed.'
     )}</p>
     <div class="upgrade-plan-steps">${plan.steps.map((step, index) => {
       const complete = step.evaluation.metrics.allReached;
@@ -7185,11 +7455,13 @@ function buildUpgradePlanFlow(analysis, plan) {
       return `<div class="upgrade-plan-step">
         <span class="upgrade-plan-number">${index + 1}</span>
         <div class="upgrade-plan-change">
-          <strong class="upgrade-plan-slot">${getUpgradeSlotLabel(step.slotIndex)}</strong>
+          <strong class="upgrade-plan-slot">${getUpgradeSlotLabel(step.slotIndex)}${step.tuningOnly
+            ? ` · ${l('只差 +5 属性','只差 +5 數值','+5 stat only')}`
+            : ''}</strong>
           <div class="upgrade-plan-swap">
-            <span class="upgrade-plan-config upgrade-plan-config--before">${formatUpgradeConfigSummary(step.beforeConfig)}</span>
+            <span class="upgrade-plan-config upgrade-plan-config--before">${formatUpgradePieceSummary(step.beforePiece)}</span>
             <span class="upgrade-plan-arrow" aria-hidden="true">→</span>
-            <strong class="upgrade-plan-config upgrade-plan-config--after">${formatUpgradeConfigSummary(step.afterConfig)}</strong>
+            <strong class="upgrade-plan-config upgrade-plan-config--after">${formatUpgradePieceSummary(step.afterPiece)}</strong>
           </div>
         </div>
         <div class="upgrade-plan-setup">
@@ -7217,6 +7489,11 @@ function buildUpgradeAssignments(analysis, evaluation, open = false) {
         <span>${formatUpgradeTuning(evaluation.tuningAssignments[index])} · ${formatUpgradeArmorMod(evaluation.modAssignments[index])}</span>
       </div>`).join('')}
     </div>
+    <p class="upgrade-empty">${l(
+      '调谐的 +5 属性是护甲刷取时自带的，不能更改；表中只有 -5 来源和护甲模组是你可以自由分配的。',
+      '調諧的 +5 數值是防具取得時自帶的，不能更改；表中只有 -5 來源和防具模組是你可以自由分配的。',
+      'The +5 side of a tuning mod is rolled onto the armor and cannot be changed; only the -5 source and the armor mods above are yours to assign.'
+    )}</p>
   </details>`;
 }
 
@@ -7226,8 +7503,10 @@ function buildUpgradeRanking(analysis) {
     <h3>${l('如果只想先换一件','如果只想先換一件','If you only want to replace one piece first')}</h3>
     ${analysis.rankings.map((candidate, index) => `
       <div class="upgrade-ranking-row ${index === 0 ? 'is-best' : ''}">
-        <strong>#${index + 1} ${getUpgradeSlotLabel(candidate.slotIndex)}</strong>
-        <span>${getArchetypeLabel(candidate.config.archetype)} · ${t('tertiaryStat')} ${STAT_LABELS[candidate.config.tertiary]}</span>
+        <strong>#${index + 1} ${getUpgradeSlotLabel(candidate.slotIndex)}${candidate.tuningOnly
+          ? ` · ${l('只差 +5 属性','只差 +5 數值','+5 stat only')}`
+          : ''}</strong>
+        <span>${formatUpgradePieceSummary(candidate.afterPiece)}</span>
         <span>${candidate.metrics.allReached
           ? l('换这一件就够了','換這一件就夠了','This one replacement is enough')
           : l(`换完还差 ${candidate.metrics.shortfall} 点 · 少 ${candidate.effectiveGain} 点`, `換完還差 ${candidate.metrics.shortfall} 點 · 少 ${candidate.effectiveGain} 點`, `${candidate.metrics.shortfall} short · improves by ${candidate.effectiveGain}`)}</span>
@@ -7253,13 +7532,13 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
         <p class="upgrade-recommendation-copy">${l(
           enteredAlreadyReached
             ? '现在这套已经达标。下面是最后的模组分配，照着核对一遍就行。'
-            : '护甲都可以留下，把调整和属性模组按下面重新配一下就能达标。',
+            : '护甲都可以留下。按下面重新选调谐的 -5 来源、重排属性模组就能达标；调谐的 +5 属性是护甲自带的，这里没有动过。',
           enteredAlreadyReached
             ? '目前這套已經達標。下面是最後的模組分配，照著核對一遍就行。'
-            : '防具都可以留下，把調整和數值模組按下面重新配一下就能達標。',
+            : '防具都可以留下。按下面重新選調諧的 -5 來源、重排數值模組就能達標；調諧的 +5 數值是防具自帶的，這裡沒有動過。',
           enteredAlreadyReached
             ? 'This loadout already meets every target. Check the final mod setup below and you are done.'
-            : 'You can keep every armor piece. Rearrange the Tuning and stat mods as shown below to meet every target.'
+            : 'You can keep every armor piece. Re-pick each tuning mod\'s -5 source and rearrange the stat mods as shown to meet every target — the rolled +5 stats are untouched.'
         )}</p>
       </div>
       <div class="upgrade-outcome"><strong>${l('5 件都能留下','5 件都能留下','Keep all 5 pieces')}</strong><span>${l('不用再刷护甲','不用再刷防具','No armor farming needed')}</span></div>
