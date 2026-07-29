@@ -46,6 +46,32 @@ python -m http.server 8000
 
 然后访问 <http://localhost:8000/destiny2-armor-solver.html>。
 
+### Deploy with Cloudflare Wrangler
+
+项目已配置为通过 Cloudflare Workers Static Assets 部署。首次使用时安装依赖并登录 Cloudflare：
+
+```bash
+npm install
+npx wrangler login
+```
+
+本地预览：
+
+```bash
+npm run dev
+```
+
+部署到 Cloudflare：
+
+```bash
+npm run deploy
+```
+
+构建脚本会创建忽略版本控制的 `dist/` 目录，将
+`destiny2-armor-solver.html` 发布为站点根路径的 `index.html`，并复制静态资源。
+Wrangler 使用 `wrangler.jsonc` 中的项目名 `d2-armor-solver`；如该名称已被当前
+Cloudflare 账户中的其他 Worker 使用，请先修改配置中的 `name`。
+
 ## Usage
 
 ### Basic workflow
@@ -69,7 +95,11 @@ python -m http.server 8000
 
 ```text
 d2-armor-solver/
+├── scripts/
+│   └── build.mjs                # 准备 Cloudflare 部署目录
 ├── destiny2-armor-solver.html  # 完整的界面、数据和求解器逻辑
+├── package.json                 # 本地预览、构建与部署命令
+├── wrangler.jsonc               # Cloudflare Workers Static Assets 配置
 ├── PRODUCT.md                   # 产品目标与设计约束
 └── README.md                    # 项目说明
 ```

@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "d2-armor-solver",
+  "compatibility_date": "2026-07-28",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "force-trailing-slash"
+  }
+}

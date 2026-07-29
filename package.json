@@ -1,0 +1,14 @@
+{
+  "name": "d2-armor-solver",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:dry-run": "npm run build && wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "^4.114.0"
+  }
+}
