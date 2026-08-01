@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   deploy:
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -28,18 +29,30 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v6
 
-      - name: Prepare static site
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test and build
+        run: npm run check
+
+      - name: Verify Pages artifact
         shell: bash
         run: |
-          mkdir -p _site
-          cp destiny2-armor-solver.html _site/index.html
-          cp -R asset _site/asset
-          touch _site/.nojekyll
+          test -s dist/index.html
+          test -s dist/destiny2-armor-solver.html
+          test -d dist/assets
+          ! grep -q './src/app.mjs' dist/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: _site
+          path: dist
 
       - name: Deploy to GitHub Pages
         id: deployment

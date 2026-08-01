@@ -2,62 +2,12 @@
 // reproducible by following the configuration the plan prints.
 // Usage: node check-upgrade-plan.js
 const assert = require('assert');
-const fs = require('fs');
-const vm = require('vm');
 
-const EXPORTS = [
-  'STATS', 'ARCHETYPES', 'UPGRADE_SLOTS', 'normalizeUpgradePiece',
-  'getManualUpgradeArmorTotals', 'finalizeUpgradeTotals',
-  'applyUpgradeEvaluationToPieces', 'analyzeUpgradeCandidates',
-  'evaluateUpgradePieces', 'getUpgradePieceIdentity', 'sameUpgradeIdentity',
-];
-
-function stubElement(id) {
-  return {
-    id, value: '0', checked: true, hidden: false, innerHTML: '', textContent: '',
-    dataset: {}, style: {},
-    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-    setAttribute() {}, removeAttribute() {}, getAttribute: () => null,
-    appendChild() {}, addEventListener() {}, scrollIntoView() {}, focus() {},
-    querySelector: () => null, querySelectorAll: () => [], closest: () => null,
-  };
-}
-
-function loadPage(file = 'destiny2-armor-solver.html') {
-  const html = fs.readFileSync(file, 'utf8');
-  const code = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n');
-  const elements = new Map();
-  const store = new Map();
-  const sandbox = {
-    console, setTimeout, clearTimeout,
-    requestAnimationFrame: fn => fn(),
-    document: {
-      getElementById(id) {
-        if (!elements.has(id)) elements.set(id, stubElement(id));
-        return elements.get(id);
-      },
-      querySelector: () => null, querySelectorAll: () => [],
-      createElement: () => stubElement('tmp'), addEventListener() {},
-      body: { classList: { add() {}, remove() {}, toggle() {} } },
-      documentElement: { setAttribute() {}, style: {} },
-    },
-    localStorage: {
-      getItem: k => (store.has(k) ? store.get(k) : null),
-      setItem: (k, v) => store.set(k, String(v)),
-      removeItem: k => store.delete(k),
-    },
-    navigator: { language: 'zh-CN' },
-    location: { href: '', search: '' },
-    matchMedia: () => ({ matches: false, addEventListener() {} }),
-    fetch: () => Promise.reject(new Error('no network in check')),
-  };
-  sandbox.window = sandbox;
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  return vm.runInContext(`${code}\n;({ ${EXPORTS.join(', ')} });`, sandbox, { filename: 'page.js' });
-}
-
-const S = loadPage();
+(async () => {
+const S = {
+  ...(await import('./src/core/armor-model.mjs')),
+  ...(await import('./src/core/upgrade-optimizer.mjs')),
+};
 const STATS = S.STATS;
 const fmt = o => STATS.map(s => `${s}=${o[s]}`).join(' ');
 const totalsOf = (pieces, fragments) =>
@@ -223,3 +173,7 @@ for (const reassignModifiers of [false, true]) {
 })();
 
 console.log(`upgrade plan check OK (${plansChecked} plans verified)`);
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

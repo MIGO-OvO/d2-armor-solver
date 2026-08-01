@@ -2,13 +2,27 @@
   "name": "d2-armor-solver",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "dev": "npm run build && wrangler dev",
+    "dev": "vite",
+    "preview": "vite preview",
+    "dev:cloudflare": "npm run build && wrangler dev",
+    "lint": "eslint . --max-warnings 0",
+    "test": "node --test",
+    "test:upgrade": "node check-upgrade-plan.js",
+    "test:browser": "npm run build && node scripts/browser-smoke.mjs",
+    "check": "npm run lint && npm run test && npm run test:upgrade && npm run build",
     "deploy": "npm run build && wrangler deploy",
     "deploy:dry-run": "npm run build && wrangler deploy --dry-run"
   },
   "devDependencies": {
+    "eslint": "^10.8.0",
+    "globals": "^17.3.0",
+    "playwright-core": "^1.62.1",
+    "vite": "^8.2.0",
     "wrangler": "^4.114.0"
   }
 }

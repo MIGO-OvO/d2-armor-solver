@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="Destiny 2 Armor 3.0 六维属性配装、可达范围与现有护甲替换规划工具">
+<meta name="theme-color" content="#0f1117">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f1117'/%3E%3Cpath d='M15 18h34v8H36v23h-8V26H15z' fill='%23f4b53d'/%3E%3C/svg%3E">
+<title>命运2 T5配装求解器</title>
+<link rel="stylesheet" href="./src/styles/app.css">
+</head>
+<body>
+<!-- ============================================================
+     Icon sprite — UI marks. The six stat glyphs use embedded copies
+     of the transparent PNG files from asset/PNG_51px.
+     ============================================================ -->
+<svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;overflow:hidden">
+  <defs>
+    <!-- UI marks -->
+    <symbol id="i-check" viewBox="0 0 24 24">
+      <path d="M4.5 12.8 9.5 17.8 19.5 6.8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24">
+      <path d="M12 3.4 21.6 20H2.4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      <path d="M12 9.2v4.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <circle cx="12" cy="16.8" r="1.15" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-block" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.9"/>
+      <path d="M6.6 12h10.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-hint" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M12 10.6v6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <circle cx="12" cy="7.6" r="1.15" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-solve" viewBox="0 0 24 24">
+      <path d="M13.6 2.4 4.8 13.4h5.2l-1.2 8.2 9-11.2h-5.4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-save" viewBox="0 0 24 24">
+      <path d="M4.6 4.6h11.2L19.4 8.2v11.2H4.6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      <path d="M8.4 4.6v5.2h7.2V4.6M8.4 19.4v-5.6h7.2v5.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24">
+      <path d="M3 6.4h6.4l1.8 2.4H21v11.2H3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M5.4 7.2h13.2M9.6 7.2V4.8h4.8v2.4M6.9 7.2l1 12h8.2l1-12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 24 24">
+      <path d="M6.2 6.2 17.8 17.8M17.8 6.2 6.2 17.8" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M20 12a8 8 0 1 1-2.6-5.9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <path d="M20.4 3.4v4.4H16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-target" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="12" cy="12" r="1.4" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M12 2.8v3M12 18.2v3M4.5 7.6l2.6 1.5M16.9 14.9l2.6 1.5M4.5 16.4l2.6-1.5M16.9 9.1l2.6-1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24">
+      <path d="M6.4 10.8h11.2v9.2H6.4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      <path d="M8.8 10.8V7.6a3.2 3.2 0 0 1 6.4 0v3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-up" viewBox="0 0 24 24">
+      <path d="M12 19.4V5.2M5.6 11.6 12 5.2l6.4 6.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-down" viewBox="0 0 24 24">
+      <path d="M12 4.6v14.2M5.6 12.4 12 18.8l6.4-6.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-caret-up" viewBox="0 0 24 24">
+      <path d="M5.6 15.4 12 8.6l6.4 6.8Z" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-caret-down" viewBox="0 0 24 24">
+      <path d="M5.6 8.6 12 15.4l6.4-6.8Z" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24">
+      <path d="M4.4 12h15.2M13.6 5.8 19.8 12l-6.2 6.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-trend-up" viewBox="0 0 24 24">
+      <path d="M3.4 17.6 9.4 11l3.6 3.4 7.2-7.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M15.4 6.6h4.8v4.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-trend-down" viewBox="0 0 24 24">
+      <path d="M3.4 6.8 9.4 13.4l3.6-3.4 7.2 7.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M15.4 17.8h4.8V13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-free" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M9.2 16.2V7.8h5.6M9.2 12.4h4.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-dot" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="5.6" fill="currentColor"/>
+    </symbol>
+  </defs>
+</svg>
+<a class="skip-link" href="#inputCard" data-i18n="skipToTargets">跳到目标输入</a>
+<main class="container" aria-labelledby="pageTitle">
+  <div class="header">
+    <div class="language-switcher">
+      <label for="pageLanguage" data-i18n="pageLanguageLabel">网页语言</label>
+      <select id="pageLanguage" onchange="changePageLanguage()">
+        <option value="zh-chs">简体中文</option>
+        <option value="zh-cht">繁體中文</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <h1 id="pageTitle" data-i18n-html="pageHeading">命运2 <span>T5</span> 配装求解器</h1>
+    <p class="subtitle" data-i18n="pageSubtitle">设置目标属性 → 计算 5 件护甲的最佳组合 · 12 种护甲框架 · 自动分配调整</p>
+  </div>
+
+  <!-- Free Notice -->
+  <div class="notice notice--free">
+    <span class="icon-text" style="font-size:18px;font-weight:800;color:var(--success);"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-free"/></svg><span data-i18n="freeNotice">本程序完全免费</span></span>
+    <span class="icon-text" style="font-size:14px;color:var(--health);margin-left:16px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warn"/></svg><span data-i18n="fraudNotice">如果你是付费购买的，说明你被骗了！</span></span>
+  </div>
+
+  <!-- Program Introduction -->
+  <div class="card card--intro">
+    <details>
+      <summary style="cursor:pointer;font-weight:700;font-size:15px;color:var(--accent);" data-i18n="introSummary">程序介绍</summary>
+      <div style="margin-top:12px;font-size:14px;color:var(--text-dim);line-height:1.8;" data-i18n-html="introContent"></div>
+    </details>
+  </div>
+
+  <div class="solver-mode-switch" role="group" aria-label="计算模式" data-i18n-aria="calculatorModeLabel">
+    <button type="button" id="modeSolveButton" aria-pressed="true" onclick="setCalculatorMode('solve')">
+      <span data-i18n="standardModeButton">从零求解</span>
+    </button>
+    <button type="button" id="modeUpgradeButton" aria-pressed="false" onclick="setCalculatorMode('upgrade')">
+      <span data-i18n="upgradeModeButton">优化现有配装</span>
+    </button>
+  </div>
+
+  <section class="card upgrade-build-card" id="upgradeBuildCard" hidden aria-labelledby="upgradeBuildHeading">
+    <div class="upgrade-card-header">
+      <h2 id="upgradeBuildHeading" data-i18n="upgradeBuildHeading">当前五件护甲</h2>
+      <p class="upgrade-card-copy" data-i18n="upgradeBuildDescription">
+        把正在用的 5 件 T5 护甲按装备栏填好。异域和不想换的护甲记得勾选“固定”。
+      </p>
+      <div class="upgrade-infer-panel">
+        <div>
+          <div class="upgrade-infer-copy"><strong>快速录入当前六维</strong>：填入游戏里看到的六维，系统会反推一套最接近的护甲框架；之后仍可逐件微调。框架顺序不确定时，可拖动装备行交换。</div>
+          <div class="upgrade-infer-grid" id="upgradeInferGrid"></div>
+        </div>
+        <button type="button" class="btn" onclick="inferUpgradeArmor()">反推护甲</button>
+      </div>
+      <div class="upgrade-live-summary" id="upgradeLiveSummary" aria-live="polite" aria-atomic="true"></div>
+    </div>
+    <div id="upgradeBuildEditor"></div>
+    <div class="upgrade-options">
+      <label>
+        <input type="checkbox" id="upgradeReassignModifiers" checked onchange="updateUpgradeOption()">
+        <span data-i18n="upgradeReassignModifiers">允许重新分配五件护甲的调整与属性模组</span>
+      </label>
+      <div class="upgrade-budget-summary" id="upgradeBudgetSummary" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <div class="workspace-grid">
+  <div class="card card--fragments" id="fragmentCard">
+    <h2 data-i18n="fragmentsHeading">碎片属性变化</h2>
+    <div class="input-grid" id="fragmentGrid"></div>
+  </div>
+
+  <div class="card card--targets" id="inputCard">
+    <h2>
+      <span data-i18n="targetsHeading">目标六维属性</span>
+      <button class="btn target-reset-btn" type="button" onclick="resetTargetStats()">
+        <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="resetTargetsButton">恢复默认值</span>
+      </button>
+    </h2>
+    <p class="upgrade-target-hint" data-i18n="upgradeTargetHint">优化模式将每项输入视为最低目标；高于目标的属性不会判定为失败。</p>
+    <div class="input-grid" id="targetGrid"></div>
+    <div id="realtimeRangeSummary" style="margin-top:8px;display:none;" aria-live="polite"></div>
+    <div class="exotic-settings">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700;">
+        <input type="checkbox" id="useExoticMode" onchange="toggleExoticMode()" style="accent-color:var(--accent);width:17px;height:17px;">
+        <span data-i18n-html="exoticModeLabel">启用<strong style="color:var(--accent);">异域职业物品模式</strong></span>
+      </label>
+      <div id="exoticSettingsBody" style="display:none;">
+        <p style="font-size:12px;color:var(--text-dim);margin-top:6px;" data-i18n="exoticModeDescription">
+          锁定异域职业物品的主要/次要/第三属性框架，再用其余四件传说护甲计算最优解与六维理论极限。调整由求解器自动分配，无需手动指定。
+        </p>
+        <div style="font-size:12px;color:var(--text-dim);margin:6px 0 10px;" data-i18n="exoticModeDetail">
+          选择职业及左右栏特性后，程序自动锁定对应的 30/25/20 固定框架；右栏特性与主要/次要属性冲突时按游戏候补顺序取剩余属性。调整属性由求解器自动分配。
+        </div>
+        <div class="exotic-settings-grid">
+          <div class="input-group">
+            <label for="exoticClass" data-i18n="classLabel">职业</label>
+            <select id="exoticClass" onchange="updateExoticPerkOptions()"></select>
+          </div>
+          <div class="input-group">
+            <label for="exoticPrimaryPerk" data-i18n="primaryPerkLabel">主特性（左栏，决定主要/次要属性）</label>
+            <select id="exoticPrimaryPerk" onchange="updateExoticFramework()"></select>
+          </div>
+          <div class="input-group">
+            <label for="exoticSecondaryPerk" data-i18n="secondaryPerkLabel">副特性（右栏，决定第三属性）</label>
+            <select id="exoticSecondaryPerk" onchange="updateExoticFramework()"></select>
+          </div>
+        </div>
+        <div id="exoticFrameworkSummary"></div>
+      </div>
+    </div>
+    <div class="armor-budget-workbench">
+      <div class="budget-toolbar">
+        <div class="input-group">
+          <label for="numPlus5" data-i18n="plus5ModCount">+5模组数量</label>
+          <input type="number" id="numPlus5" value="0" min="0" max="5" onchange="sync5to10()">
+        </div>
+        <div class="input-group">
+          <label for="numPlus10" data-i18n="plus10ModCount">+10模组数量</label>
+          <input type="number" id="numPlus10" value="5" min="0" max="5" onchange="sync10to5()">
+        </div>
+        <div class="budget-info" id="budgetInfo" aria-live="polite"></div>
+      </div>
+      <div class="plus3-panel">
+        <label class="plus3-toggle">
+          <input type="checkbox" id="usePlus3" onchange="togglePlus3()">
+          <span data-i18n-html="plus3ModeLabel">启用调整<strong style="color:var(--accent);">+3</strong>模式（免费+3点/件）</span>
+        </label>
+        <div id="plus3CountRow" class="plus3-count">
+          <span data-i18n="selectWord">选择</span>
+          <button type="button" class="icon-btn" onclick="adjPlus3(-1)" aria-label="减少 +3 件数" title="减少 +3 件数"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-caret-down"/></svg></button>
+          <span id="plus3CountVal" class="plus3-count-value">1</span>
+          <button type="button" class="icon-btn" onclick="adjPlus3(1)" aria-label="增加 +3 件数" title="增加 +3 件数"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-caret-up"/></svg></button>
+          <span data-i18n="plus3PiecesSuffix">件护甲使用+3模式（其余用+5/-5）</span>
+        </div>
+      </div>
+      <div id="targetSumDisplay" aria-live="polite" style="display:none;"></div>
+      <div id="statMins" style="display:none;"></div>
+    </div>
+  </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn-solve" id="btnSolve" onclick="solve()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="solveButton">求解最佳配装</span></button>
+    <button class="btn-solve" id="btnUpgradeAnalyze" type="button" onclick="analyzeArmorUpgrades()" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="upgradeAnalyzeButton">分析优先替换</span></button>
+    <button class="btn" id="saveBuildButton" onclick="saveBuild()" style="margin-left:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
+  </div>
+
+  <!-- Floating jump button -->
+  <div id="floatJump" style="display:none;position:fixed;bottom:20px;right:20px;z-index:99;flex-direction:column;gap:8px;">
+    <button type="button" class="icon-btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" aria-label="返回方案列表" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="返回方案列表" data-i18n-title="backToSolutionsTitle" data-i18n-aria="backToSolutionsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg></button>
+    <button type="button" class="icon-btn" onclick="document.getElementById('compCard').scrollIntoView({behavior:'smooth'})" aria-label="跳转到配装详情" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="跳转到配装详情" data-i18n-title="jumpToDetailsTitle" data-i18n-aria="jumpToDetailsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-down"/></svg></button>
+  </div>
+
+  <div id="messages" aria-live="polite" aria-atomic="false"></div>
+
+  <section class="card upgrade-results" id="upgradeResults" hidden aria-labelledby="upgradeResultsHeading">
+    <h2 id="upgradeResultsHeading" data-i18n="upgradeResultsHeading">护甲替换分析</h2>
+    <div id="upgradeResultsBody"></div>
+  </section>
+
+  <div class="card" id="savedCard" style="display:none;">
+    <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n-html="savedBuildsHeading">已保存配装 <span style="font-size:11px;color:var(--text-dim);">（点击名称加载，点 × 删除）</span></span></h2>
+    <div id="savedBuildsList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+    <button class="btn danger" onclick="clearAllBuilds()" style="margin-top:8px;font-size:11px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span data-i18n="clearAllButton">清空全部</span></button>
+  </div>
+  <div class="loading" id="loading" role="status" aria-live="polite" aria-busy="false">
+    <div class="spinner"></div>
+    <p style="margin-top:10px;color:var(--text-dim);" data-i18n="calculating">正在计算最优配装...</p>
+  </div>
+
+  <div class="results" id="results">
+    <div class="card" id="solutionNav" style="display:none;padding:12px 24px;margin-bottom:0;border-bottom:none;border-radius:12px 12px 0 0;"></div>
+    <div class="results-main">
+    <div class="card" id="compCard" style="border-radius:0 0 12px 12px;">
+      <h2><span data-i18n="targetVsActual">目标 vs 实际</span> <button class="btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" style="font-size:11px;padding:2px 8px;float:right;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg><span data-i18n="backToSolutionsButton">返回方案列表</span></button></h2>
+      <div class="comparison" id="comparisonGrid"></div>
+      <div id="exoticRangeSummary" style="display:none;margin-bottom:14px;"></div>
+      <div style="text-align:center;margin-top:12px;font-size:13px;color:var(--text-dim);" id="scoreDisplay"></div>
+      <div id="ownedGearSection" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:none;"></div>
+    </div>
+
+    <!-- Priority Refinement (shown when solve is not perfect) -->
+    <div class="card" id="refineCard" style="display:none;">
+      <h2 data-i18n="refineHeading">优先属性与约束调整</h2>
+      <p class="refine-card-copy" data-i18n="refineDescription">
+        选择优化目标后点击下方按钮重新求解。约束条件对求解器施加硬性限制。
+      </p>
+      <div id="refineCheckboxes"></div>
+      <div class="refine-actions">
+        <button class="btn" type="button" onclick="resetConstraints()"><span data-i18n="clearAllButton">清空全部</span></button>
+        <button class="btn-solve" id="btnRefine" type="button" onclick="refineWithPriorities()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="refineButton">重新优化</span></button>
+      </div>
+      <div id="refineCost" style="margin-top:14px;font-size:13px;"></div>
+    </div>
+
+    <div class="card" id="piecesCard">
+      <h2 data-i18n="recommendedBuildHeading">推荐配装方案</h2>
+      <div id="piecesOutput"></div>
+    </div>
+
+    <div class="card" id="exoticCard" style="display:none;">
+      <h2 data-i18n="exoticRecommendationHeading">异域护甲推荐</h2>
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:14px;" data-i18n="exoticRecommendationDescription">
+        普通模式按方案推荐异域护甲框架；异域职业物品模式严格使用你锁定的属性框架。
+      </p>
+      <div id="exoticRecommendation"></div>
+    </div>
+    </div>
+  </div>
+
+  <div class="footer" data-i18n-html="footerContent">
+    <div class="footer-title">命运2 T5配装求解器 · 最终版本（马拉松杀死了命运2）</div>
+    <div class="footer-credit"><span class="footer-role">原作者</span><span>B站 UID: 57597346</span><span>QQ群: 1050912445</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者B站主页</a></div>
+    <div class="footer-credit"><span class="footer-role">贡献者</span><span>MIGO-OvO</span><span>B站 UID: 23930138</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub主页</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">B站主页</a></div>
+  </div>
+</main>
+
+<script type="module" src="./src/app.mjs"></script>
+</body>
+</html>
