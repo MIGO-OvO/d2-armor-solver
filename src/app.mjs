@@ -147,6 +147,18 @@ function adjFragment(stat, delta) {
 function getVal(id) { return parseInt(document.getElementById(id)?.value) || 0; }
 function getFragVal(stat) { return parseInt(document.getElementById('fragVal_' + stat)?.textContent) || 0; }
 
+function getTargetBudgetUsage(budget) {
+  let targetSum = 0;
+  let armorNeeded = 0;
+  for (const stat of STATS) {
+    const target = getVal('target_' + stat);
+    const fragment = getFragVal(stat);
+    targetSum += target;
+    armorNeeded += target === 0 ? 0 : Math.max(0, target - fragment);
+  }
+  return { targetSum, armorNeeded, diff: armorNeeded - budget };
+}
+
 // Find an exact budget match while ensuring every value changed by the
 // automatic action lands on a multiple of 5. A small dynamic program lets the
 // reductions stay balanced without falling back to one-point adjustments.
@@ -177,16 +189,7 @@ function updateBudget() {
   );
 
   // Compute armor needed vs budget (with fragments factored in)
-  let targetSum = 0, armorNeeded = 0;
-  for (const s of STATS) {
-    const t = getVal('target_' + s);
-    const f = getFragVal(s);
-    targetSum += t;
-    let adj = t - f;
-    if (t === 0 || adj < 0) adj = 0;
-    armorNeeded += adj;
-  }
-  const diff = armorNeeded - budget;
+  const { targetSum, armorNeeded, diff } = getTargetBudgetUsage(budget);
   const sumEl = document.getElementById('targetSumDisplay');
   if (targetSum > 0) {
     const balancePlan = diff === 0 ? null : getBalancedTargetPlan(budget);
@@ -333,6 +336,7 @@ function updateBudget() {
       </div>
     </details>`;
   minsDiv.style.display = 'block';
+  if (calculatorMode === 'upgrade') updateUpgradeTargetBudget();
 }
 
 // The solver only accepts targets whose armor requirement equals the budget.
@@ -1172,7 +1176,13 @@ async function solve() {
 
 function buildRefineCard(targets, finalTotals) {
   // Grid: [stat name, exact, <=100, force minimum, current diff]
-  let html = '<div class="constraint-matrix" role="table"><div class="constraint-grid" role="rowgroup">';
+  const scrollLabel = l(
+    '横向滚动查看全部约束',
+    '橫向捲動查看全部限制',
+    'Scroll horizontally to review every constraint'
+  );
+  let html = `<div class="constraint-scroll-hint" aria-hidden="true">${icon('arrow-right', { size: 'sm' })}<span>${scrollLabel}</span></div>`;
+  html += `<div class="constraint-matrix" role="table" tabindex="0" aria-label="${scrollLabel}"><div class="constraint-grid" role="rowgroup">`;
   html += `
     <div role="columnheader">${l('属性','數值','Stat')}</div>
     <div role="columnheader">${l('精确达成','精確達成','Exact')}<small>${l('锁定当前目标','鎖定目前目標','Match target')}</small></div>
@@ -2180,8 +2190,21 @@ function renderUpgradeBuildEditor(openIndex = null) {
   editor.innerHTML = `<div class="upgrade-piece-list">${upgradeBuildState.map((piece, index) => {
     const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
     const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
-    const tuning = piece.tuningMode === 'plus3' ? '+3' : `+5 ${STAT_LABELS[piece.tuningTo]}`;
-    const identity = `${getArchetypeLabel(archetype.id)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${t('tuning')} ${tuning}`;
+    const tuning = piece.tuningMode === 'plus3'
+      ? l('调整 +3', '調整 +3', 'Tuning +3')
+      : l(
+          `调整 -5${STAT_LABELS[piece.tuningFrom]} / +5${STAT_LABELS[piece.tuningTo]}`,
+          `調整 -5${STAT_LABELS[piece.tuningFrom]} / +5${STAT_LABELS[piece.tuningTo]}`,
+          `Tuning -5 ${STAT_LABELS[piece.tuningFrom]} / +5 ${STAT_LABELS[piece.tuningTo]}`
+        );
+    const armorMod = piece.armorModSize > 0
+      ? l(
+          `模组 +${piece.armorModSize}${STAT_LABELS[piece.armorModStat]}`,
+          `模組 +${piece.armorModSize}${STAT_LABELS[piece.armorModStat]}`,
+          `Mod +${piece.armorModSize} ${STAT_LABELS[piece.armorModStat]}`
+        )
+      : l('无属性模组', '無數值模組', 'No stat mod');
+    const identity = `${getArchetypeLabel(archetype.id)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}`;
     const status = piece.exotic
       ? l('异域固定件','異域固定件','Fixed Exotic')
       : (piece.locked ? l('固定不替换','固定不替換','Fixed') : l('可替换','可替換','Replaceable'));
@@ -2190,7 +2213,7 @@ function renderUpgradeBuildEditor(openIndex = null) {
       <summary>
         <span class="upgrade-piece-slot"><span class="upgrade-drag-handle" draggable="true" ondragstart="handleUpgradeDragStart(event,${index})" ondragend="handleUpgradeDragEnd(event)" title="${l('拖动交换框架','拖曳交換原型','Drag to swap archetypes')}" aria-hidden="true">⋮⋮</span><small>${String(index + 1).padStart(2, '0')}</small>${getUpgradeSlotLabel(index)}</span>
         <span class="upgrade-piece-identity">${identity}</span>
-        <span class="upgrade-piece-status ${piece.locked ? 'is-locked' : ''}">${piece.locked ? icon('lock', { size:'sm' }) : ''}${status}</span>
+        <span class="upgrade-piece-status ${piece.locked ? 'is-locked' : ''}"><span class="upgrade-piece-status-icon" aria-hidden="true">${piece.locked ? icon('lock', { size:'sm' }) : ''}</span><span>${status}</span></span>
       </summary>
       <div class="upgrade-piece-fields">
         <label class="input-group">
@@ -2395,11 +2418,47 @@ function updateUpgradeLiveSummary() {
     </div>`;
 }
 
+function updateUpgradeTargetBudget() {
+  const summary = document.getElementById('upgradeTargetBudget');
+  if (!summary || upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
+  const modifiers = getUpgradeModifierBudget(upgradeBuildState);
+  const modifierPoints = modifiers.numPlus3 * 3 + modifiers.numPlus5 * 5 + modifiers.numPlus10 * 10;
+  const availableBudget = 450 + modifierPoints;
+  const { targetSum, armorNeeded } = getTargetBudgetUsage(availableBudget);
+  const remaining = availableBudget - armorNeeded;
+  const tone = remaining < 0 ? 'health' : (remaining > 0 ? 'warning' : 'success');
+  const mark = remaining < 0 ? 'block' : (remaining > 0 ? 'warn' : 'check');
+  const deltaLabel = remaining < 0
+    ? l(`超出 ${-remaining} 点`, `超出 ${-remaining} 點`, `${-remaining} points over`)
+    : (remaining > 0
+        ? l(`剩余 ${remaining} 点可分配`, `剩餘 ${remaining} 點可分配`, `${remaining} points available`)
+        : l('刚好用完', '剛好用完', 'Fully allocated'));
+  const guidance = l(
+    `目标合计 ${targetSum}，碎片修正后需 ${armorNeeded}；基础 450 + 当前调整/模组 ${modifierPoints}`,
+    `目標合計 ${targetSum}，碎片修正後需 ${armorNeeded}；基礎 450 + 目前調整/模組 ${modifierPoints}`,
+    `Targets total ${targetSum}; ${armorNeeded} needed after Fragments. 450 base + ${modifierPoints} from current tuning/mods.`
+  );
+
+  summary.dataset.available = String(availableBudget);
+  summary.dataset.required = String(armorNeeded);
+  summary.dataset.remaining = String(remaining);
+  summary.innerHTML = `<div class="budget-balance is-${tone}">`
+    + `${icon(mark)}<div class="budget-balance-content">`
+    + `<div class="budget-balance-head"><div class="budget-equation">`
+    + `<span>${l('目标需求', '目標需求', 'Target need')}</span><strong>${armorNeeded}</strong>`
+    + `<span class="budget-equation-arrow" aria-hidden="true">→</span>`
+    + `<span>${l('可用预算', '可用預算', 'Available budget')}</span><strong>${availableBudget}</strong>`
+    + `</div><span class="budget-delta">${deltaLabel}</span></div>`
+    + `<div class="budget-balance-foot"><span class="budget-guidance">${guidance}</span></div>`
+    + `</div></div>`;
+}
+
 function updateUpgradeBudgetSummary() {
   const summary = document.getElementById('upgradeBudgetSummary');
   if (!summary || upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
   const budget = getUpgradeModifierBudget(upgradeBuildState);
   updateUpgradeLiveSummary();
+  updateUpgradeTargetBudget();
   summary.innerHTML = l(
     `现在用了：<strong>${budget.numPlus3}</strong> 件 +3 · <strong>${budget.numPlus5}</strong> 个 +5 · <strong>${budget.numPlus10}</strong> 个 +10`,
     `目前用了：<strong>${budget.numPlus3}</strong> 件 +3 · <strong>${budget.numPlus5}</strong> 個 +5 · <strong>${budget.numPlus10}</strong> 個 +10`,
@@ -2885,6 +2944,17 @@ function renderSavedBuilds() {
   list.innerHTML = html;
 }
 
+function initializeFloatingJumpVisibility() {
+  const controls = document.getElementById('floatJump');
+  const footer = document.querySelector('.footer');
+  if (!controls || !footer || !('IntersectionObserver' in window)) return;
+
+  const observer = new IntersectionObserver(entries => {
+    controls.classList.toggle('is-footer-visible', entries[0]?.isIntersecting === true);
+  });
+  observer.observe(footer);
+}
+
 
 Object.assign(window, {
   adjFragment,
@@ -2948,3 +3018,4 @@ updateBudget();
 loadCurrentDraft();
 renderSavedBuilds();
 initializeUpgradeOptimizer();
+initializeFloatingJumpVisibility();

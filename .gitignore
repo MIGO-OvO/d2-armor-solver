@@ -1,4 +1,7 @@
-# Local design context and visual-review artifacts
+# Local agent, design context, and visual-review artifacts
+.agents/
+.audit/
+.codex/
 .impeccable.md
 .impeccable/
 

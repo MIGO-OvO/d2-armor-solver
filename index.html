@@ -177,6 +177,7 @@
     </h2>
     <p class="upgrade-target-hint" data-i18n="upgradeTargetHint">优化模式将每项输入视为最低目标；高于目标的属性不会判定为失败。</p>
     <div class="input-grid" id="targetGrid"></div>
+    <div class="upgrade-target-budget" id="upgradeTargetBudget" aria-live="polite"></div>
     <div id="realtimeRangeSummary" style="margin-top:8px;display:none;" aria-live="polite"></div>
     <div class="exotic-settings">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700;">
@@ -239,9 +240,9 @@
   </div>
 
   <div class="btn-row">
-    <button class="btn-solve" id="btnSolve" onclick="solve()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="solveButton">求解最佳配装</span></button>
+    <button class="btn-solve" id="btnSolve" type="button" onclick="solve()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="solveButton">求解最佳配装</span></button>
     <button class="btn-solve" id="btnUpgradeAnalyze" type="button" onclick="analyzeArmorUpgrades()" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="upgradeAnalyzeButton">分析优先替换</span></button>
-    <button class="btn" id="saveBuildButton" onclick="saveBuild()" style="margin-left:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
+    <button class="btn" id="saveBuildButton" type="button" onclick="saveBuild()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
   </div>
 
   <!-- Floating jump button -->
