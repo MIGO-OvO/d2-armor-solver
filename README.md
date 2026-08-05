@@ -1,196 +1,234 @@
-# Destiny 2 T5 Armor Solver
+# Destiny 2 Armor Solver v2
 
-[![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/docs/Web/HTML)
-[![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
-[![Vite 8](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Deploy GitHub Pages](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml)
 [![GitHub Pages](https://img.shields.io/badge/在线使用-GitHub%20Pages-222?logo=github)](https://migo-ovo.github.io/d2-armor-solver/)
+[![Release](https://img.shields.io/github/v/release/MIGO-OvO/d2-armor-solver?display_name=tag&sort=semver)](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-## Overview
+## Overview / 项目概览
 
-一个面向《命运 2》Armor 3.0 的 T5 六维属性配装计算器。输入目标属性、碎片变化和模组预算后，工具会枚举五件护甲的可行组合，给出实际总属性、理论可达范围和需要刷取的护甲框架。
+面向《命运 2》Armor 3.0 的六维属性配装求解器。它既能从理论框架计算目标是否可达，也能导入 DIM 护甲清单，从玩家已经拥有的装备中寻找最佳组合、保留套装约束，并列出仍需刷取的护甲。
 
-项目是一个无后端、无前端框架的结构化静态站点。源码使用原生 ES Module，Vite 负责开发服务器与生产构建；
-高开销求解在 Web Worker 中执行。界面支持简体中文、繁体中文和 English；草稿、已保存方案和已有护甲信息保存在当前浏览器的 `localStorage` 中。
+项目是完全静态的浏览器应用：无需账号、无需后端，目标属性、DIM 清单和保存的方案都只保留在当前浏览器中。
 
-## 在线使用
+## Live Site / 在线使用
 
-访问 GitHub Pages：[https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)
+访问：**[https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)**
 
-浏览器数据按站点来源隔离。在 GitHub Pages、Cloudflare 部署地址和本地开发地址之间切换时，草稿及已保存方案不会自动迁移。
+> 浏览器数据按站点来源隔离。GitHub Pages、本地开发地址和其他部署地址之间不会自动迁移草稿或已保存方案。
 
-## Features
+![Destiny 2 Armor Solver 配装工作台](./asset/web-input.png)
 
-- 输入六维目标：生命、近战、手雷、超能、职业和武器。
-- 根据碎片、+5/+10 模组以及可选的免费 +3 调整模式计算配装。
-- 可锁定单项目标，实时检查六维目标是否可达，并显示每项的可达范围。
-- 支持异域职业物品模式：选择职业及左右栏特性，锁定异域框架后计算其余四件传奇护甲。
-- 显示目标与实际属性对比、理论极限、调整建议和逐件护甲框架需求。
-- 录入已有护甲的第三属性与调整方向后，可按已拥有程度重新排序方案。
-- 提供“优化现有配装”模式：录入当前五件 T5 护甲后，逐槽位计算单件替换收益，并给出优先替换、六维变化和模组重排建议。
-- 保存、加载和清空配装方案；页面刷新后恢复当前草稿。
-- 提供键盘焦点样式、跳转链接、`aria-live` 状态播报和 `prefers-reduced-motion` 支持。
+## v2.0.0 主要更新
 
-## Getting Started
+v2 是一次围绕“真实库存配装”的主版本升级：
 
-需要 Node.js 22.13.0 或更高版本。安装开发依赖后，可使用 Vite 启动本地服务器。
+- 支持导入 DIM Armor CSV，识别职业、栏位、Tier、异域、当前穿戴、基础属性、套装和大师等级。
+- 从 DIM 显示属性中推断已安装的 `+3` / `+5/-5` 调整与 `+5` / `+10` 属性模组。
+- 新增已有护甲求解：优先使用库存中的精确匹配件，并明确显示仍需刷取的栏位、框架和调整方向。
+- 支持普通异域固定、异域职业物品，以及同名异域多件之间的最接近属性比较。
+- 支持指定套装 `4 件套`、`2 件套` 和 `2+2` 双套装约束；内置 56 组 Bungie Manifest 套装数据。
+- 已有护甲方案可导出为 DIM 配装链接，并携带护甲实例、属性模组和调整模组设置。
+- “优化现有配装”支持必须达标属性、真实护甲分布、固定件和按收益排序的替换计划。
+- 重做 DIM 导入、库存结果和替换规划界面，完善桌面端、390px 窄屏、键盘焦点和状态反馈。
+- 求解、可达范围、库存搜索和替换分析均通过 Web Worker 执行，避免阻塞主界面。
 
-## Installation
+完整版本说明见 [v2.0.0 Release](https://github.com/MIGO-OvO/d2-armor-solver/releases/tag/v2.0.0)。
 
-### Run locally
+## 核心功能
 
-克隆仓库并安装依赖：
+### 从零配装
+
+- 设置生命、近战、手雷、超能、职业和武器六维目标。
+- 应用碎片属性变化、`+5` / `+10` 属性模组和 `+3` / `+5/-5` 调整。
+- 可锁定目标，或限定方案只使用 `+5/-5` 调整。
+- 枚举五件护甲框架，显示目标差值、理论可达范围和刷取需求。
+- 支持异域职业物品的职业、左右栏特性及固定 `30/25/20` 框架。
+
+### DIM 库存规划
+
+- 按职业和 Tier 5 筛选已导入护甲。
+- 优先匹配已有护甲，再按刷取件数和属性接近程度排序方案。
+- 固定普通异域的部位与名称；同名多件会自动比较框架、第三属性和调整。
+- 为目标方案指定套装要求，并确保库存组合或刷取建议满足件数约束。
+- 查看完全由已有护甲组成的方案，或查看“已有 + 待刷”的混合规划。
+
+### 优化现有配装
+
+- 从 DIM 当前穿戴自动填入五件护甲，也可以逐件手动配置。
+- 异域或不希望替换的装备可固定保留。
+- 为关键属性勾选“必须达标”，优先满足硬约束后再比较总缺口。
+- 输出当前状态、替换后六维、逐步替换顺序、调整分配和属性模组分配。
+- 当现有装备已经足够时，会明确给出无需刷取的保留方案。
+
+### 其他能力
+
+- 简体中文、繁体中文和 English 界面。
+- 草稿、语言、模式和命名方案自动保存在 `localStorage`。
+- 支持减少动态效果、键盘操作、清晰焦点和 `aria-live` 状态播报。
+- GitHub Pages 与 Cloudflare Workers Static Assets 使用同一份生产构建。
+
+## Usage / 导入与导出 DIM
+
+### 导入护甲清单
+
+在 DIM 中依次进入：
+
+```text
+DIM → Settings → Spreadsheets → Armor → Export CSV
+```
+
+回到求解器后点击“选择 DIM CSV”。文件仅在浏览器内解析，不会上传到服务器。
+
+导入后建议依次完成：
+
+1. 选择职业并决定是否只使用 Tier 5 护甲。
+2. 如需固定普通异域，选择异域部位和名称。
+3. 设置六维目标、碎片和套装约束。
+4. 运行求解，比较已有件和待刷件。
+
+### 导出 DIM 配装
+
+完全由已有护甲组成的方案可以生成 DIM Loadout 链接。链接包含 DIM 实例 ID、属性模组和调整模组；打开前请确保浏览器已经登录 DIM。
+
+DIM 会忽略账号未拥有的模组，应用模组前护甲也需要满足游戏内能量与大师等级要求。
+
+## Getting Started / 本地运行
+
+### 环境要求
+
+- Node.js `22.13.0` 或更高版本
+- npm
+- 可选：Chrome 或 Edge，用于浏览器回归测试
+
+### Installation / 安装
 
 ```bash
 git clone https://github.com/MIGO-OvO/d2-armor-solver.git
 cd d2-armor-solver
-npm install
+npm ci
 ```
 
-Windows 用户可以直接双击项目根目录下的 `start_windows.bat`。脚本会在首次运行时自动安装依赖、启动本地服务器并打开浏览器；使用期间请保持脚本窗口开启，按 `Ctrl+C` 可停止服务器。
-
-启动开发服务器：
+### 开发服务器
 
 ```bash
 npm run dev
 ```
 
-按终端提示访问本地地址。ES Module 需要通过 HTTP 提供，因此不再支持直接双击源码 HTML；旧的 `destiny2-armor-solver.html` 路径保留为部署后的兼容跳转页。
+根据终端提示打开本地地址。Windows 用户也可以运行 `start_windows.bat`，脚本会安装缺失依赖并打开浏览器。
 
-### Deploy with GitHub Pages
+### 常用命令
 
-推送到 fork 的 `main` 分支后，`.github/workflows/deploy-pages.yml` 会自动执行以下流程：
+| 命令 | 用途 |
+| --- | --- |
+| `npm run dev` | 启动 Vite 开发服务器 |
+| `npm run build` | 生成 `dist/` 生产构建 |
+| `npm run preview` | 本地预览生产构建 |
+| `npm run lint` | 运行 ESLint |
+| `npm test` | 运行确定性算法测试 |
+| `npm run test:upgrade` | 运行随机替换规划回归测试 |
+| `npm run test:browser` | 使用本机 Chrome/Edge 验证 Worker、交互和 390px 布局 |
+| `npm run check` | 依次执行 lint、测试、替换回归和构建 |
+| `npm run deploy` | 使用 Wrangler 部署 Cloudflare 静态资源 |
 
-1. 使用 Node.js 22 安装锁定依赖；
-2. 运行 lint、单元测试和替换规划回归；
-3. 生成并检查 `dist/` 静态产物；
-4. 将同一份 `dist/` 部署到 GitHub Pages。
-
-也可以在 GitHub 仓库的 Actions 页面手动运行 `Deploy GitHub Pages` 工作流。当前 fork 的线上地址为 [https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)。
-
-### Deploy with Cloudflare Wrangler
-
-项目已配置为通过 Cloudflare Workers Static Assets 部署。首次使用时安装依赖并登录 Cloudflare：
-
-```bash
-npm install
-npx wrangler login
-```
-
-本地开发：
-
-```bash
-npm run dev
-```
-
-预览生产构建：
-
-```bash
-npm run build
-npm run preview
-```
-
-部署到 Cloudflare：
-
-```bash
-npm run deploy
-```
-
-构建脚本会创建忽略版本控制的 `dist/` 目录，输出压缩且带内容哈希的 JavaScript/CSS、独立 Worker 和兼容跳转页，并复制静态资源。
-GitHub Pages 和 Wrangler 使用完全相同的构建产物。Wrangler 按预构建静态站点处理 HTML 路径，并对不存在的资源返回 404；
-配置中的项目名为 `d2-armor-solver`，如该名称已被当前 Cloudflare 账户中的其他 Worker 使用，请先修改 `wrangler.jsonc` 中的 `name`。
-
-## Usage
-
-### Basic workflow
-
-1. 输入六维目标值；需要精确满足的属性可以勾选锁定。
-2. 填写碎片变化，并设置 +5/+10 或 +3 模式。
-3. 如需计算异域职业物品，打开异域模式并选择职业与特性。
-4. 点击“求解最佳配装”。
-5. 查看目标对比、可达范围、逐件框架需求，并在需要时录入已有护甲后重新排序。
-6. 使用“保存当前配装”保留方案。
-
-### Optimize an existing loadout
-
-1. 切换到“优化现有配装”，逐件录入护甲框架、第三属性、调整和属性模组。
-2. 将异域或不希望替换的护甲标记为固定。
-3. 填写碎片变化和希望至少达到的六维目标。
-4. 选择是否允许重新分配五件护甲的调整与属性模组。
-5. 点击“分析优先替换”，查看无需换件判断、优先替换槽位、属性差值、刷取条件和单件收益排名。
-
-## Repository Structure
+## 项目结构
 
 ```text
 d2-armor-solver/
-├── .github/workflows/deploy-pages.yml # GitHub Pages 检查与部署
-├── index.html                         # 静态页面壳与语义化内容
-├── src/
-│   ├── app.mjs                        # 浏览器 UI Adapter 与工作台编排
-│   ├── core/
-│   │   ├── armor-engine.mjs           # 三个高层算法 Interface
-│   │   ├── armor-model.mjs            # 护甲规则、目录和多语言数据
-│   │   ├── solver.mjs                 # 配装求解 Implementation
-│   │   ├── reachability.mjs           # 可达范围 Implementation
-│   │   ├── upgrade-optimizer.mjs      # 替换规划 Implementation
-│   │   ├── budget.mjs                 # 预算平衡动态规划
-│   │   └── build-repository.mjs       # 版本化浏览器存储 Module
-│   ├── workers/
-│   │   └── armor-engine.worker.mjs    # 非阻塞算法 Adapter
-│   └── styles/
-│       └── app.css                    # 保持既有级联顺序的外部样式
-├── tests/                              # Node 内置测试运行器测试
-├── scripts/build.mjs                  # Vite 构建与静态资源复制
-├── start_windows.bat                  # Windows 双击启动与自动打开浏览器
-├── vite.config.mjs                    # 相对路径静态部署配置
-├── wrangler.jsonc                     # Cloudflare 静态资源配置
-├── CONTEXT.md                         # 领域词汇与不变量
-└── docs/architecture.md               # Module、Interface 与依赖说明
+├─ .github/workflows/        # GitHub Pages 持续部署
+├─ asset/                    # 属性图标与界面截图
+├─ docs/architecture.md      # 模块、Worker 与存储边界说明
+├─ scripts/
+│  ├─ build.mjs              # 生产构建与静态资源处理
+│  ├─ browser-smoke.mjs      # 浏览器端回归检查
+│  └─ fetch-armor-mod-data.mjs
+├─ src/
+│  ├─ app.mjs                # 浏览器工作台与界面编排
+│  ├─ core/
+│  │  ├─ armor-engine.mjs    # 求解器统一接口
+│  │  ├─ dim-csv.mjs         # DIM CSV 解析与模组推断
+│  │  ├─ inventory-solver.mjs # 已有护甲组合搜索
+│  │  ├─ inventory-plan.mjs  # 已有/待刷混合规划
+│  │  ├─ armor-sets.mjs      # 套装目录与激活规则
+│  │  └─ upgrade-optimizer.mjs
+│  ├─ workers/               # 非阻塞算法 Worker
+│  └─ styles/app.css         # 响应式界面样式
+├─ tests/                    # 算法、DIM、库存和结构测试
+├─ index.html                # 应用页面
+└─ package.json
 ```
 
-## Technical Notes
+更详细的模块关系见 [架构说明](./docs/architecture.md)。
 
-- 求解器使用原生 JavaScript，在 Worker 中完成护甲框架组合、调整分配、可达范围和方案排序，避免阻塞主线程。
-- `ArmorEngine` 仅暴露标准求解、可达范围和替换分析三个高层 Interface；算法 Module 不依赖 DOM 或浏览器存储。
-- Vite 仅用于开发和构建，生产物仍是可部署到任意静态托管平台的 HTML/CSS/JavaScript。
-- 运行时不向远端发送目标属性、保存方案或已有护甲数据。
-- 清除浏览器站点数据会同时清除草稿和已保存方案。
-- `npm test` 运行快速单元测试，`npm run test:upgrade` 运行完整随机替换规划回归；
-  `npm run test:browser` 使用本机 Chrome/Edge 执行 Worker 与 390px 布局冒烟测试；
-  `npm run check` 依次执行 lint、单元测试、替换规划回归和生产构建。
+## 部署
 
-- UI 修改后仍应在桌面和 390px 窄屏下验证输入、求解、保存/加载和语言切换流程。
+推送到 `main` 后，[Deploy GitHub Pages](.github/workflows/deploy-pages.yml) 会：
 
-## Contributing
+1. 使用 Node.js 22 安装锁定依赖。
+2. 执行 `npm run check`。
+3. 验证生产构建不再引用源模块。
+4. 将 `dist/` 发布到 GitHub Pages。
 
-欢迎提交 Issue 或 Pull Request。请在变更说明中写清楚：
+Cloudflare 部署使用：
 
-- 修改影响的计算规则或 UI 流程；
-- 可复现问题的输入条件和预期结果；
-- 是否验证了简体中文、繁体中文和英文界面；
-- 是否验证了移动端布局和可达性提示。
+```bash
+npx wrangler login
+npm run deploy
+```
 
-## Reporting Issues
+`dist/`、`node_modules/`、Wrangler 本地状态和 Agent 工作文件均被排除在版本控制之外。
 
-请前往 [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues) 提交问题或建议。涉及计算错误时，请附上目标六维、碎片、模组、异域设置和实际结果。
+## 数据来源、隐私与免责声明
+
+- 护甲套装、物品哈希和模组数据来自 Bungie Manifest；生成后的静态数据随版本发布。
+- Destiny、Destiny 2、相关名称、商标和游戏美术资源归 Bungie 及其权利人所有。
+- 本项目与 Bungie、Destiny Item Manager 没有隶属或官方认可关系。
+- 应用运行时不会把目标、清单或配装发送到项目服务器。
+- 清除当前站点的浏览器数据会同时删除草稿和已保存方案。
+
+## 质量保证
+
+发布前质量门禁覆盖：
+
+- 护甲规则、预算平衡、可达范围和替换规划。
+- DIM CSV 的 BOM、引号、CRLF、多语言字段和真实属性推断。
+- 套装成员、`2 件 / 4 件 / 2+2` 约束和固定异域。
+- 同哈希不同实例、已有件优先级和待刷建议。
+- Worker 请求、模式切换、目标同步和 390px 响应式布局。
+
+## Issues and Contributing / 反馈与贡献
+
+欢迎通过 [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues) 报告问题或提出建议。计算错误请尽量附上：
+
+- 六维目标与碎片变化
+- 模组、异域和套装设置
+- DIM CSV 中相关装备的栏位与属性
+- 预期结果和实际结果
+- 浏览器与操作系统版本
+
+提交 Pull Request 前请运行：
+
+```bash
+npm run check
+npm run test:browser
+```
 
 ## License
 
-本项目使用 [MIT License](./LICENSE) 发布。你可以自由使用、复制、修改、合并、发布、分发、再许可和销售本软件，但须在副本中保留版权和许可声明。
+本项目使用 [MIT License](./LICENSE) 发布。
 
-## Acknowledgements
+## Acknowledgements / 致谢
 
-- 《命运 2》及其 Armor 3.0 游戏规则资料；
-- Web 平台原生 HTML、CSS 和 JavaScript；
-- [Shields.io](https://shields.io/) 提供 README 徽章。
+- [liheng-Huang](https://github.com/liheng-Huang) 提供初始版本与源仓库。
+- [MIGO-OvO](https://github.com/MIGO-OvO) 维护当前 fork 与后续版本。
+- [Destiny Item Manager](https://destinyitemmanager.com/) 提供护甲清单导出与 Loadout 工作流。
+- Bungie 提供 Destiny 2 Manifest 与游戏数据接口。
 
-## Contributors
+## Contact / 联系方式
 
-- **[liheng-Huang](https://github.com/liheng-Huang)** — 此前版本及源仓库作者。
-- **[MIGO-OvO](https://github.com/MIGO-OvO)** — fork 维护者及后续贡献者，负责异域装备求解、可达范围分析、响应式 UI/UX 优化、多语言、已有护甲流程、无障碍改进、项目文档和 MIT 许可等工作。
+维护者：[@MIGO-OvO](https://github.com/MIGO-OvO)
 
-## Contact
-
-项目维护者：[@MIGO-OvO](https://github.com/MIGO-OvO)
-
-如需讨论功能或计算规则，优先使用 [Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues)。
+功能和计算规则讨论请优先使用 [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues)。

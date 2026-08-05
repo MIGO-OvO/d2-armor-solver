@@ -1,6 +1,7 @@
 import {
   analyzeUpgrade,
   calculateReachability,
+  solveInventory,
   solveLoadout,
 } from "../core/armor-engine.mjs";
 
@@ -8,6 +9,7 @@ const operations = Object.freeze({
   solve: solveLoadout,
   analyzeUpgrade,
   calculateReachability,
+  solveInventory,
 });
 
 self.addEventListener("message", ({ data }) => {

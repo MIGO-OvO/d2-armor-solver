@@ -221,9 +221,12 @@ export function evaluateConfig(
   const priorityOrder = constraints?.priorityOrder || [];
   const minimums = constraints?.minimums || {};
   const exact = constraints?.exact || {};
-  // Only refine near-miss configs (score < 500) to save time
-  // Only refine reasonably close configs to save time
-  if (bestOverall && bestOverall.score > 0 && bestOverall.score < 10000) {
+  // Hard minimum/exact constraints must still get a refinement pass when their
+  // large penalty pushes the score above the normal near-miss cutoff.
+  const hasHardTargetConstraint = Object.values(minimums).some(value => value > 0)
+    || Object.values(exact).some(Boolean);
+  if (bestOverall && bestOverall.score > 0 &&
+      (bestOverall.score < 10000 || hasHardTargetConstraint)) {
     let improved = true;
     while (improved) {
       improved = false;

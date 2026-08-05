@@ -1,6 +1,7 @@
 import {
   ARCHETYPES, BASE_CONFIGS, STATS,
 } from "./armor-model.mjs";
+import { getEffectiveBaseStats, inferArchetypeFromStats } from "./dim-csv.mjs";
 import { evaluateConfig, scoreStats } from "./solver.mjs";
 
 export const UPGRADE_SLOTS = [
@@ -29,6 +30,11 @@ export function createDefaultUpgradePiece(slotIndex) {
     armorModStat: archetype.secondary,
     exotic: false,
     locked: false,
+    baseStats: null,
+    setHash: null,
+    itemName: "",
+    sourceId: null,
+    hash: null,
   };
 }
 
@@ -52,11 +58,62 @@ export function normalizeUpgradePiece(piece, slotIndex) {
   return normalized;
 }
 
+// Build a normalized upgrade piece from an imported DIM item. The real rolled
+// stat distribution and the +5 tuning side (masterwork stat) stay on the piece.
+// baseStats carries the item's ACTUAL stats, including only the masterwork
+// bonus the item really has; the full-masterwork projection is only used to
+// rank replacement candidates (inventory-solver), not the owned piece itself.
+export function createUpgradePieceFromItem(item, slotIndex) {
+  const archetypeId = item.archetypeId
+    || inferArchetypeFromStats(item.baseStats)
+    || ARCHETYPES[0].id;
+  const archetype = ARCHETYPES.find(entry => entry.id === archetypeId) || ARCHETYPES[0];
+  const tertiary = item.tertiary && item.tertiary !== archetype.primary && item.tertiary !== archetype.secondary
+    ? item.tertiary
+    : STATS.find(stat => stat !== archetype.primary && stat !== archetype.secondary);
+  const tuningMode = item.tuningMode === "plus3" ? "plus3" : "shift";
+  const tuningTo = item.tuningTo || item.tuningStat || STATS.find(stat => stat !== tertiary);
+  const tuningFrom = STATS.includes(item.tuningFrom)
+    ? item.tuningFrom
+    : STATS.find(stat => stat !== tuningTo);
+  const armorModSize = [0, 5, 10].includes(Number(item.armorModSize))
+    ? Number(item.armorModSize)
+    : 10;
+  const armorModStat = STATS.includes(item.armorModStat)
+    ? item.armorModStat
+    : archetype.secondary;
+  return normalizeUpgradePiece({
+    slot: UPGRADE_SLOTS[slotIndex].id,
+    archetypeId,
+    tertiary,
+    tuningMode,
+    tuningFrom,
+    tuningTo,
+    armorModSize,
+    armorModStat,
+    exotic: Boolean(item.exotic),
+    locked: false,
+    baseStats: { ...(
+      item.effectiveBaseStats
+      || getEffectiveBaseStats({ ...item, archetypeId, tertiary })
+    ) },
+    masterworkTier: Number(item.masterworkTier) || 0,
+    modifierInference: item.modifierInference || null,
+    setHash: item.setHash,
+    itemName: item.name,
+    sourceId: item.id,
+    hash: item.hash,
+  }, slotIndex);
+}
+
 export function getUpgradeConfig(piece) {
   const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
-  return BASE_CONFIGS.find(config =>
+  const config = BASE_CONFIGS.find(config =>
     config.archetype === archetype.name && config.tertiary === piece.tertiary
   ) || BASE_CONFIGS.find(config => config.archetype === archetype.name);
+  // Real armor imported from DIM carries its actual rolled stat distribution;
+  // otherwise the theoretical T5 archetype layout is used.
+  return piece.baseStats ? { ...config, baseStats: piece.baseStats } : config;
 }
 
 export function getArchetypeIdForConfig(config) {
@@ -102,11 +159,26 @@ export function getUpgradeModifierBudget(pieces) {
 }
 
 
-export function getUpgradeMetrics(finalTotals, targets, score = 0) {
+function normalizeRequiredStats(requiredStats = []) {
+  return [...new Set(requiredStats)].filter(stat => STATS.includes(stat));
+}
+
+function getUpgradeEvaluationConstraints(armorTarget, requiredStats) {
+  return {
+    minimums: Object.fromEntries(requiredStats.map(stat => [stat, armorTarget[stat]])),
+  };
+}
+
+export function getUpgradeMetrics(finalTotals, targets, score = 0, requiredStats = []) {
+  const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   const deficits = STATS.map(stat => Math.max(0, targets[stat] - finalTotals[stat]));
   const excesses = STATS.map(stat => Math.max(0, finalTotals[stat] - targets[stat]));
   const reachedCount = STATS.filter(stat => finalTotals[stat] >= targets[stat]).length;
   const exactCount = STATS.filter(stat => finalTotals[stat] === targets[stat]).length;
+  const requiredDeficits = normalizedRequiredStats.map(stat =>
+    Math.max(0, targets[stat] - finalTotals[stat]));
+  const requiredReachedCount = normalizedRequiredStats.filter(stat =>
+    finalTotals[stat] >= targets[stat]).length;
   return {
     allReached: reachedCount === STATS.length,
     shortfall: deficits.reduce((sum, value) => sum + value, 0),
@@ -114,11 +186,32 @@ export function getUpgradeMetrics(finalTotals, targets, score = 0) {
     reachedCount,
     exactCount,
     excess: excesses.reduce((sum, value) => sum + value, 0),
+    requiredStats: normalizedRequiredStats,
+    requiredCount: normalizedRequiredStats.length,
+    requiredAllReached: requiredReachedCount === normalizedRequiredStats.length,
+    requiredReachedCount,
+    requiredShortfall: requiredDeficits.reduce((sum, value) => sum + value, 0),
+    requiredMaxShortfall: requiredDeficits.length > 0 ? Math.max(...requiredDeficits) : 0,
     score,
   };
 }
 
 export function compareUpgradeMetrics(left, right) {
+  const hasRequiredStats = Math.max(left.requiredCount || 0, right.requiredCount || 0) > 0;
+  if (hasRequiredStats) {
+    if (left.requiredAllReached !== right.requiredAllReached) {
+      return left.requiredAllReached ? -1 : 1;
+    }
+    if (left.requiredShortfall !== right.requiredShortfall) {
+      return left.requiredShortfall - right.requiredShortfall;
+    }
+    if (left.requiredMaxShortfall !== right.requiredMaxShortfall) {
+      return left.requiredMaxShortfall - right.requiredMaxShortfall;
+    }
+    if (left.requiredReachedCount !== right.requiredReachedCount) {
+      return right.requiredReachedCount - left.requiredReachedCount;
+    }
+  }
   if (left.allReached !== right.allReached) return left.allReached ? -1 : 1;
   if (left.shortfall !== right.shortfall) return left.shortfall - right.shortfall;
   if (left.maxShortfall !== right.maxShortfall) return left.maxShortfall - right.maxShortfall;
@@ -128,12 +221,16 @@ export function compareUpgradeMetrics(left, right) {
   return left.score - right.score;
 }
 
-export function evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers) {
+export function evaluateUpgradePieces(
+  pieces, targets, fragments, reassignModifiers, requiredStats = []
+) {
+  const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   const configs = pieces.map(getUpgradeConfig);
   const armorTarget = Object.fromEntries(STATS.map(stat => [
     stat,
     Math.max(0, targets[stat] - (fragments[stat] || 0))
   ]));
+  const constraints = getUpgradeEvaluationConstraints(armorTarget, normalizedRequiredStats);
   const manualArmorTotals = getManualUpgradeArmorTotals(pieces);
   const manualEvaluation = {
     totals: manualArmorTotals,
@@ -144,7 +241,7 @@ export function evaluateUpgradePieces(pieces, targets, fragments, reassignModifi
       index,
       piece.armorModSize > 0 ? { size:piece.armorModSize, stat:piece.armorModStat } : null
     ])),
-    score: scoreStats(manualArmorTotals, armorTarget, {}),
+    score: scoreStats(manualArmorTotals, armorTarget, constraints),
   };
   let evaluation = manualEvaluation;
   if (reassignModifiers) {
@@ -154,13 +251,17 @@ export function evaluateUpgradePieces(pieces, targets, fragments, reassignModifi
     const fixedTuningTargets = pieces.map(piece =>
       piece.tuningMode === 'plus3' ? null : piece.tuningTo);
     const automaticEvaluation = evaluateConfig(
-      configs, armorTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, {},
+      configs, armorTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, constraints,
       fixedTuningTargets
     );
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
     const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
-    const manualMetrics = getUpgradeMetrics(manualFinal, targets, manualEvaluation.score);
-    const automaticMetrics = getUpgradeMetrics(automaticFinal, targets, automaticEvaluation.score);
+    const manualMetrics = getUpgradeMetrics(
+      manualFinal, targets, manualEvaluation.score, normalizedRequiredStats
+    );
+    const automaticMetrics = getUpgradeMetrics(
+      automaticFinal, targets, automaticEvaluation.score, normalizedRequiredStats
+    );
     if (compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) evaluation = automaticEvaluation;
   }
   const finalTotals = finalizeUpgradeTotals(evaluation.totals, fragments);
@@ -168,11 +269,13 @@ export function evaluateUpgradePieces(pieces, targets, fragments, reassignModifi
     ...evaluation,
     configs,
     finalTotals,
-    metrics: getUpgradeMetrics(finalTotals, targets, evaluation.score),
+    metrics: getUpgradeMetrics(
+      finalTotals, targets, evaluation.score, normalizedRequiredStats
+    ),
   };
 }
 
-function createUpgradeEvaluator(targets, fragments) {
+function createUpgradeEvaluator(targets, fragments, requiredStats) {
   const cache = new Map();
   return (pieces, reassignModifiers) => {
     const key = pieces.map(piece => [
@@ -187,7 +290,7 @@ function createUpgradeEvaluator(targets, fragments) {
     const cached = cache.get(key);
     if (cached) return cached;
     const evaluation = evaluateUpgradePieces(
-      pieces, targets, fragments, reassignModifiers
+      pieces, targets, fragments, reassignModifiers, requiredStats
     );
     cache.set(key, evaluation);
     return evaluation;
@@ -219,8 +322,19 @@ export function sameUpgradeConfig(left, right) {
 }
 
 export function setUpgradePieceConfig(piece, slotIndex, config) {
+  // Replacement candidates are freshly farmed pieces, so real-stat fields
+  // from an imported owned piece must not leak into the hypothetical config.
+  const hypothetical = { ...piece };
+  delete hypothetical.baseStats;
+  delete hypothetical.masterworkStats;
+  delete hypothetical.setHash;
+  delete hypothetical.itemName;
+  delete hypothetical.sourceId;
+  delete hypothetical.hash;
+  delete hypothetical.masterworkTier;
+  delete hypothetical.modifierInference;
   return normalizeUpgradePiece({
-    ...piece,
+    ...hypothetical,
     archetypeId: getArchetypeIdForConfig(config),
     tertiary: config.tertiary,
   }, slotIndex);
@@ -287,7 +401,10 @@ export function compareUpgradePlans(left, right) {
   return left.evaluation.score - right.evaluation.score;
 }
 
-export function chooseUpgradeTertiaries(archetypeIndices, lockedConfigs, armorTarget) {
+export function chooseUpgradeTertiaries(
+  archetypeIndices, lockedConfigs, armorTarget, requiredStats = []
+) {
+  const requiredSet = new Set(normalizeRequiredStats(requiredStats));
   const selected = [];
   const partialTotals = Object.fromEntries(STATS.map(stat => [stat, 0]));
   for (const config of lockedConfigs) {
@@ -305,7 +422,9 @@ export function chooseUpgradeTertiaries(archetypeIndices, lockedConfigs, armorTa
       for (const stat of STATS) {
         const actual = partialTotals[stat] + config.baseStats[stat];
         const difference = actual - armorTarget[stat] * ratio;
-        score += difference < 0 ? difference * difference * 3 : difference * difference;
+        const requiredWeight = requiredSet.has(stat) ? 1e6 : 1;
+        score += (difference < 0 ? difference * difference * 3 : difference * difference)
+          * requiredWeight;
       }
       if (score < bestScore) {
         bestScore = score;
@@ -438,8 +557,9 @@ export function buildUpgradePlanSteps(
 
 export function findUpgradeCompletionPlan(
   pieces, targets, fragments, reassignModifiers, baseline, extraSeedPieces = [],
+  requiredStats = [],
   evaluatePieces = (candidatePieces, shouldReassign) => evaluateUpgradePieces(
-    candidatePieces, targets, fragments, shouldReassign
+    candidatePieces, targets, fragments, shouldReassign, requiredStats
   )
 ) {
   const unlockedIndices = pieces
@@ -474,7 +594,7 @@ export function findUpgradeCompletionPlan(
 
   function evaluateArchetypeSet(archetypeIndices) {
     const candidateConfigs = chooseUpgradeTertiaries(
-      archetypeIndices, lockedConfigs, armorTarget
+      archetypeIndices, lockedConfigs, armorTarget, requiredStats
     );
     addSeed(mapUpgradeConfigsToPieces(pieces, unlockedIndices, candidateConfigs));
   }
@@ -525,8 +645,11 @@ export function findUpgradeCompletionPlan(
   return bestPlan;
 }
 
-export function analyzeUpgradeCandidates(pieces, targets, fragments, reassignModifiers) {
-  const evaluatePieces = createUpgradeEvaluator(targets, fragments);
+export function analyzeUpgradeCandidates(
+  pieces, targets, fragments, reassignModifiers, requiredStats = []
+) {
+  const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
+  const evaluatePieces = createUpgradeEvaluator(targets, fragments, normalizedRequiredStats);
   const enteredBaseline = evaluatePieces(pieces, false);
   const baseline = evaluatePieces(pieces, reassignModifiers);
   const rankings = [];
@@ -574,12 +697,14 @@ export function analyzeUpgradeCandidates(pieces, targets, fragments, reassignMod
     ? null
     : findUpgradeCompletionPlan(
       pieces, targets, fragments, reassignModifiers, baseline, singleSwapSeeds,
+      normalizedRequiredStats,
       evaluatePieces
     );
   return {
     pieces: pieces.map(piece => ({ ...piece })),
     targets: { ...targets },
     fragments: { ...fragments },
+    requiredStats: normalizedRequiredStats,
     reassignModifiers,
     enteredBaseline,
     baseline,

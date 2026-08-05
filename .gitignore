@@ -4,6 +4,7 @@
 .codex/
 .impeccable.md
 .impeccable/
+.omo/
 
 # Local build and Cloudflare Wrangler state
 dist/

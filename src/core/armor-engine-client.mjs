@@ -39,6 +39,7 @@ function run(operation, payload) {
         solve: engine.solveLoadout,
         analyzeUpgrade: engine.analyzeUpgrade,
         calculateReachability: engine.calculateReachability,
+        solveInventory: engine.solveInventory,
       };
       return localOperations[operation](payload);
     });
@@ -61,4 +62,8 @@ export function analyzeUpgradeAsync(payload) {
 
 export function calculateReachabilityAsync(payload) {
   return run("calculateReachability", payload);
+}
+
+export function solveInventoryAsync(payload) {
+  return run("solveInventory", payload);
 }

@@ -10,13 +10,16 @@ Pages, Cloudflare Static Assets, or any equivalent static host.
 
 | Module | Interface | Implementation kept behind the Interface |
 | --- | --- | --- |
-| `ArmorEngine` | `solveLoadout`, `calculateReachability`, `analyzeUpgrade` | enumeration, scoring, tuning, range dynamic programming, replacement planning |
+| `ArmorEngine` | `solveLoadout`, `calculateReachability`, `analyzeUpgrade`, `solveInventory` | enumeration, scoring, tuning, range dynamic programming, inventory search, replacement planning |
 | `Budget` | `createBalancedTargetPlan` | exact-budget dynamic programming and balanced tie-breaking |
 | `BuildRepository` | typed read/write methods for drafts, mode, language, and builds | storage keys, JSON parsing, schema version, storage errors |
+| `DIM CSV` | `parseCsv`, `normalizeDimItem`, inventory filters | CSV quoting/BOM handling, real-stat reconstruction, Tuning and Armor Mod inference |
+| `InventoryPlanner` | owned/farm plans and owned-only loadouts | slot assignment, fixed Exotic matching, set requirements, farming gaps |
+| `ArmorSets` | set lookup and active bonuses | generated Bungie Manifest catalog and localized perk text |
 | browser workbench | global action Adapter used by existing HTML handlers | DOM state, translation, rendering, mode switching |
 | Worker client | Promise-based engine calls | request IDs, structured cloning, Worker errors, inline fallback |
 
-`ArmorEngine` is intentionally deep: callers learn three request-object
+`ArmorEngine` is intentionally deep: callers learn four request-object
 Interfaces while the search Implementation stays local. The Worker and inline
 fallback are two Adapters at the execution Seam. This creates Leverage for the
 UI and tests, and Locality for future rule changes.
@@ -27,12 +30,14 @@ UI and tests, and Locality for future rule changes.
 index.html
   -> app.mjs (browser Adapter)
        -> armor-engine-client.mjs
-            -> Worker Adapter -> ArmorEngine -> solver/reachability/upgrade
-            -> inline Adapter -> ArmorEngine -> solver/reachability/upgrade
+            -> Worker Adapter -> ArmorEngine -> solver/reachability/upgrade/inventory
+            -> inline Adapter -> ArmorEngine -> solver/reachability/upgrade/inventory
        -> Budget
        -> BuildRepository -> localStorage
+       -> DIM CSV -> ArmorSets
 
 ArmorEngine -> armor model
+ArmorEngine -> InventoryPlanner -> ArmorSets
 ArmorEngine -X-> DOM / localStorage
 ```
 
@@ -41,8 +46,8 @@ state from leaking back across the Seam.
 
 ## Performance
 
-- Standard solving, priority refinement, reachability, armor inference, and
-  owned-armor analysis execute through a module Worker.
+- Standard solving, priority refinement, reachability, inventory search, armor
+  inference, and owned-armor analysis execute through a module Worker.
 - The upgrade optimizer memoizes identical piece evaluations for the lifetime
   of one analysis request; cache entries cannot leak across target/Fragment
   inputs.
@@ -69,9 +74,10 @@ origin-scoped browser data disappear.
 
 ## Styling
 
-The former inline CSS is externalized as `src/styles/app.css`. Its historical
-source order is currently load-bearing, so this refactor preserves the cascade
-exactly. Semantic CSS layering should be a separate, screenshot-backed change.
+The former inline CSS is externalized as `src/styles/app.css`. Compatibility
+styles preserve the historical cascade while workbench-specific sections own
+the DIM import, inventory results, and upgrade-planning surfaces. UI changes are
+verified at desktop and 390px widths before release.
 
 ## Commands
 

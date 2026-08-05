@@ -8,6 +8,11 @@ const algorithmModules = [
   "src/core/reachability.mjs",
   "src/core/solver.mjs",
   "src/core/upgrade-optimizer.mjs",
+  "src/core/inventory-solver.mjs",
+  "src/core/inventory-plan.mjs",
+  "src/core/dim-csv.mjs",
+  "src/core/armor-sets.mjs",
+  "src/core/armor-sets.data.mjs",
 ];
 
 test("algorithm modules stay independent from browser state", async () => {

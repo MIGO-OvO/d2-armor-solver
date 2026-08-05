@@ -25,22 +25,42 @@ import {
 import {
   analyzeUpgradeAsync,
   calculateReachabilityAsync,
+  solveInventoryAsync,
   solveLoadoutAsync,
 } from "./core/armor-engine-client.mjs";
 import {
   createBalancedTargetPlan,
 } from "./core/budget.mjs";
 import { farmabilityScore } from "./core/solver.mjs";
+import { rankInventoryPlans } from "./core/inventory-plan.mjs";
 import { buildRepository } from "./core/build-repository.mjs";
 import {
   UPGRADE_SLOTS,
+  createUpgradePieceFromItem,
   finalizeUpgradeTotals,
-  getArchetypeIdForConfig,
   getManualUpgradeArmorTotals,
   getUpgradeConfig,
   getUpgradeModifierBudget,
   normalizeUpgradePiece,
 } from "./core/upgrade-optimizer.mjs";
+import {
+  detectEquippedClass,
+  filterArmorItems,
+  normalizeDimItem,
+  parseCsv,
+  pickCurrentLoadout,
+} from "./core/dim-csv.mjs";
+import {
+  getActiveSetBonuses,
+  getArmorSetByHash,
+  getSetName,
+  getSetPieceCounts,
+} from "./core/armor-sets.mjs";
+import {
+  BALANCED_TUNING_MOD_HASH,
+  STAT_MOD_HASHES,
+  TUNING_MOD_HASH_BY_TUNING,
+} from "./core/armor-mods.data.mjs";
 
 let lastTargets = null;
 let lastFragments = null;
@@ -51,6 +71,7 @@ let allSolutions = [];
 let currentSolutionIdx = 0;
 let lastExoticSettings = null;
 let showAllSolutions = false;
+let lastInventoryPlans = [];
 
 function displayArchetypeKey(config, exoticIndex = null) {
   const freq = {};
@@ -84,16 +105,21 @@ function getUpgradeStatOptions(selectedValue, excludedValue = '') {
 // ============================================================
 
 function getStatInputHTML(prefix, stat, val) {
+  const isUpgradeRequired = upgradeRequiredStats.includes(stat);
   return `
     <div class="input-group ${prefix === 'target' ? 'target-stat-group' : ''}">
       <div class="stat-label" style="color:${STAT_COLORS[stat]};display:flex;align-items:center;justify-content:space-between;">
         <span class="icon-text stat-name target-stat-name">${icon(stat)}<span>${STAT_LABELS[stat]}</span></span>
         ${prefix === 'target' ? `<label class="lock-control">
           <input type="checkbox" id="targetLock_${stat}" aria-label="${STAT_LABELS[stat]} ${t('lock')}" style="accent-color:var(--accent);width:13px;height:13px;">${icon('lock', { size: 'sm' })}<span>${t('lock')}</span>
+        </label><label class="required-control">
+          <input type="checkbox" id="upgradeRequired_${stat}" ${isUpgradeRequired ? 'checked' : ''}
+            aria-label="${STAT_LABELS[stat]} ${t('upgradeRequiredStat')}"
+            onchange="updateUpgradeRequiredStat('${stat}',this.checked)"><span class="required-label-long">${t('upgradeRequiredStat')}</span><span class="required-label-short">${t('upgradeRequiredStatShort')}</span>
         </label>` : ''}
       </div>
       <input type="number" id="${prefix}_${stat}" value="${val||0}"${prefix === 'target' ? ` aria-describedby="rangeHint_${stat}"` : ''}
-        inputmode="numeric" min="0" max="100" aria-label="${STAT_LABELS[stat]}"
+        inputmode="numeric" min="0" max="200" aria-label="${STAT_LABELS[stat]}"
         style="border-color:${(val||0)!==0?STAT_COLORS[stat]:'var(--border)'}">
       ${prefix === 'target' ? `<div class="stat-range-hint" id="rangeHint_${stat}" aria-live="polite"></div>` : ''}
     </div>`;
@@ -124,7 +150,10 @@ function resetTargetStats() {
     }
     const lock = document.getElementById('targetLock_' + stat);
     if (lock) lock.checked = false;
+    const required = document.getElementById('upgradeRequired_' + stat);
+    if (required) required.checked = false;
   }
+  upgradeRequiredStats = [];
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();
@@ -176,10 +205,35 @@ function getBalancedTargetPlan(budget) {
   });
 }
 
+function isOnlyPlus5Tuning() {
+  return document.getElementById('onlyPlus5Tuning')?.checked === true;
+}
+
+function getEnabledPlus3Count() {
+  if (isOnlyPlus5Tuning()) return 0;
+  return document.getElementById('usePlus3')?.checked ? (getPlus3Count() || 0) : 0;
+}
+
+function syncPlus3PreferenceUI() {
+  const onlyPlus5 = isOnlyPlus5Tuning();
+  const plus3 = document.getElementById('usePlus3');
+  const countRow = document.getElementById('plus3CountRow');
+  if (plus3) {
+    plus3.disabled = onlyPlus5;
+    if (onlyPlus5) plus3.setAttribute('aria-describedby', 'onlyPlus5TuningHint');
+    else plus3.removeAttribute('aria-describedby');
+  }
+  if (countRow) {
+    countRow.style.display = !onlyPlus5 && plus3?.checked ? 'flex' : 'none';
+    countRow.setAttribute('aria-hidden', String(onlyPlus5 || !plus3?.checked));
+  }
+  document.querySelector('.plus3-panel')?.classList.toggle('is-plus5-only', onlyPlus5);
+}
+
 function updateBudget() {
   const n5 = getVal('numPlus5');
   const n10 = getVal('numPlus10');
-  const n3 = document.getElementById('usePlus3')?.checked ? (getPlus3Count() || 0) : 0;
+  const n3 = getEnabledPlus3Count();
   const budget = 450 + n3 * 3 + n5 * 5 + n10 * 10;
   const modBudget = n3 * 3 + n5 * 5 + n10 * 10;
   document.getElementById('budgetInfo').innerHTML = l(
@@ -345,7 +399,7 @@ function updateBudget() {
 function balanceTargetsToBudget() {
   const n5 = getVal('numPlus5');
   const n10 = getVal('numPlus10');
-  const n3 = document.getElementById('usePlus3')?.checked ? (getPlus3Count() || 0) : 0;
+  const n3 = getEnabledPlus3Count();
   const budget = 450 + n3 * 3 + n5 * 5 + n10 * 10;
 
   const targets = getBalancedTargetPlan(budget);
@@ -361,8 +415,16 @@ function balanceTargetsToBudget() {
 }
 
 function togglePlus3() {
-  const checked = document.getElementById('usePlus3')?.checked;
-  document.getElementById('plus3CountRow').style.display = checked ? 'flex' : 'none';
+  if (isOnlyPlus5Tuning()) document.getElementById('usePlus3').checked = false;
+  syncPlus3PreferenceUI();
+  updateBudget();
+  scheduleRealtimeRanges();
+  saveCurrentDraft();
+}
+
+function toggleOnlyPlus5Tuning() {
+  if (isOnlyPlus5Tuning()) document.getElementById('usePlus3').checked = false;
+  syncPlus3PreferenceUI();
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();
@@ -407,6 +469,7 @@ function toggleExoticMode() {
   const showSettings = enabled && calculatorMode !== 'upgrade';
   document.getElementById('exoticSettingsBody').style.display = showSettings ? 'block' : 'none';
   if (showSettings) updateExoticFramework();
+  updateInventorySolveOptions();
 }
 
 function renderExoticInputs() {
@@ -459,9 +522,10 @@ function changePageLanguage() {
   updateBudget();
   updateRealtimeRanges();
   renderSavedBuilds();
-  renderUpgradeInferInputs();
   renderUpgradeBuildEditor();
+  renderUpgradeImportPanel();
   if (lastUpgradeAnalysis) renderUpgradeAnalysis(lastUpgradeAnalysis);
+  if (lastInventoryResult?.results?.length) renderInventoryResults(lastInventoryResult);
   saveCurrentDraft();
   saveUpgradeDraft();
   if (allSolutions.length > 0 && lastTargets && lastFragments) {
@@ -544,6 +608,7 @@ let nearestTargetSuggestion = null;
 
 function collectDraftState() {
   const exotic = getExoticSettings();
+  const onlyPlus5Tuning = isOnlyPlus5Tuning();
   return {
     language: getPageLanguage(),
     targets: Object.fromEntries(STATS.map(s => [s, getVal('target_' + s)])),
@@ -552,7 +617,8 @@ function collectDraftState() {
     fragments: Object.fromEntries(STATS.map(s => [s, getFragVal(s)])),
     numPlus5: getVal('numPlus5'),
     numPlus10: getVal('numPlus10'),
-    n3Enabled: document.getElementById('usePlus3')?.checked || false,
+    onlyPlus5Tuning,
+    n3Enabled: !onlyPlus5Tuning && (document.getElementById('usePlus3')?.checked || false),
     numPlus3: getPlus3Count(),
     exotic: exotic ? {
       enabled: true,
@@ -598,9 +664,10 @@ function loadCurrentDraft() {
   }
   if (draft.numPlus5 !== undefined) document.getElementById('numPlus5').value = draft.numPlus5;
   if (draft.numPlus10 !== undefined) document.getElementById('numPlus10').value = draft.numPlus10;
-  document.getElementById('usePlus3').checked = !!draft.n3Enabled;
-  document.getElementById('plus3CountRow').style.display = draft.n3Enabled ? 'block' : 'none';
+  document.getElementById('onlyPlus5Tuning').checked = draft.onlyPlus5Tuning === true;
+  document.getElementById('usePlus3').checked = !draft.onlyPlus5Tuning && !!draft.n3Enabled;
   if (draft.numPlus3 !== undefined) document.getElementById('plus3CountVal').textContent = draft.numPlus3;
+  syncPlus3PreferenceUI();
 
   document.getElementById('useExoticMode').checked = !!draft.exotic?.enabled;
   toggleExoticMode();
@@ -850,7 +917,7 @@ async function updateRealtimeRanges() {
   const fragments = getFragments();
   const numPlus5 = getVal('numPlus5');
   const numPlus10 = getVal('numPlus10');
-  const numPlus3 = document.getElementById('usePlus3')?.checked ? getPlus3Count() : 0;
+  const numPlus3 = getEnabledPlus3Count();
   const lockedTargets = Object.fromEntries(
     locks.map(stat => [stat, getVal('target_' + stat)])
   );
@@ -957,7 +1024,7 @@ async function solve() {
   const fragments = getFragments();
   let numPlus5 = getVal('numPlus5');
   let numPlus10 = getVal('numPlus10');
-  const numPlus3 = document.getElementById('usePlus3')?.checked ? (getPlus3Count() || 0) : 0;
+  const numPlus3 = getEnabledPlus3Count();
   const exoticSettings = getExoticSettings();
   if (exoticSettings && !exoticSettings.config) {
     msgs.innerHTML = `<div class="msg error">${icon('block')}${l(
@@ -1121,8 +1188,7 @@ async function solve() {
     });
     currentSolutionIdx = 0;
 
-    const bestResult = allSolutions[0];
-    if (!bestResult) {
+    if (!allSolutions[0]) {
       msgs.innerHTML += `<div class="msg error">${icon('block')}${l('未找到满足当前异域职业物品框架的候选方案。','找不到符合目前異域職業物品原型的候選方案。','No candidate matches the current Exotic Class Item archetype.')}</div>`;
       return;
     }
@@ -1135,13 +1201,17 @@ async function solve() {
         solution.priorityOrder = [...exoticSettings.priorityOrder];
       }
     }
+    refreshInventoryPlansFromSolutions({ rerender: false });
+    const bestResult = allSolutions[0];
 
     // Count +3 pieces in best result
     const plus3Count = bestResult.tuningAssignments.filter(t => t.mode === '+3').length;
 
     // Post-solve analysis
     if (bestResult.score === 0) {
-      msgs.innerHTML += `<div class="msg info">${icon('check')}${l(`找到完美配装！${plus3Count}件使用+3模式。`,`找到完美配裝！${plus3Count}件使用+3模式。`,`Perfect loadout found. ${plus3Count} piece(s) use +3 mode.`)}</div>`;
+      msgs.innerHTML += `<div class="msg info">${icon('check')}${isOnlyPlus5Tuning()
+        ? l('找到完美配装！全部护甲使用+5/-5调整。','找到完美配裝！全部防具使用+5/-5調整。','Perfect loadout found. Every piece uses +5/-5 Tuning.')
+        : l(`找到完美配装！${plus3Count}件使用+3模式。`,`找到完美配裝！${plus3Count}件使用+3模式。`,`Perfect loadout found. ${plus3Count} piece(s) use +3 mode.`)}</div>`;
     } else if (exoticSettings) {
       const limitLines = exoticSettings.priorityOrder.map(stat => {
         const actual = bestResult.totals[stat] + (fragments[stat] || 0);
@@ -1195,7 +1265,7 @@ function buildRefineCard(targets, finalTotals) {
     const notExact = diff !== 0;
     const notOver100 = finalTotals[s] <= 100;
     // Force-minimum: checked when at the achievable minimum (armor base + fragments)
-    const armorBase = (document.getElementById('usePlus3')?.checked ? (parseInt(document.getElementById('plus3CountVal')?.textContent) || 0) : 0) * 6;
+    const armorBase = getEnabledPlus3Count() * 6;
     const statMin = Math.max(0, armorBase + (parseInt(document.getElementById('fragVal_' + s)?.textContent) || 0));
     const atMinimum = finalTotals[s] === statMin;
     const exactLabel = l(
@@ -1839,6 +1909,146 @@ function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
   if (scroll) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function formatInventoryPlanTuning(piece) {
+  return piece.tuningMode === 'plus3'
+    ? l('+3调整', '+3調整', '+3 Tuning')
+    : l(`+5${STAT_LABELS[piece.tuningTo]} 调谐`, `+5${STAT_LABELS[piece.tuningTo]} 調諧`, `+5 ${STAT_LABELS[piece.tuningTo]} Tuning`);
+}
+
+function formatInventoryItemTuning(item) {
+  if (item?.tuningMode === 'plus3') return l('+3调整', '+3調整', '+3 Tuning');
+  const tuningTo = item?.tuningTo || item?.tuningStat;
+  return tuningTo
+    ? l(`+5${STAT_LABELS[tuningTo]} 调谐`, `+5${STAT_LABELS[tuningTo]} 調諧`, `+5 ${STAT_LABELS[tuningTo]} Tuning`)
+    : l('调整属性未知', '調整數值未知', 'Unknown Tuning');
+}
+
+function formatClosestExoticMismatch(piece) {
+  const labels = {
+    archetype: l('框架', '原型', 'frame'),
+    tertiary: t('tertiaryStat'),
+    tuningMode: l('调整类型', '調整類型', 'Tuning type'),
+    tuningTo: l('+5调整属性', '+5調整數值', '+5 Tuning stat'),
+  };
+  return (piece.closestMismatch?.fields || []).map(field => labels[field] || field).join(l('、', '、', ', '));
+}
+
+function formatInventoryPlanSet(setHash) {
+  if (!setHash) return '';
+  const set = getArmorSetByHash(setHash);
+  return set ? getSetName(set) : String(setHash);
+}
+
+function renderInventoryPlanResults(plans) {
+  const section = document.getElementById('inventoryPlanResults');
+  if (!section) return;
+  if (!plans.length) {
+    section.hidden = true;
+    section.innerHTML = '';
+    return;
+  }
+
+  const best = plans[0];
+  section.hidden = calculatorMode !== 'solve';
+  section.innerHTML = `
+    <div class="inventory-plan-heading">
+      <div>
+        <h2 id="inventoryPlanHeading">${l('DIM库存混合方案', 'DIM庫存混合方案', 'DIM inventory plans')}</h2>
+        <p>${l(
+          '优先复用清单中框架、第三属性和调谐 +5 属性都吻合的护甲；剩余件数按最少刷取量，再按框架集中度排列。',
+          '優先重用清單中原型、第三數值和調諧 +5 數值都吻合的防具；剩餘欄位依最少取得量，再依原型集中度排列。',
+          'Owned pieces must match the archetype, tertiary, and rolled +5 tuning stat. Plans are ranked by the fewest pieces to farm, then by archetype concentration.'
+        )}</p>
+      </div>
+      <span class="inventory-plan-best">${l(`首选：已有 ${best.ownedCount}/5 件`, `首選：已有 ${best.ownedCount}/5 件`, `Best: ${best.ownedCount}/5 owned`)}</span>
+    </div>
+    <div class="inventory-plan-list" role="list">
+      ${plans.map((plan, index) => `
+        <article class="inventory-plan-card${index === 0 ? ' is-best' : ''}" role="listitem">
+          <div class="inventory-plan-card-head">
+            <div class="inventory-plan-rank">#${index + 1}</div>
+            <div class="inventory-plan-card-title">
+              <strong>${l(`已有 ${plan.ownedCount}/5 · 需刷 ${plan.farmCount} 件`, `已有 ${plan.ownedCount}/5 · 需取得 ${plan.farmCount} 件`, `${plan.ownedCount}/5 owned · farm ${plan.farmCount}`)}</strong>
+              <span>${l(`框架集中度 ${plan.farmability}（越低越易刷）`, `原型集中度 ${plan.farmability}（越低越易取得）`, `Archetype concentration ${plan.farmability} (lower is easier)`)}</span>
+            </div>
+            <button type="button" class="btn inventory-plan-view" onclick="switchSolution(${allSolutions.indexOf(plan.solution)})">${icon('down')}${l('查看方案','查看方案','View solution')}</button>
+          </div>
+          <div class="inventory-plan-pieces">
+            ${plan.pieces.map(piece => {
+              const slotLabel = getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot));
+              const requirement = `${getArchetypeLabel(piece.archetype)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${formatInventoryPlanTuning(piece)}`;
+              if (piece.item) {
+                return `<div class="inventory-plan-piece is-owned"><span class="inventory-plan-piece-status">${icon('check')}${l('已有','已有','Owned')}</span><strong>${slotLabel}</strong><span>${escapeHtml(piece.item.name || requirement)}</span><small>${requirement}</small></div>`;
+              }
+              const exoticLabel = piece.exotic ? l('异域','異域','Exotic') : l('待刷','待取得','Farm');
+              const setLabel = piece.farmSetHash ? ` · ${formatInventoryPlanSet(piece.farmSetHash)}` : '';
+              const closestRoll = piece.closestItem
+                ? `${getArchetypeLabel(piece.closestItem.archetypeId)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.closestItem.tertiary] || '—'} · ${formatInventoryItemTuning(piece.closestItem)}`
+                : '';
+              const farmHelp = piece.exotic
+                ? (piece.closestItem
+                  ? l(
+                    `同名已有件中最接近的是“${escapeHtml(piece.closestItem.name)}”：${closestRoll}；仍不匹配${formatClosestExoticMismatch(piece)}，建议刷取上方目标框架。`,
+                    `同名現有件中最接近的是「${escapeHtml(piece.closestItem.name)}」：${closestRoll}；仍不符合${formatClosestExoticMismatch(piece)}，建議取得上方目標原型。`,
+                    `Closest owned copy of “${escapeHtml(piece.closestItem.name)}”: ${closestRoll}. It still misses ${formatClosestExoticMismatch(piece)}; farm the target roll above.`,
+                  )
+                  : l('清单中没有符合目标属性的同名异域，建议优先刷取上方框架。', '清單中沒有符合目標數值的同名異域，建議優先取得上方原型。', 'No owned copy of the selected Exotic matches; farm the target roll above.'))
+                : l('需要新护甲，框架、第三属性和调谐 +5 属性均需吻合。', '需要新防具，原型、第三數值和調諧 +5 數值均需吻合。', 'Farm a new piece matching the frame, tertiary, and rolled +5 tuning stat.');
+              return `<div class="inventory-plan-piece is-farm"><span class="inventory-plan-piece-status">${icon(piece.exotic ? 'warn' : 'trend-up')}${exoticLabel}</span><strong>${slotLabel}</strong><span>${requirement}${setLabel}</span><small>${farmHelp}</small></div>`;
+            }).join('')}
+          </div>
+        </article>`).join('')}
+    </div>`;
+}
+
+function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
+  const section = document.getElementById('inventoryPlanResults');
+  if (calculatorMode !== 'solve' || importedInventory.length === 0 || allSolutions.length === 0) {
+    lastInventoryPlans = [];
+    if (section) {
+      section.hidden = true;
+      section.innerHTML = '';
+    }
+    return;
+  }
+
+  const classItemSettings = document.getElementById('useExoticMode')?.checked
+    ? getExoticSettings()
+    : null;
+  // In Exotic Class Item mode the selected class defines the legal class-item
+  // slot and must win over a stale DIM class filter from another character.
+  const classId = classItemSettings?.classId || importClassFilter || null;
+  if (!classId) {
+    lastInventoryPlans = [];
+    if (section) {
+      section.hidden = true;
+      section.innerHTML = '';
+    }
+    return;
+  }
+  const plans = rankInventoryPlans({
+    solutions: allSolutions,
+    items: filterArmorItems(importedInventory, {
+      classId,
+      tier5Only: importTier5Only,
+    }),
+    classId,
+    fixedExotic: classItemSettings ? null : getSelectedInventoryExotic(),
+    setRequirement: snapshotSetRequirement(),
+    maxResults: Math.max(SOLUTION_PREVIEW_COUNT, 12),
+  });
+  lastInventoryPlans = plans;
+  const rank = new Map(plans.map((plan, index) => [plan.solution, index]));
+  allSolutions.sort((left, right) =>
+    (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER)
+  );
+  currentSolutionIdx = Math.max(0, allSolutions.indexOf(plans[0]?.solution));
+  renderInventoryPlanResults(plans);
+  if (rerender && allSolutions.length > 0) {
+    displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false });
+  }
+}
+
 // ============================================================
 // SOLUTION NAV
 // ============================================================
@@ -2151,6 +2361,644 @@ function resortByOwned() {
 let calculatorMode = 'solve';
 let upgradeBuildState = [];
 let lastUpgradeAnalysis = null;
+let upgradeRequiredStats = [];
+
+// Imported DIM armor inventory and the set-bonus requirement for the upgrade
+// mode. Imported pieces carry their real stat distribution and set membership.
+let importedInventory = [];
+let importClassFilter = "";
+let importTier5Only = true;
+let setRequirement = { type: "none" };
+let manualLocked = [];
+let inventoryExoticSlotFilter = "";
+let inventoryFixedExoticKey = "";
+
+const REGULAR_EXOTIC_SLOTS = new Set(["helmet", "arms", "chest", "legs"]);
+
+function getInventoryExoticKey(item) {
+  const name = String(item?.name || "").trim().toLocaleLowerCase();
+  if (name) return `name:${name}`;
+  const hash = Number(item?.hash) || 0;
+  return `hash:${hash}`;
+}
+
+function getFilteredInventoryExotics() {
+  if (!importClassFilter) return [];
+  return filterArmorItems(importedInventory, {
+    classId: importClassFilter,
+    tier5Only: importTier5Only,
+  }).filter(item => Boolean(item.exotic) && REGULAR_EXOTIC_SLOTS.has(item.slot));
+}
+
+function getSelectedInventoryExotic() {
+  if (!inventoryFixedExoticKey) return null;
+  const item = getFilteredInventoryExotics().find(candidate =>
+    candidate.slot === inventoryExoticSlotFilter &&
+    getInventoryExoticKey(candidate) === inventoryFixedExoticKey
+  );
+  if (!item) return null;
+  return {
+    key: inventoryFixedExoticKey,
+    classId: item.classId,
+    slot: item.slot,
+    hash: Number(item.hash) || 0,
+    name: item.name || "",
+  };
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getInventoryExoticPickerData() {
+  const pool = getFilteredInventoryExotics();
+  const slots = [...new Set(pool.map(item => item.slot))]
+    .sort((left, right) => [...REGULAR_EXOTIC_SLOTS].indexOf(left) - [...REGULAR_EXOTIC_SLOTS].indexOf(right));
+  if (!slots.includes(inventoryExoticSlotFilter)) {
+    inventoryExoticSlotFilter = "";
+    inventoryFixedExoticKey = "";
+  }
+
+  const groups = new Map();
+  for (const item of pool) {
+    if (item.slot !== inventoryExoticSlotFilter) continue;
+    const key = getInventoryExoticKey(item);
+    if (!groups.has(key)) groups.set(key, { key, item, count: 0 });
+    groups.get(key).count++;
+  }
+  const names = [...groups.values()].sort((left, right) =>
+    String(left.item.name || "").localeCompare(String(right.item.name || ""), localeCode())
+  );
+  if (!names.some(entry => entry.key === inventoryFixedExoticKey)) {
+    inventoryFixedExoticKey = "";
+  }
+  return { pool, slots, names };
+}
+
+function renderUpgradeImportPanel() {
+  const el = document.getElementById("upgradeImportPanel");
+  if (!el) return;
+  const isScratchMode = calculatorMode === "solve";
+  const importHeading = isScratchMode
+    ? l("从零配装：导入 DIM 护甲清单", "從零配裝：匯入 DIM 防具清單", "Build from scratch: import DIM armor")
+    : l("从 DIM 导入装备", "從 DIM 匯入裝備", "Import gear from DIM");
+  const importDescription = isScratchMode
+    ? l(
+      "导入后选择职业，再设置目标、碎片、套装和异域。求解会优先使用匹配的已有护甲，并列出仍需刷取的件数与框架。",
+      "匯入後選擇職業，再設定目標、碎片、套裝和異域。求解會優先使用符合的現有防具，並列出仍需取得的件數與原型。",
+      "Import, choose a class, then set targets, Fragments, a set, and an Exotic. Matching owned armor is used first; remaining pieces and frames are listed to farm.",
+    )
+    : l(
+      "上传护甲清单后，会自动识别当前穿戴并填入下方五个栏位；也可以按套装要求直接从清单中求解。",
+      "上傳防具清單後，會自動辨識目前穿戴並填入下方五個欄位；也可以依套裝要求直接從清單中求解。",
+      "Upload an armor inventory to fill the five slots below from your equipped loadout, or solve directly from the list with a set requirement.",
+    );
+  const { pool: exoticPool, slots: exoticSlots, names: exoticNames } = getInventoryExoticPickerData();
+  const classOptions = [
+    ["", isScratchMode
+      ? l("请选择职业", "請選擇職業", "Choose a class")
+      : l("全部职业", "全部職業", "All classes")],
+    ["hunter", l("猎人", "獵人", "Hunter")],
+    ["titan", l("泰坦", "泰坦", "Titan")],
+    ["warlock", l("术士", "術士", "Warlock")],
+  ].map(([value, label]) =>
+    `<option value="${value}" ${importClassFilter === value ? "selected" : ""}>${label}</option>`
+  ).join("");
+  const exoticSlotOptions = [
+    `<option value="">${l("先选择部位", "先選擇部位", "Choose a slot")}</option>`,
+    ...exoticSlots.map(slot => {
+      const slotIndex = UPGRADE_SLOTS.findIndex(definition => definition.id === slot);
+      return `<option value="${slot}" ${slot === inventoryExoticSlotFilter ? "selected" : ""}>${getUpgradeSlotLabel(slotIndex)}</option>`;
+    }),
+  ].join("");
+  const exoticNameOptions = [
+    `<option value="">${inventoryExoticSlotFilter
+      ? l("不固定异域", "不固定異域", "No fixed Exotic")
+      : l("请先选择部位", "請先選擇部位", "Choose a slot first")}</option>`,
+    ...exoticNames.map(entry => `<option value="${escapeHtml(entry.key)}" ${entry.key === inventoryFixedExoticKey ? "selected" : ""}>${escapeHtml(entry.item.name || l("未命名异域", "未命名異域", "Unnamed Exotic"))} ×${entry.count}</option>`),
+  ].join("");
+
+  el.innerHTML = `
+    <div class="upgrade-import-heading">
+      <div>
+        <h3>${importHeading}</h3>
+        <p>${importDescription}</p>
+      </div>
+      <label class="upgrade-import-file">
+        <span class="btn upgrade-import-primary">${icon("folder")}${l("选择 DIM CSV", "選擇 DIM CSV", "Choose DIM CSV")}</span>
+        <input type="file" id="dimCsvFile" accept=".csv,text/csv" onchange="handleDimCsvFile(this)">
+      </label>
+    </div>
+    <p class="upgrade-import-hint">${l(
+      "导出路径：DIM → 设置 → 电子表格 → 防具（Export CSV），仅处理文件中的护甲行。",
+      "匯出路徑：DIM → 設定 → 試算表 → 防具（Export CSV），僅處理檔案中的防具列。",
+      "Export path: DIM → Settings → Spreadsheets → Armor (Export CSV). Only armor rows are processed."
+    )}</p>
+    <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
+    <div class="upgrade-import-toolbar" aria-label="${l("导入筛选与操作", "匯入篩選與操作", "Import filters and actions")}">
+      <label class="import-class-select">
+        <span>${l("职业", "職業", "Class")}</span>
+        <select id="importClass" data-import-dependent onchange="updateImportOptions()">${classOptions}</select>
+      </label>
+      <label class="import-tier-toggle">
+        <input type="checkbox" id="importTier5Only" data-import-dependent ${importTier5Only ? "checked" : ""} onchange="updateImportOptions()">
+        <span>${l("仅 Tier 5", "僅 Tier 5", "Tier 5 only")}</span>
+      </label>
+      <div class="upgrade-import-actions">
+        ${isScratchMode ? "" : `<button type="button" class="btn" data-import-dependent onclick="applyEquippedLoadout()">${icon("refresh")}${l("填入当前穿戴", "填入目前穿戴", "Fill equipped loadout")}</button>`}
+        <button type="button" class="btn danger" data-import-dependent onclick="clearImportedInventory()">${icon("trash")}${l("清空", "清空", "Clear")}</button>
+      </div>
+    </div>
+    <div class="inventory-solve-options" id="inventorySolveOptions">
+      <div class="inventory-solve-option-copy">
+        <strong>${l("从零配装：优先使用已有护甲", "從零配裝：優先使用已有防具", "Build from scratch: prefer owned armor")}</strong>
+        <span>${l("按职业筛选库存；如需固定普通异域，再按部位和名称选择。方案优先减少刷取件数，其次选择最接近需求的同名异域。", "依職業篩選庫存；如需固定一般異域，再依部位和名稱選擇。方案優先減少取得件數，其次選擇最接近需求的同名異域。", "Filter inventory by class. To fix a regular Exotic, choose its slot and name. Plans minimize farming first, then prefer the closest owned copy of that Exotic.")}</span>
+      </div>
+      <div class="inventory-exotic-picker" aria-label="${l("固定异域筛选", "固定異域篩選", "Fixed Exotic filters")}">
+        <label class="inventory-fixed-exotic-control">
+          <span>${l("异域部位", "異域部位", "Exotic slot")}</span>
+          <select id="inventoryExoticSlotFilter" onchange="updateInventoryExoticSlot()" ${!importClassFilter || exoticPool.length === 0 ? "disabled" : ""}>${exoticSlotOptions}</select>
+        </label>
+        <label class="inventory-fixed-exotic-control">
+          <span>${l("异域名称", "異域名稱", "Exotic name")}</span>
+          <select id="inventoryFixedExoticName" onchange="updateInventorySolveOptions()" ${!inventoryExoticSlotFilter || exoticNames.length === 0 ? "disabled" : ""}>${exoticNameOptions}</select>
+        </label>
+      </div>
+      <p class="inventory-solve-option-hint" id="inventorySolveOptionHint">${l(
+        "先选择职业，再从该职业已有异域中选择部位和名称；同名多件会自动比较框架、第三属性与 +5 调整。",
+        "先選擇職業，再從該職業現有異域中選擇部位和名稱；同名多件會自動比較原型、第三數值與 +5 調整。",
+        "Choose a class, slot, and Exotic name. Multiple owned copies are compared by frame, tertiary, and rolled +5 Tuning."
+      )}</p>
+    </div>
+    <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
+  `;
+  updateImportSummary();
+  updateInventorySolveOptions();
+  renderSetEffects();
+}
+
+function showImportMessage(text, tone = "error") {
+  const el = document.getElementById("upgradeImportSummary");
+  if (!el) return;
+  el.innerHTML = `<div class="msg ${tone}">${icon(tone === "error" ? "block" : "check")}<span>${escapeHtml(text)}</span></div>`;
+}
+
+function handleDimCsvFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const items = parseCsv(reader.result)
+        .map(normalizeDimItem)
+        .filter(item => item.slot);
+      if (items.length === 0) {
+        showImportMessage(l(
+          "没有在 CSV 里识别到护甲行，请确认导出的是 DIM 的护甲清单。",
+          "沒有在 CSV 中辨識到防具列，請確認匯出的是 DIM 的防具清單。",
+          "No armor rows were recognized in the CSV. Export an armor list from DIM."
+        ));
+        return;
+      }
+      importedInventory = items;
+      input.value = "";
+      clearInventoryResults();
+      const importedClasses = new Set(items.map(item => item.classId).filter(Boolean));
+      const detectedClass = detectEquippedClass(items);
+      if (!importedClasses.has(importClassFilter)) {
+        importClassFilter = detectedClass || (importedClasses.size === 1 ? [...importedClasses][0] : "");
+      }
+      inventoryExoticSlotFilter = "";
+      inventoryFixedExoticKey = "";
+      if (calculatorMode === "solve") {
+        renderUpgradeImportPanel();
+        saveUpgradeDraft();
+        showImportMessage(l(
+          `已导入 ${items.length} 件护甲。请选择职业，再设置目标、套装和异域后求解。`,
+          `已匯入 ${items.length} 件防具。請選擇職業，再設定目標、套裝和異域後求解。`,
+          `Imported ${items.length} armor pieces. Choose a class, set your targets, set requirement, and Exotic, then solve.`,
+        ), "info");
+      } else {
+        renderUpgradeImportPanel();
+        if (importClassFilter) {
+          applyEquippedLoadout();
+        } else {
+          showImportMessage(l(
+            `已导入 ${items.length} 件护甲。CSV 包含多个职业的当前穿戴，请先选择职业，再填入当前穿戴。`,
+            `已匯入 ${items.length} 件防具。CSV 包含多個職業的目前穿戴，請先選擇職業，再填入目前穿戴。`,
+            `Imported ${items.length} armor pieces. The CSV contains equipped loadouts for multiple classes; choose a class before filling the loadout.`,
+          ), "info");
+        }
+      }
+    } catch (error) {
+      showImportMessage(l(
+        "CSV 解析失败，请检查文件格式。",
+        "CSV 解析失敗，請檢查檔案格式。",
+        "Failed to parse the CSV file."
+      ));
+    }
+  };
+  reader.onerror = () => showImportMessage(l("读取文件失败。", "讀取檔案失敗。", "Failed to read the file."));
+  reader.readAsText(file, "utf-8");
+}
+
+function updateImportOptions() {
+  importTier5Only = document.getElementById("importTier5Only")?.checked !== false;
+  importClassFilter = document.getElementById("importClass")?.value || "";
+  if (!importClassFilter) {
+    inventoryExoticSlotFilter = "";
+    inventoryFixedExoticKey = "";
+  }
+  renderUpgradeImportPanel();
+}
+
+function updateInventoryExoticSlot() {
+  inventoryExoticSlotFilter = document.getElementById("inventoryExoticSlotFilter")?.value || "";
+  inventoryFixedExoticKey = "";
+  renderUpgradeImportPanel();
+}
+
+function updateInventorySolveOptions() {
+  const slotSelect = document.getElementById("inventoryExoticSlotFilter");
+  const nameSelect = document.getElementById("inventoryFixedExoticName");
+  if (slotSelect) inventoryExoticSlotFilter = slotSelect.value || "";
+  if (nameSelect) inventoryFixedExoticKey = nameSelect.value || "";
+  const exoticClassItemMode = calculatorMode === 'solve' &&
+    document.getElementById('useExoticMode')?.checked === true;
+  if (slotSelect) slotSelect.disabled = exoticClassItemMode || !importClassFilter;
+  if (nameSelect) nameSelect.disabled = exoticClassItemMode || !importClassFilter || !inventoryExoticSlotFilter;
+  const hint = document.getElementById("inventorySolveOptionHint");
+  if (hint) {
+    hint.classList.toggle('is-class-item', exoticClassItemMode);
+    const selected = getSelectedInventoryExotic();
+    hint.textContent = exoticClassItemMode
+      ? l(
+        '职业异域物品模式已固定职业物品；库存规划会匹配这件职业物品，并为其余四件传说护甲计算已有件与刷取缺口。',
+        '職業異域物品模式已固定職業物品；庫存規劃會匹配這件職業物品，並為其餘四件傳說防具計算已有件與取得缺口。',
+        'Exotic Class Item mode already fixes the class item. Inventory planning matches it and calculates owned/farm gaps for the other four Legendary pieces.'
+      )
+      : !importClassFilter
+        ? l('请先选择职业，库存规划不会混用不同职业的护甲。', '請先選擇職業，庫存規劃不會混用不同職業的防具。', 'Choose a class first; inventory planning never mixes armor across classes.')
+        : !selected && inventoryExoticSlotFilter && getFilteredInventoryExotics().length > 0
+          ? l('已选择部位，请继续选择具体异域名称；同名多件会自动择优。', '已選擇部位，請繼續選擇具體異域名稱；同名多件會自動擇優。', 'Choose an Exotic name for this slot; same-name copies will be compared automatically.')
+          : selected
+            ? l(`已固定：${selected.name}（${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === selected.slot))}）；会优先使用同名且属性最接近的已有件。`, `已固定：${selected.name}（${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === selected.slot))}）；會優先使用同名且數值最接近的現有件。`, `Fixed: ${selected.name} (${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === selected.slot))}); the closest owned copy is preferred.`)
+            : getFilteredInventoryExotics().length === 0
+              ? l('当前职业和 Tier 5 筛选下没有可固定的普通异域。', '目前職業和 Tier 5 篩選下沒有可固定的一般異域。', 'No regular Exotics are available under the current class and Tier 5 filters.')
+              : l('可选。先选异域部位和名称；没有完全匹配时，结果会显示同名最接近的现有件以及建议刷取属性。', '可選。先選異域部位和名稱；沒有完全符合時，結果會顯示同名最接近的現有件以及建議取得數值。', 'Optional. Choose an Exotic slot and name. If no copy fully matches, the result shows the closest owned copy and the roll to farm.');
+  }
+  saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
+}
+
+function setImportClass(classId) {
+  importClassFilter = classId || "";
+  const select = document.getElementById("importClass");
+  if (select) select.value = importClassFilter;
+  updateImportSummary();
+}
+
+function updateImportSummary() {
+  const el = document.getElementById("upgradeImportSummary");
+  if (!el) return;
+  document.querySelectorAll("[data-import-dependent]").forEach(control => {
+    control.disabled = importedInventory.length === 0;
+  });
+  const tierFiltered = filterArmorItems(importedInventory, {
+    tier5Only: importTier5Only,
+  });
+  const filtered = importClassFilter
+    ? tierFiltered.filter(item => item.classId === importClassFilter)
+    : tierFiltered;
+  if (importedInventory.length === 0) {
+    el.innerHTML = `<div class="upgrade-import-empty">${icon("folder")}<span>${l(
+      calculatorMode === "solve"
+        ? "尚未导入护甲清单。导入 DIM CSV 后选择职业，已有护甲会用于从零配装规划。"
+        : "尚未导入护甲清单。导入 DIM CSV 后可按当前穿戴填入，或在下方逐件手动填写。",
+      calculatorMode === "solve"
+        ? "尚未匯入防具清單。匯入 DIM CSV 後選擇職業，現有防具會用於從零配裝規劃。"
+        : "尚未匯入防具清單。匯入 DIM CSV 後可依目前穿戴填入，或在下方逐件手動填寫。",
+      calculatorMode === "solve"
+        ? "No armor inventory imported. Import a DIM CSV, choose a class, and use owned armor in scratch-build planning."
+        : "No armor inventory imported. Import a DIM CSV to fill the equipped loadout, or enter each piece manually below."
+    )}</span></div>`;
+    return;
+  }
+  const countByClass = { hunter: 0, titan: 0, warlock: 0 };
+  const setHashes = new Set();
+  for (const item of tierFiltered) {
+    if (item.classId in countByClass) countByClass[item.classId] += 1;
+    if ((!importClassFilter || item.classId === importClassFilter) && item.setHash) {
+      setHashes.add(item.setHash);
+    }
+  }
+  const setCount = filtered.reduce((count, item) => count + (item.setHash ? 1 : 0), 0);
+  const setTotal = setHashes.size;
+  el.innerHTML = `<div class="upgrade-import-counts">${icon("check")}<span>${l(
+    `已导入 ${importedInventory.length} 件护甲：猎人 ${countByClass.hunter} 件 · 泰坦 ${countByClass.titan} 件 · 术士 ${countByClass.warlock} 件；当前筛选 ${filtered.length} 件，其中 ${setCount} 件分属 ${setTotal} 个套装。`,
+    `已匯入 ${importedInventory.length} 件防具：獵人 ${countByClass.hunter} 件 · 泰坦 ${countByClass.titan} 件 · 術士 ${countByClass.warlock} 件；目前篩選 ${filtered.length} 件，其中 ${setCount} 件分屬 ${setTotal} 個套裝。`,
+    `Imported ${importedInventory.length} armor pieces: Hunter ${countByClass.hunter} / Titan ${countByClass.titan} / Warlock ${countByClass.warlock}; ${filtered.length} in the current filter, ${setCount} of them from ${setTotal} set(s).`
+  )}</span></div>`;
+}
+
+function clearImportedInventory() {
+  importedInventory = [];
+  setRequirement = { type: "none" };
+  manualLocked = [];
+  inventoryExoticSlotFilter = "";
+  inventoryFixedExoticKey = "";
+  clearInventoryResults();
+  updateImportOptions();
+  renderSetEffects();
+  saveUpgradeDraft();
+}
+
+function applyLoadoutItems(items) {
+  const bySlot = {};
+  for (const item of items) {
+    if (item.slot && !bySlot[item.slot]) bySlot[item.slot] = item;
+  }
+  const missingSlots = [];
+  upgradeBuildState = UPGRADE_SLOTS.map((slotDef, index) => {
+    const item = bySlot[slotDef.id];
+    if (!item) {
+      missingSlots.push(getUpgradeSlotLabel(index));
+      return normalizeUpgradePiece(upgradeBuildState[index], index);
+    }
+    return createUpgradePieceFromItem(item, index);
+  });
+  manualLocked = [];
+  syncUpgradeLocks();
+  saveUpgradeDraft();
+  renderUpgradeBuildEditor();
+  renderSetEffects();
+  if (missingSlots.length > 0) {
+    showImportMessage(l(
+      `有 ${missingSlots.length} 个槽位没有匹配到护甲（${missingSlots.join("、")}），已保留原值。`,
+      `有 ${missingSlots.length} 個欄位未匹配到防具（${missingSlots.join("、")}），已保留原值。`,
+      `${missingSlots.length} slot(s) had no matching armor (${missingSlots.join(", ")}); existing values kept.`
+    ), "info");
+  }
+}
+
+function applyEquippedLoadout() {
+  if (importedInventory.length === 0) {
+    showImportMessage(l(
+      "请先导入护甲 CSV，再识别当前穿戴。",
+      "請先匯入防具 CSV，再辨識目前穿戴。",
+      "Import the armor CSV first."
+    ));
+    return;
+  }
+  if (!importClassFilter && !detectEquippedClass(importedInventory)) {
+    showImportMessage(l(
+      "CSV 中有多个职业的当前穿戴，请先选择一个职业。",
+      "CSV 中有多個職業的目前穿戴，請先選擇一個職業。",
+      "The CSV contains equipped loadouts for multiple classes. Choose one class first."
+    ));
+    return;
+  }
+  const items = pickCurrentLoadout(filterArmorItems(importedInventory, {
+    classId: importClassFilter || null,
+    tier5Only: importTier5Only,
+  }));
+  if (!importClassFilter && items[0]?.classId) setImportClass(items[0].classId);
+  applyLoadoutItems(items);
+  showImportMessage(l(
+    `已按当前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件护甲。`,
+    `已依目前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件防具。`,
+    `Filled ${items.length} armor pieces from the equipped loadout (${getClassLabel(importClassFilter)}).`
+  ), "info");
+}
+
+function getClassLabel(classId) {
+  if (classId === "hunter") return l("猎人", "獵人", "Hunter");
+  if (classId === "titan") return l("泰坦", "泰坦", "Titan");
+  if (classId === "warlock") return l("术士", "術士", "Warlock");
+  return l("全部职业", "全部職業", "all classes");
+}
+
+// ============================================================
+// SET BONUSES (2pc / 4pc) AND REQUIREMENT FILTER
+// ============================================================
+
+function renderSetEffects() {
+  const el = document.getElementById("upgradeSetEffects");
+  if (!el) return;
+  // Scratch mode has no current five-piece loadout. Do not leak the last
+  // upgrade draft's active bonuses into the shared set picker.
+  const currentHashes = calculatorMode === "upgrade"
+    ? (upgradeBuildState || []).map(piece => piece?.hash).filter(Boolean)
+    : [];
+  const hashes = currentHashes;
+  const counts = getSetPieceCounts(hashes);
+  const active = getActiveSetBonuses(hashes, getPageLanguage());
+  const inventorySetHashes = [...new Set(importedInventory.map(item => item.setHash).filter(Boolean))];
+  const pieceSetHashes = [...counts.keys()].map(set => set.hash);
+  const available = [...new Set([...inventorySetHashes, ...pieceSetHashes])]
+    .sort((a, b) => getSetName(getArmorSetByHash(a)).localeCompare(getSetName(getArmorSetByHash(b))));
+  const setOptions = available.map(hash => {
+    const set = getArmorSetByHash(hash);
+    const isSelected = setRequirement.type !== "none"
+      && (Number(setRequirement.setHash) === hash
+        || Number(setRequirement.a) === hash
+        || Number(setRequirement.b) === hash);
+    return `<option value="${hash}" ${isSelected ? "selected" : ""}>${escapeHtml(getSetName(set))}</option>`;
+  }).join("");
+  const mode = setRequirement.type === "set" ? `set${setRequirement.count}` : setRequirement.type;
+  const noSets = available.length === 0;
+  const setRequirementDescription = calculatorMode === "solve"
+    ? l(
+      "可选。用于给从零配装规划指定套装；已有件会优先覆盖要求，缺失件会标出应刷的套装。",
+      "可選。用於為從零配裝規劃指定套裝；現有件會優先覆蓋要求，缺失件會標出應取得的套裝。",
+      "Optional. Set the desired set for scratch-build plans; owned pieces cover it first, and missing pieces are tagged with the set to farm.",
+    )
+    : l(
+      "可选。启用后，求解会从已导入清单中搭配并保留所有固定装备。",
+      "可選。啟用後，求解會從已匯入清單中搭配並保留所有固定裝備。",
+      "Optional. When enabled, the solver builds from the imported list while preserving every fixed piece.",
+    );
+
+  el.innerHTML = `
+    <div class="set-effects-head">
+      <div>
+        <span class="set-effects-title">${l("套装约束", "套裝約束", "Set requirement")}</span>
+        <p>${setRequirementDescription}</p>
+      </div>
+      <div class="set-requirement-controls">
+        <label>
+          <span>${l("要求", "要求", "Require")}</span>
+          <select id="setReqMode" onchange="updateSetRequirementMode(this.value)">
+            <option value="none" ${mode === "none" ? "selected" : ""}>${l("不要求", "不要求", "None")}</option>
+            <option value="set4" ${mode === "set4" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("指定套装 4 件套", "指定套裝 4 件套", "A set, 4-piece")}</option>
+            <option value="set2" ${mode === "set2" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("指定套装 2 件套", "指定套裝 2 件套", "A set, 2-piece")}</option>
+            <option value="split" ${mode === "split" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("两个套装各 2 件（2+2）", "兩個套裝各 2 件（2+2）", "Two sets, 2-piece each")}</option>
+          </select>
+        </label>
+        <label class="set-req-set" id="setReqALabel" ${mode === "none" ? "hidden" : ""}>
+          <span>${l("套装", "套裝", "Set")}</span>
+          <select id="setReqA" onchange="updateSetRequirementPicks()">${setOptions}</select>
+        </label>
+        <label class="set-req-set" id="setReqBLabel" ${mode === "split" ? "" : "hidden"}>
+          <span>${l("另一个套装", "另一個套裝", "Second set")}</span>
+          <select id="setReqB" onchange="updateSetRequirementPicks()">${setOptions}</select>
+        </label>
+      </div>
+    </div>
+    ${calculatorMode === "upgrade" ? `<div class="set-active-list">${active.length === 0
+      ? `<div class="set-active-empty">${l(
+        "当前五件护甲没有激活任何套装效果（2 件或 4 件）。",
+        "目前五件防具沒有啟動任何套裝效果（2 件或 4 件）。",
+        "No set bonus (2pc/4pc) is active with the current five pieces."
+      )}</div>`
+      : active.map(bonus => `
+        <div class="set-active-card">
+          <div class="set-active-head">
+            <strong>${escapeHtml(getSetName(bonus.set))}</strong>
+            <span class="set-active-count">${bonus.pieceCount}/${5}</span>
+            <span class="set-active-tier">${bonus.requiredCount} ${l("件套", "件套", "pc")}</span>
+          </div>
+          <div class="set-active-name">${escapeHtml(bonus.name)}</div>
+          <p class="set-active-desc">${escapeHtml(bonus.desc)}</p>
+        </div>`).join("")}
+    </div>` : ""}
+    <div class="set-requirement-state" id="setRequirementState" aria-live="polite"></div>
+  `;
+  if (mode === "split") {
+    const aSelect = document.getElementById("setReqA");
+    const bSelect = document.getElementById("setReqB");
+    if (aSelect && bSelect && bSelect.value === aSelect.value && bSelect.options.length > 1) {
+      const alternate = [...bSelect.options].findIndex(option => option.value !== aSelect.value);
+      if (alternate >= 0) bSelect.selectedIndex = alternate;
+    }
+  }
+  syncUpgradeLocks();
+}
+
+function updateSetRequirementMode(value) {
+  clearInventoryResults();
+  const a = Number(document.getElementById("setReqA")?.value) || 0;
+  const b = Number(document.getElementById("setReqB")?.value) || a;
+  if (value === "none") {
+    setRequirement = { type: "none" };
+  } else if (value === "set2" || value === "set4") {
+    setRequirement = { type: "set", setHash: a, count: value === "set4" ? 4 : 2 };
+  } else if (value === "split") {
+    const aSelect = document.getElementById("setReqA");
+    const bSelect = document.getElementById("setReqB");
+    const aValue = Number(aSelect?.value) || a;
+    let bValue = Number(bSelect?.value) || b;
+    if (bSelect && bValue === aValue && bSelect.options.length > 1) {
+      const alternate = [...bSelect.options].findIndex(option => Number(option.value) !== aValue);
+      if (alternate >= 0) {
+        bSelect.selectedIndex = alternate;
+        bValue = Number(bSelect.value);
+      }
+    }
+    setRequirement = { type: "split", a: aValue, b: bValue };
+  }
+  renderSetEffects();
+  renderUpgradeBuildEditor();
+  saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
+}
+
+function updateSetRequirementPicks() {
+  updateSetRequirementMode(document.getElementById("setReqMode")?.value || "none");
+}
+
+// Whether the CURRENT five pieces already satisfy the chosen set requirement,
+// and (informational) how many of each required set they carry. This no longer
+// locks pieces — the requirement is enforced by the inventory solve, which may
+// swap any non-fixed piece for a better set roll from the imported list.
+function resolveSetRequirement() {
+  const pieces = upgradeBuildState || [];
+  const requirement = setRequirement;
+  if (!requirement || requirement.type === "none") return { ok: true };
+
+  const bySet = new Map();
+  pieces.forEach(piece => {
+    if (piece?.setHash) {
+      if (!bySet.has(piece.setHash)) bySet.set(piece.setHash, []);
+      bySet.get(piece.setHash).push(piece);
+    }
+  });
+
+  if (requirement.type === "set") {
+    const count = (bySet.get(Number(requirement.setHash)) || []).length;
+    if (count < requirement.count) {
+      return {
+        ok: false,
+        error: l(
+          `“${getSetName(getArmorSetByHash(requirement.setHash))}”目前只有 ${count} 件，需要 ${requirement.count} 件才能满足要求。`,
+          `「${getSetName(getArmorSetByHash(requirement.setHash))}」目前只有 ${count} 件，需要 ${requirement.count} 件才能滿足要求。`,
+          `“${getSetName(getArmorSetByHash(requirement.setHash))}” currently has only ${count} piece(s) here; ${requirement.count} are required.`
+        ),
+      };
+    }
+    return { ok: true };
+  }
+
+  const aCount = (bySet.get(Number(requirement.a)) || []).length;
+  const bCount = (bySet.get(Number(requirement.b)) || []).length;
+  if (aCount < 2) {
+    return {
+      ok: false,
+      error: l(
+        `“${getSetName(getArmorSetByHash(requirement.a))}”不足 2 件。`,
+        `「${getSetName(getArmorSetByHash(requirement.a))}」不足 2 件。`,
+        `“${getSetName(getArmorSetByHash(requirement.a))}” needs at least 2 pieces.`
+      ),
+    };
+  }
+  if (bCount < 2) {
+    return {
+      ok: false,
+      error: l(
+        `“${getSetName(getArmorSetByHash(requirement.b))}”不足 2 件。`,
+        `「${getSetName(getArmorSetByHash(requirement.b))}」不足 2 件。`,
+        `“${getSetName(getArmorSetByHash(requirement.b))}” needs at least 2 pieces.`
+      ),
+    };
+  }
+  return { ok: true };
+}
+
+function syncUpgradeLocks() {
+  // Only Exotic armor (unique, cannot be farmed) and pieces the player locked
+  // manually stay fixed. A set requirement must NOT lock the current pieces:
+  // solving filters the uploaded inventory for loadouts that satisfy the set
+  // bonus while approaching the stat targets, which requires every non-fixed
+  // slot to stay swappable.
+  (upgradeBuildState || []).forEach((piece, index) => {
+    piece.locked = Boolean(piece.exotic) || Boolean(manualLocked[index]);
+  });
+  const stateEl = document.getElementById("setRequirementState");
+  if (!stateEl) return;
+  const result = resolveSetRequirement();
+  const requirement = setRequirement;
+  if (!requirement || requirement.type === "none") {
+    stateEl.innerHTML = "";
+    return;
+  }
+  if (result.ok) {
+    stateEl.innerHTML = `<div class="set-requirement-ok">${icon("check")}${l(
+      "当前配装已满足所选套装要求。求解会从已导入清单中搜索更接近六维目标的搭配。",
+      "目前配裝已滿足所選套裝要求。求解會從已匯入清單中搜尋更接近六維目標的搭配。",
+      "The current pieces already satisfy the set requirement. Solving will still search the imported list for loadouts closer to your targets."
+    )}</div>`;
+    return;
+  }
+  stateEl.innerHTML = `<div class="set-requirement-ok">${icon("check")}${escapeHtml(result.error)}${l(
+    " 求解时会从清单中搜索满足要求的组合。",
+    " 求解時會從清單中搜尋滿足要求的組合。",
+    " Solving will search the list for a loadout that satisfies it."
+  )}</div>`;
+}
 
 function getUpgradeSlotLabel(slotIndex) {
   const labels = UPGRADE_SLOTS[slotIndex]?.labels || UPGRADE_SLOTS[0].labels;
@@ -2166,15 +3014,6 @@ function updateUpgradeTuningChoice(index, value) {
   const [, tuningTo] = String(value).split(':');
   updateUpgradePiece(index, 'tuningMode', 'shift');
   updateUpgradePiece(index, 'tuningTo', STATS.includes(tuningTo) ? tuningTo : STATS[0], true);
-}
-
-function renderUpgradeInferInputs() {
-  const grid = document.getElementById('upgradeInferGrid');
-  if (!grid) return;
-  const totals = upgradeBuildState.length === UPGRADE_SLOTS.length
-    ? finalizeUpgradeTotals(getManualUpgradeArmorTotals(upgradeBuildState), getUpgradeFragments())
-    : Object.fromEntries(STATS.map(stat => [stat, 0]));
-  grid.innerHTML = STATS.map(stat => `<label>${STAT_LABELS[stat]}<input id="upgradeInfer_${stat}" type="number" min="0" max="200" step="1" value="${totals[stat]}"></label>`).join('');
 }
 
 function renderUpgradeBuildEditor(openIndex = null) {
@@ -2204,16 +3043,26 @@ function renderUpgradeBuildEditor(openIndex = null) {
           `Mod +${piece.armorModSize} ${STAT_LABELS[piece.armorModStat]}`
         )
       : l('无属性模组', '無數值模組', 'No stat mod');
-    const identity = `${getArchetypeLabel(archetype.id)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}`;
+    const setForPiece = piece.setHash ? getArmorSetByHash(piece.setHash) : null;
+    const pieceNameLabel = piece.itemName
+      ? `<span class="upgrade-piece-name">${escapeHtml(piece.itemName)}</span> · `
+      : '';
+    const setLabel = setForPiece
+      ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(setForPiece))}</span> · `
+      : '';
+    const identity = `${pieceNameLabel}${setLabel}<span class="upgrade-piece-arch">${getArchetypeLabel(archetype.id)}</span><span class="upgrade-piece-detail"> · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}</span>`;
     const status = piece.exotic
       ? l('异域固定件','異域固定件','Fixed Exotic')
       : (piece.locked ? l('固定不替换','固定不替換','Fixed') : l('可替换','可替換','Replaceable'));
+    const statusIcon = piece.locked
+      ? `<span class="upgrade-piece-status-icon" aria-hidden="true">${icon('lock', { size:'sm' })}</span>`
+      : '';
     const isOpen = currentlyOpen.includes(index) || (currentlyOpen.length === 0 && index === 0);
-    return `<details class="upgrade-piece-row" data-index="${index}" ondragover="event.preventDefault()" ondrop="handleUpgradeDrop(event,${index})" ${isOpen ? 'open' : ''}>
+    return `<details class="upgrade-piece-row" data-index="${index}" ${isOpen ? 'open' : ''}>
       <summary>
-        <span class="upgrade-piece-slot"><span class="upgrade-drag-handle" draggable="true" ondragstart="handleUpgradeDragStart(event,${index})" ondragend="handleUpgradeDragEnd(event)" title="${l('拖动交换框架','拖曳交換原型','Drag to swap archetypes')}" aria-hidden="true">⋮⋮</span><small>${String(index + 1).padStart(2, '0')}</small>${getUpgradeSlotLabel(index)}</span>
+        <span class="upgrade-piece-slot">${getUpgradeSlotLabel(index)}</span>
         <span class="upgrade-piece-identity">${identity}</span>
-        <span class="upgrade-piece-status ${piece.locked ? 'is-locked' : ''}"><span class="upgrade-piece-status-icon" aria-hidden="true">${piece.locked ? icon('lock', { size:'sm' }) : ''}</span><span>${status}</span></span>
+        <span class="upgrade-piece-status ${piece.locked ? 'is-locked' : ''}">${statusIcon}<span>${status}</span></span>
       </summary>
       <div class="upgrade-piece-fields">
         <label class="input-group">
@@ -2252,7 +3101,7 @@ function renderUpgradeBuildEditor(openIndex = null) {
         </label>
         <label class="input-group">
           <span>${l('模组属性','模組數值','Mod stat')}</span>
-          <select ${piece.armorModSize === 0 ? 'disabled' : ''} onchange="updateUpgradePiece(${index},'armorModStat',this.value)">
+          <select ${piece.armorModSize === 0 ? 'disabled' : ''} onchange="updateUpgradePiece(${index},'armorModStat',this.value,true)">
             ${getUpgradeStatOptions(piece.armorModStat)}
           </select>
         </label>
@@ -2293,92 +3142,12 @@ function handleUpgradeDrop(event, targetIndex) {
   renderUpgradeBuildEditor(targetIndex);
 }
 
-function getUpgradeInferenceBudgets(armorTotal) {
-  const current = getUpgradeModifierBudget(upgradeBuildState);
-  const candidates = [];
-  for (let numPlus3 = 0; numPlus3 <= 5; numPlus3++) {
-    for (let numPlus10 = 0; numPlus10 <= 5; numPlus10++) {
-      for (let numPlus5 = 0; numPlus5 + numPlus10 <= 5; numPlus5++) {
-        const total = 450 + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
-        const budgetChange = Math.abs(numPlus3 - current.numPlus3) +
-          Math.abs(numPlus5 - current.numPlus5) + Math.abs(numPlus10 - current.numPlus10);
-        candidates.push({ numPlus3, numPlus5, numPlus10, total, budgetChange });
-      }
-    }
-  }
-  candidates.sort((left, right) =>
-    Math.abs(left.total - armorTotal) - Math.abs(right.total - armorTotal) ||
-    left.budgetChange - right.budgetChange
-  );
-  return candidates.slice(0, 4);
-}
-
-async function inferUpgradeArmor() {
-  const fragments = getUpgradeFragments();
-  const observed = Object.fromEntries(STATS.map(stat => [
-    stat, Math.max(0, Math.min(200, Number(document.getElementById(`upgradeInfer_${stat}`)?.value) || 0))
-  ]));
-  const armorTarget = Object.fromEntries(STATS.map(stat => [
-    stat, Math.max(0, observed[stat] - (fragments[stat] || 0))
-  ]));
-  const armorTotal = STATS.reduce((sum, stat) => sum + armorTarget[stat], 0);
-  const button = document.querySelector('.upgrade-infer-panel .btn');
-  const originalText = button?.textContent;
-  if (button) { button.disabled = true; button.textContent = l('反推中…','反推中…','Inferring…'); }
-
-  try {
-    let best = null;
-    for (const budget of getUpgradeInferenceBudgets(armorTotal)) {
-      const result = (await solveLoadoutAsync({
-        target: armorTarget,
-        numPlus5: budget.numPlus5,
-        numPlus10: budget.numPlus10,
-        numPlus3: budget.numPlus3,
-        constraints: {},
-        runtimeOptions: { fastMode: true },
-      }))[0];
-      if (!result) continue;
-      const finalTotals = finalizeUpgradeTotals(result.totals, fragments);
-      const distance = STATS.reduce((sum, stat) => sum + Math.abs(finalTotals[stat] - observed[stat]), 0);
-      if (!best || distance < best.distance || (distance === best.distance && result.score < best.result.score)) {
-        best = { result, distance };
-      }
-    }
-    if (best) {
-      upgradeBuildState = best.result.config.map((config, index) => {
-        const tuning = best.result.tuningAssignments[index];
-        const mod = best.result.modAssignments[index];
-        return normalizeUpgradePiece({
-          ...upgradeBuildState[index], archetypeId: getArchetypeIdForConfig(config), tertiary: config.tertiary,
-          tuningMode: tuning.mode === '+3' ? 'plus3' : 'shift',
-          tuningFrom: tuning.from || upgradeBuildState[index].tuningFrom,
-          tuningTo: tuning.to || upgradeBuildState[index].tuningTo,
-          armorModSize: mod?.size || 0, armorModStat: mod?.stat || upgradeBuildState[index].armorModStat,
-        }, index);
-      });
-      saveUpgradeDraft();
-      renderUpgradeBuildEditor();
-      document.getElementById('messages').innerHTML = `<div class="msg info">${icon('check')}${best.distance === 0
-        ? l('已按六维反推出一套完全匹配的护甲，可继续微调或拖动交换框架。','已依六維反推出一套完全符合的防具，可繼續微調或拖曳交換原型。','Found an exact armor match. Fine-tune it or drag rows to swap archetypes.')
-        : l(`已生成最接近的护甲，六维合计偏差 ${best.distance} 点；请按实际装备微调。`,`已產生最接近的防具，六維合計偏差 ${best.distance} 點；請依實際裝備微調。`,`Generated the closest armor match (${best.distance} total stat difference). Fine-tune it to your actual gear.`)}</div>`;
-    }
-  } catch (error) {
-    console.error('Armor inference failed', error);
-    document.getElementById('messages').innerHTML = '<div class="msg error">' +
-      icon('block') + l(
-        '护甲反推失败，请重试。',
-        '防具反推失敗，請重試。',
-        'Armor inference failed. Please try again.'
-      ) + '</div>';
-  } finally {
-    if (button) { button.disabled = false; button.textContent = originalText; }
-  }
-}
-
 function updateUpgradePiece(index, field, value, rerender = false) {
   if (!upgradeBuildState[index]) return;
   upgradeBuildState[index][field] = value;
+  if (field === 'locked') manualLocked[index] = Boolean(value);
   upgradeBuildState[index] = normalizeUpgradePiece(upgradeBuildState[index], index);
+  if (field === 'locked') syncUpgradeLocks();
   saveUpgradeDraft();
   if (rerender || field === 'tertiary') renderUpgradeBuildEditor(index);
   else updateUpgradeBudgetSummary();
@@ -2395,6 +3164,21 @@ function getUpgradeFragments() {
 
 function getUpgradeTargets() {
   return Object.fromEntries(STATS.map(stat => [stat, getVal('target_' + stat)]));
+}
+
+function getUpgradeRequiredStats() {
+  return STATS.filter(stat =>
+    document.getElementById('upgradeRequired_' + stat)?.checked
+  );
+}
+
+function updateUpgradeRequiredStat(stat, required) {
+  if (!STATS.includes(stat)) return;
+  const selected = new Set(upgradeRequiredStats);
+  if (required) selected.add(stat);
+  else selected.delete(stat);
+  upgradeRequiredStats = STATS.filter(item => selected.has(item));
+  saveUpgradeDraft();
 }
 
 
@@ -2470,15 +3254,40 @@ function saveUpgradeDraft() {
   if (upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
   buildRepository.writeUpgradeDraft({
     pieces: upgradeBuildState,
+    requiredStats: getUpgradeRequiredStats(),
     reassignModifiers: document.getElementById('upgradeReassignModifiers')?.checked ?? true,
+    setRequirement,
+    exoticSlotFilter: inventoryExoticSlotFilter,
+    fixedExoticKey: inventoryFixedExoticKey,
+    manualLocked,
+    importClassFilter,
+    importTier5Only,
+    inventory: importedInventory,
   });
 }
 
 function loadUpgradeDraft() {
   const draft = buildRepository.readUpgradeDraft();
+  upgradeRequiredStats = Array.isArray(draft?.requiredStats)
+    ? STATS.filter(stat => draft.requiredStats.includes(stat))
+    : [];
   upgradeBuildState = UPGRADE_SLOTS.map((_, index) => normalizeUpgradePiece(draft?.pieces?.[index], index));
+  setRequirement = draft?.setRequirement?.type ? draft.setRequirement : { type: 'none' };
+  inventoryExoticSlotFilter = ['helmet', 'arms', 'chest', 'legs'].includes(draft?.exoticSlotFilter)
+    ? draft.exoticSlotFilter
+    : (['helmet', 'arms', 'chest', 'legs'].includes(draft?.fixedExoticSlot) ? draft.fixedExoticSlot : '');
+  inventoryFixedExoticKey = typeof draft?.fixedExoticKey === 'string' ? draft.fixedExoticKey : '';
+  manualLocked = Array.isArray(draft?.manualLocked) ? draft.manualLocked : [];
+  importClassFilter = draft?.importClassFilter || '';
+  importTier5Only = draft?.importTier5Only !== false;
+  importedInventory = Array.isArray(draft?.inventory) ? draft.inventory : [];
   const reassign = document.getElementById('upgradeReassignModifiers');
   if (reassign) reassign.checked = draft?.reassignModifiers !== false;
+  for (const stat of STATS) {
+    const control = document.getElementById('upgradeRequired_' + stat);
+    if (control) control.checked = upgradeRequiredStats.includes(stat);
+  }
+  syncUpgradeLocks();
   renderUpgradeBuildEditor();
 }
 
@@ -2489,10 +3298,13 @@ function setCalculatorMode(mode, persist = true) {
   document.getElementById('modeSolveButton')?.setAttribute('aria-pressed', String(!isUpgrade));
   document.getElementById('modeUpgradeButton')?.setAttribute('aria-pressed', String(isUpgrade));
   document.getElementById('upgradeBuildCard').hidden = !isUpgrade;
+  document.getElementById('inventoryImportCard').hidden = false;
   document.getElementById('btnSolve').hidden = isUpgrade;
   document.getElementById('btnUpgradeAnalyze').hidden = !isUpgrade;
   document.getElementById('saveBuildButton').hidden = isUpgrade;
   document.getElementById('upgradeResults').hidden = !isUpgrade || !lastUpgradeAnalysis;
+  document.getElementById('inventoryPlanResults').hidden = isUpgrade || lastInventoryPlans.length === 0;
+  document.getElementById('inventoryResults').hidden = !isUpgrade || !lastInventoryResult?.results?.length;
   document.getElementById('floatJump').style.display = 'none';
   document.getElementById('messages').innerHTML = '';
   if (isUpgrade) {
@@ -2507,6 +3319,10 @@ function setCalculatorMode(mode, persist = true) {
     scheduleRealtimeRanges();
     renderSavedBuilds();
   }
+  // The shared DIM panel serves both modes; refresh its copy and controls so
+  // switching modes never leaves upgrade-only instructions in scratch mode
+  // (or vice versa), while the imported inventory state remains intact.
+  renderUpgradeImportPanel();
   if (persist) {
     buildRepository.writeCalculatorMode(calculatorMode);
   }
@@ -2514,7 +3330,7 @@ function setCalculatorMode(mode, persist = true) {
 
 function initializeUpgradeOptimizer() {
   loadUpgradeDraft();
-  renderUpgradeInferInputs();
+  renderUpgradeImportPanel();
   setCalculatorMode(buildRepository.readCalculatorMode(), false);
 }
 
@@ -2552,20 +3368,41 @@ function buildUpgradeStatComparison(analysis, afterTotals) {
     const after = afterTotals[stat];
     const delta = after - before;
     const target = analysis.targets[stat];
+    const isRequired = analysis.requiredStats?.includes(stat) === true;
     const targetReached = after >= target;
     const deltaClass = targetReached ? 'is-target-met' : 'is-shortfall';
     const targetStatus = targetReached
       ? l('达标','達標','met')
       : l(`差 ${target - after}`, `差 ${target - after}`, `${target - after} short`);
-    return `<div class="upgrade-stat">
-      <div class="upgrade-stat-label" style="color:${STAT_COLORS[stat]}">${icon(stat)}${STAT_LABELS[stat]}</div>
+    return `<div class="upgrade-stat ${isRequired ? 'is-required' : ''}">
+      <div class="upgrade-stat-label" style="color:${STAT_COLORS[stat]}"><span>${icon(stat)}${STAT_LABELS[stat]}</span>${isRequired
+        ? `<em>${l('必须达标','必須達標','Must meet')}</em>` : ''}</div>
       <div class="upgrade-stat-values">${before} <small>→</small> ${after}</div>
       <span class="upgrade-stat-delta ${deltaClass}">${delta > 0 ? '+' : ''}${delta} · ${l('目标','目標','target')} ${target} · ${targetStatus}</span>
     </div>`;
   }).join('')}</div>`;
 }
 
-function buildUpgradeBaselineNote(analysis) {
+function buildUpgradeRequirementResult(analysis, evaluation) {
+  const requiredStats = analysis.requiredStats || [];
+  if (requiredStats.length === 0 || !evaluation) return '';
+  const metrics = evaluation.metrics;
+  const details = requiredStats.map(stat => {
+    const actual = evaluation.finalTotals[stat];
+    const target = analysis.targets[stat];
+    return `${STAT_LABELS[stat]} ${actual}/${target}`;
+  }).join(l(' · ', ' · ', ' · '));
+  const met = metrics.requiredAllReached;
+  return `<div class="upgrade-requirement-result ${met ? 'is-met' : 'is-unmet'}">
+    ${icon(met ? 'check' : 'warn')}
+    <div><strong>${met
+      ? l('必须达标的属性已全部满足','必須達標的數值已全部滿足','All must-meet stats are satisfied')
+      : l(`必须达标的属性还差 ${metrics.requiredShortfall} 点`, `必須達標的數值還差 ${metrics.requiredShortfall} 點`, `Must-meet stats are ${metrics.requiredShortfall} points short`)}</strong>
+      <span>${details}</span></div>
+  </div>`;
+}
+
+function buildUpgradeBaselineNote(analysis, keepOnly = false) {
   if (!analysis.reassignModifiers || !analysis.enteredBaseline) return '';
   const changedStats = STATS.filter(stat =>
     analysis.enteredBaseline.finalTotals[stat] !== analysis.baseline.finalTotals[stat]
@@ -2573,11 +3410,17 @@ function buildUpgradeBaselineNote(analysis) {
   if (changedStats.length === 0) return '';
   return `<div class="upgrade-baseline-note">
     ${icon('refresh', { size:'sm' })}
-    <span><strong>${l('数值说明：','數值說明：','Stats:')}</strong>${l('', '', ' ')}${l(
-      '左侧为当前六维，右侧为替换并重配模组后的六维。',
-      '左側為目前六維，右側為替換並重配模組後的六維。',
-      'Left shows current stats; right shows the result after swaps and mod changes.'
-    )}</span>
+    <span><strong>${l('数值说明：','數值說明：','Stats:')}</strong>${l('', '', ' ')}${keepOnly
+      ? l(
+        '左侧为当前六维，右侧为保留现有护甲、只重排调谐与模组后的六维。',
+        '左側為目前六維，右側為保留目前防具、只重排調諧與模組後的六維。',
+        'Left shows current stats; right shows the result after keeping every piece and rearranging only tuning sources and mods.'
+      )
+      : l(
+        '左侧为当前六维，右侧为替换并重配模组后的六维。',
+        '左側為目前六維，右側為替換並重配模組後的六維。',
+        'Left shows current stats; right shows the result after swaps and mod changes.'
+      )}</span>
   </div>`;
 }
 
@@ -2643,21 +3486,25 @@ function buildUpgradeAssignments(analysis, evaluation, open = false) {
   </details>`;
 }
 
-function buildUpgradeRanking(analysis) {
-  if (analysis.rankings.length === 0) return '';
-  return `<div class="upgrade-ranking">
-    <h3>${l('如果只想先换一件','如果只想先換一件','If you only want to replace one piece first')}</h3>
-    ${analysis.rankings.map((candidate, index) => `
-      <div class="upgrade-ranking-row ${index === 0 ? 'is-best' : ''}">
-        <strong>#${index + 1} ${getUpgradeSlotLabel(candidate.slotIndex)}${candidate.tuningOnly
-          ? ` · ${l('只差 +5 属性','只差 +5 數值','+5 stat only')}`
-          : ''}</strong>
-        <span>${formatUpgradePieceSummary(candidate.afterPiece)}</span>
-        <span>${candidate.metrics.allReached
-          ? l('换这一件就够了','換這一件就夠了','This one replacement is enough')
-          : l(`换完还差 ${candidate.metrics.shortfall} 点 · 少 ${candidate.effectiveGain} 点`, `換完還差 ${candidate.metrics.shortfall} 點 · 少 ${candidate.effectiveGain} 點`, `${candidate.metrics.shortfall} short · improves by ${candidate.effectiveGain}`)}</span>
-      </div>`).join('')}
-  </div>`;
+// The alternative to a farming plan: keep all five pieces and only re-pick the
+// tuning -5 sources and armor mods. This is what analysis.baseline already is.
+function buildUpgradeKeepArmorAlternative(analysis) {
+  const shortfall = analysis.baseline.metrics.shortfall;
+  return `<details class="upgrade-assignment-details">
+    <summary>${l(
+      `备选方案：不刷护甲，保留现有五件重排调谐与模组，还差 ${shortfall} 点`,
+      `備選方案：不刷防具，保留目前五件重排調諧與模組，還差 ${shortfall} 點`,
+      `Alternative: no farming — keep all five pieces, rearrange tuning and mods, ${shortfall} points short`
+    )}</summary>
+    ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
+    ${buildUpgradeBaselineNote(analysis, true)}
+    <p class="upgrade-empty">${l(
+      '不想刷取新护甲的话，这是现有五件能达到的最好六维；想完全达标，还是需要按上面的方案刷取替换件。',
+      '不想刷取新防具的話，這是目前五件能達到的最好六維；想完全達標，還是需要按上面的方案刷取替換件。',
+      'If you do not want to farm, this is the best your five current pieces can reach; to meet every target you still need the replacement plan above.'
+    )}</p>
+    ${buildUpgradeAssignments(analysis, analysis.baseline)}
+  </details>`;
 }
 
 function renderUpgradeAnalysis(analysis, scroll = false) {
@@ -2666,6 +3513,7 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
   const section = document.getElementById('upgradeResults');
   const body = document.getElementById('upgradeResultsBody');
   section.hidden = calculatorMode !== 'upgrade';
+  let displayedEvaluation = analysis.baseline;
 
   if (analysis.baseline.metrics.allReached) {
     const enteredAlreadyReached = analysis.enteredBaseline.metrics.allReached;
@@ -2693,25 +3541,39 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
     ${buildUpgradeBaselineNote(analysis)}
     ${buildUpgradeAssignments(analysis, analysis.baseline, true)}`;
   } else if (!analysis.plan) {
+    // No replacement beats the current armor: it is already the closest setup.
+    const rearranged = analysis.reassignModifiers && analysis.enteredBaseline &&
+      STATS.some(stat =>
+        analysis.enteredBaseline.finalTotals[stat] !== analysis.baseline.finalTotals[stat]
+      );
     body.innerHTML = `<div class="upgrade-hero">
       <div>
-        <div class="upgrade-eyebrow">${l('没有合适的替换','沒有合適的替換','No useful replacement found')}</div>
-        <div class="upgrade-recommendation">${l('暂时没有更好的换法','暫時沒有更好的換法','There is no better swap right now')}</div>
+        <div class="upgrade-eyebrow">${l('当前配装已是最接近目标','目前配裝已是最接近目標','Current loadout is already the closest')}</div>
+        <div class="upgrade-recommendation">${rearranged
+          ? l('重配模组后已是最接近的方案','重配模組後已是最接近的方案','Already the closest after rearranging the mods')
+          : l('当前已是最接近目标的方案','目前已是最接近目標的方案','Already the closest setup to your targets')}</div>
         <p class="upgrade-recommendation-copy">${l(
-          '能换的框架都试过了。固定护甲和模组数量不变的话，缺口已经降不下去了。可以先降低一项目标，或放开一件固定护甲。',
-          '能換的原型都試過了。固定防具和模組數量不變的話，缺口已經降不下去了。可以先降低一項目標，或放開一件固定防具。',
-          'We tried every available archetype swap. With the same fixed pieces and mod count, the gap will not get any smaller. Lower one target or unlock a piece and try again.'
+          `所有能刷到的替换方案都无法缩小与目标的差距，当前这套就是最接近目标的选择（还差 ${analysis.baseline.metrics.shortfall} 点）。想完全达标，请降低一项目标，或放开一件固定护甲。`,
+          `所有能刷到的替換方案都無法縮小與目標的差距，目前這套就是最接近目標的選擇（還差 ${analysis.baseline.metrics.shortfall} 點）。想完全達標，請降低一項目標，或放開一件固定防具。`,
+          `Every replacement we could farm fails to close the gap to your targets — this loadout is already the closest (${analysis.baseline.metrics.shortfall} points short). To hit everything, lower a target or unlock one fixed piece.`
         )}</p>
       </div>
-      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('先调整目标或固定护甲','先調整目標或固定防具','Change a target or fixed piece first')}</span></div>
+      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('当前已是最接近 · 无需刷取','目前已是最接近 · 無需刷取','Closest available · no farming needed')}</span></div>
     </div>
     ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
-    ${buildUpgradeBaselineNote(analysis)}
-    ${buildUpgradeRanking(analysis)}`;
+    ${buildUpgradeBaselineNote(analysis)}`;
   } else {
     const plan = analysis.plan;
+    displayedEvaluation = plan.evaluation;
     const reached = plan.metrics.allReached;
-    body.innerHTML = `<div class="upgrade-hero">
+    const farmLabel = importedInventory.length > 0
+      ? `<div class="upgrade-option-label">${l(
+        '刷取方案：替换清单中没有的护甲（与上面从已有清单搭配的方案二选一）',
+        '刷取方案：替換清單中沒有的防具（與上面從已有清單搭配的方案二選一）',
+        'Farming plan: pieces not in your inventory (alternative to the owned-armor loadouts above)'
+      )}</div>`
+      : '';
+    body.innerHTML = farmLabel + `<div class="upgrade-hero">
       <div>
         <div class="upgrade-eyebrow">${reached
           ? l('推荐换法','推薦換法','Recommended swaps')
@@ -2721,14 +3583,14 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
           : l(`换 ${plan.replacementCount} 件后还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件後還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} and remain ${plan.metrics.shortfall} short`)}</div>
         <p class="upgrade-recommendation-copy">${reached
           ? l(
-            '方案已按优先顺序排好，照着下面执行即可。',
-            '方案已按優先順序排好，照著下面執行即可。',
-            'The swaps are already prioritized. Follow the steps below.'
+            '方案已按优先顺序排好，照着下面执行即可。如果暂时不想刷，也可以先保留现有护甲重排调谐与模组，但还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。',
+            '方案已按優先順序排好，照著下面執行即可。如果暫時不想刷，也可以先保留目前防具重排調諧與模組，但還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。',
+            'The swaps are already prioritized. Follow the steps below. If you do not want to farm yet, keeping your current armor and rearranging tuning and mods works too, but leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below).'
           )
           : l(
-            '目前没有一套能把六项都补齐。下面这套差得最少，可以先参考；想完全达标，还得降低目标或放开一件固定护甲。',
-            '目前沒有一套能把六項都補齊。下面這套差得最少，可以先參考；想完全達標，還得降低目標或放開一件固定防具。',
-            'Nothing we found fills all six targets. This is the closest setup; to hit everything, lower a target or unlock one fixed piece.'
+            '目前没有一套能把六项都补齐。下面这套差得最少，可以先参考；如果不想刷，保留现有护甲重排调谐与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。想完全达标，还得降低目标或放开一件固定护甲。',
+            '目前沒有一套能把六項都補齊。下面這套差得最少，可以先參考；如果不想刷，保留目前防具重排調諧與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。想完全達標，還得降低目標或放開一件固定防具。',
+            'Nothing we found fills all six targets. This is the closest setup; without farming, keeping your current armor and rearranging tuning and mods leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below). To hit everything, lower a target or unlock one fixed piece.'
           )}</p>
       </div>
       <div class="upgrade-outcome">
@@ -2745,9 +3607,422 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
     ${buildUpgradeStatComparison(analysis, plan.evaluation.finalTotals)}
     ${buildUpgradeBaselineNote(analysis)}
     ${buildUpgradePlanFlow(analysis, plan)}
-    ${buildUpgradeAssignments(analysis, plan.evaluation, true)}`;
+    ${buildUpgradeAssignments(analysis, plan.evaluation, true)}
+    ${buildUpgradeKeepArmorAlternative(analysis)}`;
   }
+  body.insertAdjacentHTML('afterbegin', buildUpgradeRequirementResult(analysis, displayedEvaluation));
   if (scroll) section.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+let lastInventoryResult = null;
+let lastInventoryTargets = null;
+let lastInventoryRequiredStats = [];
+let selectedInventoryResultIndex = 0;
+let inventorySolveRevision = 0;
+
+function clearInventoryResults() {
+  inventorySolveRevision++;
+  lastInventoryResult = null;
+  lastInventoryTargets = null;
+  lastInventoryRequiredStats = [];
+  selectedInventoryResultIndex = 0;
+  const el = document.getElementById("inventoryResults");
+  if (el) {
+    el.innerHTML = "";
+    el.hidden = true;
+  }
+}
+
+function formatSetRequirementLabel(requirement) {
+  if (!requirement || requirement.type === "none") {
+    return l("不要求", "不要求", "None");
+  }
+  if (requirement.type === "set") {
+    return `${escapeHtml(getSetName(getArmorSetByHash(requirement.setHash)))} ${requirement.count} ${l("件套", "件套", "pc")}`;
+  }
+  return `${escapeHtml(getSetName(getArmorSetByHash(requirement.a)))} 2 + ${escapeHtml(getSetName(getArmorSetByHash(requirement.b)))} 2`;
+}
+
+function snapshotSetRequirement(requirement = setRequirement) {
+  if (!requirement || requirement.type === "none") return { type: "none" };
+  if (requirement.type === "set") {
+    return {
+      type: "set",
+      setHash: Number(requirement.setHash),
+      count: Number(requirement.count),
+    };
+  }
+  return {
+    type: "split",
+    a: Number(requirement.a),
+    b: Number(requirement.b),
+  };
+}
+
+function sameSetRequirement(left, right) {
+  return JSON.stringify(snapshotSetRequirement(left)) ===
+    JSON.stringify(snapshotSetRequirement(right));
+}
+
+// Search the imported inventory for loadouts built only from owned pieces and
+// render them as the "no farming" option. Returns the message HTML so the
+// caller can compose it with the farming-plan message.
+async function solveInventoryRequirement({
+  targets = getUpgradeTargets(),
+  fragments = getUpgradeFragments(),
+  requiredStats = getUpgradeRequiredStats(),
+} = {}) {
+  const button = document.getElementById("btnUpgradeAnalyze");
+  const loading = document.getElementById("loading");
+  const requirementSnapshot = snapshotSetRequirement();
+  const solveRevision = ++inventorySolveRevision;
+  const setControls = [...document.querySelectorAll(".set-requirement-controls select")];
+  const reassignModifiers = document.getElementById("upgradeReassignModifiers")?.checked !== false;
+  const pool = filterArmorItems(importedInventory, {
+    classId: importClassFilter || null,
+    tier5Only: importTier5Only,
+  });
+  if (pool.length === 0) {
+    return `<div class="msg error">${icon("block")}${l(
+      "当前筛选下没有可用的护甲（检查职业与 Tier 5 开关），无法从清单中搭配。",
+      "目前篩選下沒有可用的防具（檢查職業與 Tier 5 開關），無法從清單中搭配。",
+      "No usable armor under the current filter (check class and the Tier 5 toggle); cannot build from the list."
+    )}</div>`;
+  }
+
+  button.disabled = true;
+  setControls.forEach(control => { control.disabled = true; });
+  loading.querySelector("p").textContent = l(
+    "正在从已有清单中搭配护甲与六维...",
+    "正在從已有清單中搭配防具與六維...",
+    "Searching your inventory for the best loadout..."
+  );
+  loading.classList.add("show");
+  loading.setAttribute("aria-busy", "true");
+  saveUpgradeDraft();
+
+  try {
+    const result = await solveInventoryAsync({
+      items: pool,
+      targets,
+      fragments,
+      setRequirement: requirementSnapshot,
+      reassignModifiers,
+      currentPieces: upgradeBuildState,
+      requiredStats,
+    });
+    if (solveRevision !== inventorySolveRevision ||
+        !sameSetRequirement(requirementSnapshot, setRequirement)) {
+      return null;
+    }
+    lastInventoryTargets = targets;
+    lastInventoryRequiredStats = requiredStats;
+    renderInventoryResults(result);
+    if (result?.results?.length) {
+      return `<div class="msg info">${icon("check")}${requirementSnapshot.type === "none"
+        ? l(
+          `从已有护甲清单中找到 ${result.results.length} 个可行组合（无需刷取），可核对后导出 DIM 配装链接。`,
+          `從已有防具清單中找到 ${result.results.length} 個可行組合（無需刷取），可核對後匯出 DIM 配裝連結。`,
+          `Found ${result.results.length} loadouts from armor you already own (no farming). Review one and export a DIM loadout link.`
+        )
+        : l(
+          `找到 ${result.results.length} 个满足 ${formatSetRequirementLabel(requirementSnapshot)} 的组合，可点击“应用此方案”。`,
+          `找到 ${result.results.length} 個滿足 ${formatSetRequirementLabel(requirementSnapshot)} 的組合，可點擊「套用此方案」。`,
+          `Found ${result.results.length} loadouts meeting ${formatSetRequirementLabel(requirementSnapshot)}. Click “Apply” to use one.`
+        )}</div>`;
+    }
+    return `<div class="msg error">${icon("block")}${requirementSnapshot.type === "none"
+      ? l(
+        "当前筛选下清单里凑不齐五件护甲，无法从清单搭配；可调整职业或 Tier 5 筛选后重试。",
+        "目前篩選下清單中湊不齊五件防具，無法從清單搭配；可調整職業或 Tier 5 篩選後重試。",
+        "The list cannot produce a five-piece loadout under the current filter. Adjust the class or Tier 5 filter and try again."
+      )
+      : l(
+        "清单里凑不出满足所选套装要求的配装（当前职业 / Tier 5 筛选下套装件数不足）。",
+        "清單中湊不出滿足所選套裝要求的配裝（目前職業 / Tier 5 篩選下套裝件數不足）。",
+        "The list cannot produce a loadout meeting the set requirement (not enough set pieces under the current class / Tier 5 filter)."
+      )}</div>`;
+  } catch (error) {
+    console.error("Inventory solve failed", error);
+    return `<div class="msg error">${icon("block")}${l(
+      "库存搭配计算失败，请重试。",
+      "庫存搭配計算失敗，請重試。",
+      "The inventory solve failed. Please try again."
+    )}</div>`;
+  } finally {
+    button.disabled = false;
+    setControls.forEach(control => { control.disabled = false; });
+    loading.classList.remove("show");
+    loading.setAttribute("aria-busy", "false");
+    loading.querySelector("p").textContent = t("calculating");
+  }
+}
+
+function renderInventoryResults(result) {
+  const el = document.getElementById("inventoryResults");
+  if (!el) return;
+  lastInventoryResult = result;
+  if (!result?.results?.length) {
+    el.innerHTML = "";
+    el.hidden = true;
+    return;
+  }
+  selectedInventoryResultIndex = Math.min(
+    Math.max(0, selectedInventoryResultIndex),
+    result.results.length - 1,
+  );
+  const selected = result.results[selectedInventoryResultIndex];
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="inventory-results-head">
+      <div>
+        <h2 class="inventory-results-title">${l("已有护甲搭配方案", "已有防具搭配方案", "Owned armor loadouts")}</h2>
+        <p>${l(
+          "从已拥有的护甲清单中搭配，无需刷取；选择方案核对装备与六维后，可导出 DIM 配装链接。",
+          "從已擁有的防具清單中搭配，無需刷取；選擇方案核對裝備與六維後，可匯出 DIM 配裝連結。",
+          "Loadouts built from armor you already own — no farming. Pick one, review the pieces, then export a DIM loadout link."
+        )}</p>
+      </div>
+      <span class="inventory-results-req">${result.requirement?.type === "none"
+        ? l("全部已有护甲", "全部已有防具", "All owned armor")
+        : formatSetRequirementLabel(result.requirement)} · ${l(
+        `共检查 ${result.examined} 种组合`,
+        `共檢查 ${result.examined} 種組合`,
+        `${result.examined} combinations examined`
+      )}</span>
+    </div>
+    <div class="inventory-results-layout">
+      <div class="inventory-result-list" role="listbox" aria-label="${l("方案清单", "方案清單", "Loadout list")}">
+        ${result.results.map((entry, index) => renderInventoryResultOption(entry, index)).join("")}
+      </div>
+      <div class="inventory-result-detail">${renderInventoryResultDetail(selected, selectedInventoryResultIndex)}</div>
+    </div>`;
+}
+
+function getInventoryResultSummary(entry) {
+  const targets = lastInventoryTargets || {};
+  const metCount = STATS.filter(stat => (entry.finalTotals[stat] || 0) >= (targets[stat] || 0)).length;
+  const requiredCount = entry.metrics.requiredCount || lastInventoryRequiredStats.length;
+  const requiredReachedCount = entry.metrics.requiredReachedCount || 0;
+  const statusMet = requiredCount > 0 ? entry.metrics.requiredAllReached : entry.metrics.allReached;
+  const status = entry.metrics.allReached
+    ? l("六维全部达标", "六維全部達標", "All targets met")
+    : (requiredCount > 0
+      ? (entry.metrics.requiredAllReached
+        ? l("必达属性全部满足", "必達數值全部滿足", "All must-meet stats satisfied")
+        : l(
+          `必达属性还差 ${entry.metrics.requiredShortfall} 点`,
+          `必達數值還差 ${entry.metrics.requiredShortfall} 點`,
+          `Must-meet stats ${entry.metrics.requiredShortfall} points short`
+        ))
+      : l(`还差 ${entry.metrics.shortfall} 点`, `還差 ${entry.metrics.shortfall} 點`, `${entry.metrics.shortfall} points short`));
+  return { metCount, requiredCount, requiredReachedCount, status, statusMet };
+}
+
+function renderInventoryResultOption(entry, index) {
+  const { metCount, requiredCount, requiredReachedCount, status, statusMet } = getInventoryResultSummary(entry);
+  const fixedCount = entry.pieces.filter(piece => piece.locked).length;
+  return `
+    <button type="button" class="inventory-result-option ${entry.isCurrent ? "is-current" : ""}"
+      role="option" aria-selected="${index === selectedInventoryResultIndex}" onclick="selectInventorySolution(${index})">
+      <span class="inventory-result-rank">${index + 1}</span>
+      <span class="inventory-result-option-copy">
+        <strong class="inventory-result-status ${statusMet ? "is-met" : ""}">${status}</strong>
+        <small>${requiredCount > 0 ? l(
+          `必达 ${requiredReachedCount}/${requiredCount} · `,
+          `必達 ${requiredReachedCount}/${requiredCount} · `,
+          `Must meet ${requiredReachedCount}/${requiredCount} · `
+        ) : ''}${l(`达标 ${metCount}/6`, `達標 ${metCount}/6`, `${metCount}/6 met`)}${fixedCount
+          ? l(` · 保留 ${fixedCount} 件固定装备`, ` · 保留 ${fixedCount} 件固定裝備`, ` · ${fixedCount} fixed kept`)
+          : ""}</small>
+      </span>
+      ${entry.isCurrent ? `<span class="inventory-result-current">${l("当前", "目前", "Current")}</span>` : ""}
+    </button>`;
+}
+
+function renderInventoryResultDetail(entry, index) {
+  const targets = lastInventoryTargets || {};
+  const { metCount, requiredCount, requiredReachedCount, status, statusMet } = getInventoryResultSummary(entry);
+  return `
+    <div class="inventory-result-detail-head">
+      <div>
+        <span class="inventory-result-detail-label">${l(`方案 ${index + 1}`, `方案 ${index + 1}`, `Loadout ${index + 1}`)}</span>
+        <h3 class="${statusMet ? "is-met" : ""}">${status}</h3>
+        <p>${requiredCount > 0 ? l(
+          `必达 ${requiredReachedCount}/${requiredCount} · `,
+          `必達 ${requiredReachedCount}/${requiredCount} · `,
+          `Must meet ${requiredReachedCount}/${requiredCount} · `
+        ) : ''}${l(`目标达成 ${metCount}/6`, `目標達成 ${metCount}/6`, `${metCount} of 6 targets met`)}</p>
+      </div>
+      <div class="inventory-result-actions">
+        <button type="button" class="btn-solve inventory-export-button" onclick="exportInventorySolution(${index})">${icon("share")}${l("导出 DIM 配装链接", "匯出 DIM 配裝連結", "Export DIM loadout link")}</button>
+      </div>
+    </div>
+    <div class="inventory-result-stats" role="list">
+      ${STATS.map(stat => {
+        const actual = entry.finalTotals[stat] || 0;
+        const target = targets[stat] || 0;
+        const met = actual >= target;
+        const isRequired = lastInventoryRequiredStats.includes(stat);
+        return `<div class="inventory-result-stat ${met ? "is-met" : "is-short"} ${isRequired ? 'is-required' : ''}" role="listitem">
+          <span style="color:${STAT_COLORS[stat]}">${icon(stat)}${STAT_LABELS[stat]}</span>
+          <strong>${actual}</strong>
+          <small>${isRequired ? `${l('必须达标','必須達標','Must meet')} · ` : ''}${l("目标", "目標", "Target")} ${target}${met
+            ? ` · ${l("达标", "達標", "met")}`
+            : ` · ${l(`差 ${target - actual}`, `差 ${target - actual}`, `${target - actual} short`)}`}</small>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="inventory-result-pieces" role="list">
+      ${entry.pieces.map(piece => {
+        const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
+        const set = piece.setHash ? getArmorSetByHash(piece.setHash) : null;
+        return `<div class="inventory-result-piece" role="listitem">
+          <span class="inventory-result-piece-slot">${getUpgradeSlotLabel(slotIndex)}</span>
+          <span class="inventory-result-piece-name">${escapeHtml(piece.itemName || "—")}</span>
+          ${set ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(set))}</span>` : `<span></span>`}
+          ${piece.locked ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${piece.exotic
+            ? l("异域固定", "異域固定", "Fixed Exotic")
+            : l("固定保留", "固定保留", "Fixed")}</span>` : ""}
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function selectInventorySolution(index) {
+  if (!lastInventoryResult?.results?.[index]) return;
+  selectedInventoryResultIndex = index;
+  renderInventoryResults(lastInventoryResult);
+}
+
+// A DIM import link: https://app.destinyitemmanager.com/loadouts?loadout=<JSON>
+// This is the same format DIM itself produces for shared loadouts, accepted by
+// its "Import Loadout" flow without any upload, so the app stays static. The
+// link carries the five armor instances plus the plan's stat mods and tuning
+// mods in parameters.mods, which DIM auto-assigns when the loadout is applied.
+// Only pieces imported from the DIM CSV carry the hash + instance id DIM needs.
+let lastDimExportUrl = "";
+
+function getDimLoadoutExport(pieces, tuningAssignments, modAssignments) {
+  const classTypeById = { titan: 0, hunter: 1, warlock: 2 };
+  const equipped = [];
+  const mods = [];
+  pieces.forEach((piece, index) => {
+    if (!piece?.hash || !piece?.sourceId) return;
+    equipped.push({ id: piece.sourceId, hash: Number(piece.hash), amount: 1 });
+    const mod = modAssignments?.[index];
+    if (mod?.size > 0) {
+      const modHash = STAT_MOD_HASHES[mod.stat]?.[mod.size];
+      if (modHash) mods.push(modHash);
+    }
+    const tuning = tuningAssignments?.[index];
+    if (tuning?.mode === '+3') {
+      mods.push(BALANCED_TUNING_MOD_HASH);
+    } else if (tuning?.mode === '+5-5' && tuning.to && tuning.from) {
+      const tuningHash = TUNING_MOD_HASH_BY_TUNING[`${tuning.to}:${tuning.from}`];
+      if (tuningHash) mods.push(tuningHash);
+    }
+  });
+  const loadout = {
+    id: `d2armor-${Date.now().toString(36)}`,
+    name: l("T5 配装方案", "T5 配裝方案", "T5 Armor Loadout"),
+    classType: classTypeById[importClassFilter] ?? 3,
+    equipped,
+    unequipped: [],
+    parameters: { mods },
+  };
+  return {
+    url: `https://app.destinyitemmanager.com/loadouts?loadout=${encodeURIComponent(JSON.stringify(loadout))}`,
+    count: equipped.length,
+    modCount: mods.length,
+  };
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
+function renderDimExportMessage(messages, url, count, modCount, ok) {
+  const note = count < 5
+    ? l(
+      `（${5 - count} 件缺少 DIM 实例信息，未包含）`,
+      `（${5 - count} 件缺少 DIM 實例資訊，未包含）`,
+      ` (${5 - count} piece(s) lack DIM instance data and were skipped)`
+    )
+    : '';
+  const modNote = modCount > 0
+    ? l(
+      `，已包含 ${modCount} 个护甲模组/调谐设置`,
+      `，已包含 ${modCount} 個防具模組/調諧設定`,
+      `, includes ${modCount} armor mod/tuning settings`
+    )
+    : l(
+      "（未包含模组设置）",
+      "（未包含模組設定）",
+      " (no mod settings included)"
+    );
+  const heading = ok
+    ? l(
+      `已复制 DIM 配装链接（${count} 件护甲）${note}${modNote}`,
+      `已複製 DIM 配裝連結（${count} 件防具）${note}${modNote}`,
+      `DIM loadout link copied (${count} armor pieces)${note}${modNote}`
+    )
+    : l(
+      "复制失败，请用下方按钮复制或打开链接：",
+      "複製失敗，請用下方按鈕複製或開啟連結：",
+      "Copy failed. Use the buttons below to copy or open the link:"
+    );
+  messages.innerHTML = `<div class="msg ${ok ? "info" : "error"} dim-export-msg">${
+    icon(ok ? "check" : "block")
+  }<div class="dim-export-body">
+    <span>${heading}</span>
+    <div class="dim-export-actions">
+      <a class="btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">${icon("share")}${l("在 DIM 中打开", "在 DIM 中開啟", "Open in DIM")}</a>
+      <button type="button" class="btn" onclick="copyDimExportLink()">${icon("save")}${l("重新复制链接", "重新複製連結", "Copy link again")}</button>
+    </div>
+    <p class="dim-export-hint">${l(
+      "打开前请确保浏览器已登录 DIM；或复制链接后，粘贴到 DIM → Loadouts → Import Loadout。模组与调谐（含 -5 来源）已随链接带入，需已拥有对应模组（未拥有的会灰显忽略）；护甲需已满大师。",
+      "開啟前請確保瀏覽器已登入 DIM；或複製連結後，貼上到 DIM → Loadouts → Import Loadout。模組與調諧（含 -5 來源）已隨連結帶入，需已擁有對應模組（未擁有的會灰顯忽略）；防具需已滿傑作。",
+      "Make sure DIM is logged in before opening the link, or paste it into DIM → Loadouts → Import Loadout. Stat mods and the full tuning setup (including the -5 source) are included in the link — you must own them (missing mods are greyed out and ignored); armor must be fully masterworked."
+    )}</p>
+  </div></div>`;
+}
+
+async function copyDimExportLink() {
+  if (!lastDimExportUrl) return;
+  try {
+    await copyText(lastDimExportUrl);
+  } catch (error) {
+    console.error('DIM loadout link copy failed', error);
+  }
+}
+
+async function exportInventorySolution(index) {
+  const entry = lastInventoryResult?.results?.[index];
+  if (!entry) return;
+  const { url, count, modCount } = getDimLoadoutExport(
+    entry.pieces, entry.tuningAssignments, entry.modAssignments
+  );
+  lastDimExportUrl = url;
+  const messages = document.getElementById('messages');
+  try {
+    await copyText(url);
+    renderDimExportMessage(messages, url, count, modCount, true);
+  } catch (error) {
+    console.error('DIM loadout export failed', error);
+    renderDimExportMessage(messages, url, count, modCount, false);
+  }
 }
 
 async function analyzeArmorUpgrades() {
@@ -2756,11 +4031,21 @@ async function analyzeArmorUpgrades() {
   const messages = document.getElementById('messages');
   const targets = getUpgradeTargets();
   const fragments = getUpgradeFragments();
+  const requiredStats = getUpgradeRequiredStats();
   const reassignModifiers = document.getElementById('upgradeReassignModifiers')?.checked !== false;
-  const unlockedCount = upgradeBuildState.filter(piece => !piece.locked).length;
   messages.innerHTML = '';
+
+  // With an imported inventory the "no farming" option comes from the pieces
+  // you already own; the theoretical plan below is the "farming" option.
+  let inventoryMessage = '';
+  if (importedInventory.length > 0) {
+    inventoryMessage = await solveInventoryRequirement({ targets, fragments, requiredStats });
+    if (inventoryMessage === null) return;
+  }
+
+  const unlockedCount = upgradeBuildState.filter(piece => !piece.locked).length;
   if (unlockedCount === 0) {
-    messages.innerHTML = `<div class="msg error">${icon('block')}${l(
+    messages.innerHTML = inventoryMessage + `<div class="msg error">${icon('block')}${l(
       '5 件护甲都被固定了。至少放开一件，才能继续找替换方案。',
       '5 件防具都被固定了。至少放開一件，才能繼續找替換方案。',
       'All five pieces are fixed. Unlock at least one before looking for replacements.'
@@ -2780,9 +4065,10 @@ async function analyzeArmorUpgrades() {
         targets,
         fragments,
         reassignModifiers,
+        requiredStats,
       });
       renderUpgradeAnalysis(analysis, true);
-      messages.innerHTML = `<div class="msg info">${icon('check')}${analysis.baseline.metrics.allReached
+      messages.innerHTML = inventoryMessage + `<div class="msg info">${icon('check')}${analysis.baseline.metrics.allReached
         ? l('算好了：现在这套不用换护甲。','算好了：目前這套不用換防具。','Done: you can keep the current armor.')
         : (analysis.plan
           ? (analysis.plan.metrics.allReached
@@ -2791,7 +4077,7 @@ async function analyzeArmorUpgrades() {
           : l('没有找到能缩小缺口的替换方案。','沒有找到能縮小缺口的替換方案。','No replacement plan reduces the gap.'))}</div>`;
     } catch (error) {
       console.error('Armor upgrade analysis failed', error);
-      messages.innerHTML = '<div class="msg error">' + icon('block') + l(
+      messages.innerHTML = inventoryMessage + '<div class="msg error">' + icon('block') + l(
         '替换分析过程中发生错误，请重试。',
         '替換分析過程中發生錯誤，請重試。',
         'The replacement analysis failed. Please try again.'
@@ -2828,6 +4114,7 @@ function saveBuild() {
   const name = prompt(l('给这套配装起个名字（留空自动命名）：','為這套配裝命名（留空自動命名）：','Name this loadout (leave blank for an automatic name):')) ||
     l('配装 ','配裝 ','Loadout ') + new Date().toLocaleDateString(localeCode()) + ' ' + new Date().toLocaleTimeString(localeCode()).slice(0,5);
   const exoticSettings = getExoticSettings();
+  const onlyPlus5Tuning = isOnlyPlus5Tuning();
 
   const build = {
     name,
@@ -2837,7 +4124,8 @@ function saveBuild() {
     targetLocks: Object.fromEntries(STATS.map(s => [s, document.getElementById('targetLock_' + s)?.checked || false])),
     numPlus5: getVal('numPlus5'),
     numPlus10: getVal('numPlus10'),
-    n3Enabled: document.getElementById('usePlus3')?.checked || false,
+    onlyPlus5Tuning,
+    n3Enabled: !onlyPlus5Tuning && (document.getElementById('usePlus3')?.checked || false),
     numPlus3: getPlus3Count(),
     exotic: exoticSettings ? {
       enabled: true,
@@ -2872,11 +4160,12 @@ function loadBuild(build) {
   }
   document.getElementById('numPlus5').value = build.numPlus5;
   document.getElementById('numPlus10').value = build.numPlus10;
-  document.getElementById('usePlus3').checked = build.n3Enabled;
-  document.getElementById('plus3CountRow').style.display = build.n3Enabled ? 'block' : 'none';
+  document.getElementById('onlyPlus5Tuning').checked = build.onlyPlus5Tuning === true;
+  document.getElementById('usePlus3').checked = !build.onlyPlus5Tuning && !!build.n3Enabled;
   if (build.n3Enabled) {
     document.getElementById('plus3CountVal').textContent = build.numPlus3;
   }
+  syncPlus3PreferenceUI();
   document.getElementById('useExoticMode').checked = !!build.exotic?.enabled;
   toggleExoticMode();
   if (build.exotic?.enabled) {
@@ -2896,7 +4185,7 @@ function loadBuild(build) {
     lastFragments = build.fragments;
     lastNumPlus5 = build.numPlus5;
     lastNumPlus10 = build.numPlus10;
-    lastNumPlus3 = build.n3Enabled ? build.numPlus3 : 0;
+    lastNumPlus3 = build.onlyPlus5Tuning || !build.n3Enabled ? 0 : build.numPlus3;
     lastExoticSettings = getExoticSettings();
     displayAllResults(build.result, build.targets, build.fragments);
   }
@@ -2960,24 +4249,29 @@ Object.assign(window, {
   adjFragment,
   adjPlus3,
   analyzeArmorUpgrades,
+  applyEquippedLoadout,
   applyNearestTargetSuggestion,
   balanceTargetsToBudget,
   changeOwnedCount,
   changePageLanguage,
   clearAllBuilds,
+  copyDimExportLink,
+  exportInventorySolution,
+  clearImportedInventory,
   clearOwnedGear,
   deleteBuild,
   getSavedBuilds,
+  handleDimCsvFile,
   handleUpgradeDragEnd,
   handleUpgradeDragStart,
   handleUpgradeDrop,
-  inferUpgradeArmor,
   loadBuild,
   refineWithPriorities,
   resetConstraints,
   resetTargetStats,
   resortByOwned,
   saveBuild,
+  selectInventorySolution,
   setCalculatorMode,
   solve,
   switchSolution,
@@ -2985,7 +4279,12 @@ Object.assign(window, {
   sync5to10,
   toggleAllSolutions,
   toggleExoticMode,
+  toggleOnlyPlus5Tuning,
   togglePlus3,
+  updateImportOptions,
+  updateInventoryExoticSlot,
+  updateInventorySolveOptions,
+  updateUpgradeRequiredStat,
   updateExoticFramework,
   updateExoticPerkOptions,
   updateOwnedCount,
@@ -2994,6 +4293,8 @@ Object.assign(window, {
   updateRefineActionState,
   updateUpgradeOption,
   updateUpgradePiece,
+  updateSetRequirementMode,
+  updateSetRequirementPicks,
   updateUpgradeTuningChoice
 });
 
@@ -3003,6 +4304,7 @@ Object.assign(window, {
 initializePageLanguage();
 renderInputs();
 renderExoticInputs();
+syncPlus3PreferenceUI();
 document.getElementById('inputCard').addEventListener('input', () => {
   updateBudget();
   scheduleRealtimeRanges();

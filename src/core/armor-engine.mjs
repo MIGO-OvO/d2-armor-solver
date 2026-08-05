@@ -1,4 +1,5 @@
 import { calculateReachableRanges } from "./reachability.mjs";
+import { solveInventoryLoadout } from "./inventory-solver.mjs";
 import { runSolver } from "./solver.mjs";
 import { analyzeUpgradeCandidates } from "./upgrade-optimizer.mjs";
 
@@ -45,11 +46,17 @@ export function analyzeUpgrade({
   targets,
   fragments,
   reassignModifiers,
+  requiredStats = [],
 }) {
   return analyzeUpgradeCandidates(
     pieces,
     targets,
     fragments,
     reassignModifiers,
+    requiredStats,
   );
+}
+
+export function solveInventory(payload) {
+  return solveInventoryLoadout(payload);
 }

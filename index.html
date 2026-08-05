@@ -54,6 +54,10 @@
       <path d="M20 12a8 8 0 1 1-2.6-5.9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
       <path d="M20.4 3.4v4.4H16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
+    <symbol id="i-share" viewBox="0 0 24 24">
+      <path d="M12 3.4 7.6 7.8M12 3.4l4.4 4.4M12 3.4V15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4.6 13.6v6h14.8v-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
     <symbol id="i-target" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
       <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
@@ -137,22 +141,25 @@
     </button>
   </div>
 
+  <section class="inventory-import-card" id="inventoryImportCard" hidden aria-label="DIM护甲清单" data-i18n-aria="inventoryImportAriaLabel">
+    <div id="upgradeImportPanel" class="upgrade-import-panel"></div>
+  </section>
+
   <section class="card upgrade-build-card" id="upgradeBuildCard" hidden aria-labelledby="upgradeBuildHeading">
     <div class="upgrade-card-header">
-      <h2 id="upgradeBuildHeading" data-i18n="upgradeBuildHeading">当前五件护甲</h2>
+      <h2 id="upgradeBuildHeading" data-i18n="upgradeBuildHeading">优化现有配装</h2>
       <p class="upgrade-card-copy" data-i18n="upgradeBuildDescription">
-        把正在用的 5 件 T5 护甲按装备栏填好。异域和不想换的护甲记得勾选“固定”。
+        设置当前五件护甲，并选择需要保留的固定装备。
       </p>
-      <div class="upgrade-infer-panel">
-        <div>
-          <div class="upgrade-infer-copy"><strong>快速录入当前六维</strong>：填入游戏里看到的六维，系统会反推一套最接近的护甲框架；之后仍可逐件微调。框架顺序不确定时，可拖动装备行交换。</div>
-          <div class="upgrade-infer-grid" id="upgradeInferGrid"></div>
-        </div>
-        <button type="button" class="btn" onclick="inferUpgradeArmor()">反推护甲</button>
+    </div>
+    <div class="upgrade-current-section">
+      <div class="upgrade-current-head">
+        <h3 id="upgradeCurrentHeading" data-i18n="upgradeCurrentHeading">当前五件护甲</h3>
+        <p class="upgrade-current-copy" data-i18n="upgradeCurrentDescription">异域和不想替换的护甲请勾选“固定”。</p>
       </div>
+      <div id="upgradeBuildEditor"></div>
       <div class="upgrade-live-summary" id="upgradeLiveSummary" aria-live="polite" aria-atomic="true"></div>
     </div>
-    <div id="upgradeBuildEditor"></div>
     <div class="upgrade-options">
       <label>
         <input type="checkbox" id="upgradeReassignModifiers" checked onchange="updateUpgradeOption()">
@@ -175,7 +182,7 @@
         <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="resetTargetsButton">恢复默认值</span>
       </button>
     </h2>
-    <p class="upgrade-target-hint" data-i18n="upgradeTargetHint">优化模式将每项输入视为最低目标；高于目标的属性不会判定为失败。</p>
+    <p class="upgrade-target-hint" data-i18n="upgradeTargetHint">这里填最低目标。勾选“必须达标”后，该属性会优先满足；其余方案再按总缺口从小到大排列。高于目标仍视为达标。</p>
     <div class="input-grid" id="targetGrid"></div>
     <div class="upgrade-target-budget" id="upgradeTargetBudget" aria-live="polite"></div>
     <div id="realtimeRangeSummary" style="margin-top:8px;display:none;" aria-live="polite"></div>
@@ -221,6 +228,13 @@
         <div class="budget-info" id="budgetInfo" aria-live="polite"></div>
       </div>
       <div class="plus3-panel">
+        <div class="plus5-only-preference">
+          <label class="plus5-only-toggle">
+            <input type="checkbox" id="onlyPlus5Tuning" onchange="toggleOnlyPlus5Tuning()">
+            <span data-i18n-html="onlyPlus5TuningLabel">只使用<strong style="color:var(--accent);">+5/-5</strong>调整（不使用+3）</span>
+          </label>
+          <span class="plus5-only-hint" id="onlyPlus5TuningHint" data-i18n="onlyPlus5TuningHint">选中后，求解方案不会分配+3调整。</span>
+        </div>
         <label class="plus3-toggle">
           <input type="checkbox" id="usePlus3" onchange="togglePlus3()">
           <span data-i18n-html="plus3ModeLabel">启用调整<strong style="color:var(--accent);">+3</strong>模式（免费+3点/件）</span>
@@ -252,6 +266,9 @@
   </div>
 
   <div id="messages" aria-live="polite" aria-atomic="false"></div>
+
+  <section class="card inventory-plan-results" id="inventoryPlanResults" hidden aria-live="polite" aria-labelledby="inventoryPlanHeading"></section>
+  <section class="card inventory-results" id="inventoryResults" hidden aria-live="polite"></section>
 
   <section class="card upgrade-results" id="upgradeResults" hidden aria-labelledby="upgradeResultsHeading">
     <h2 id="upgradeResultsHeading" data-i18n="upgradeResultsHeading">护甲替换分析</h2>
