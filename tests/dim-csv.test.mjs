@@ -94,6 +94,8 @@ test("DIM import recognizes +3 tuning even when the tuning column contains a sta
   assert.deepEqual(getManualUpgradeArmorTotals([piece]), {
     health: 1, melee: 20, grenade: 30, super: 35, class: 1, weapons: 1,
   });
+  assert.deepEqual(piece.optimizationBaseStats, item.optimizationBaseStats,
+    "the upgrade planner must retain the full-masterwork projection");
 });
 
 test("DIM import caps the masterwork bonus at +5 per stat regardless of tier", () => {

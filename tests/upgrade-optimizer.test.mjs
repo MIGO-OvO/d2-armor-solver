@@ -8,7 +8,9 @@ import {
   createDefaultUpgradePiece,
   evaluateUpgradePieces,
   getUpgradeMetrics,
+  getUpgradeReplacements,
   normalizeUpgradePiece,
+  refineUpgradePlanPieces,
 } from "../src/core/upgrade-optimizer.mjs";
 import {
   ARCHETYPES, BASE_CONFIGS, STATS,
@@ -150,6 +152,92 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
     analysis.plan.evaluation.finalTotals.weapons, target.weapons,
     "the plan must land exactly on the target"
   );
+
+  for (const requiredStats of [["health"], STATS]) {
+    const requiredAnalysis = analyzeUpgradeCandidates(
+      broken, target, fragments, true, requiredStats
+    );
+    const label = requiredStats.length === STATS.length ? "all stats" : requiredStats[0];
+    assert.ok(requiredAnalysis.plan,
+      `the exact two-piece plan must survive the ${label} required selection`);
+    assert.equal(requiredAnalysis.plan.metrics.allReached, true,
+      `${label} required must not demote a plan that reaches the full target`);
+    assert.equal(
+      requiredAnalysis.plan.replacementCount, 2,
+      `${label} required: expected 2 replacements, got ${requiredAnalysis.plan.replacementCount}`
+    );
+  }
+});
+
+// Regression for the real DIM-import scenario reported in the UI. The current
+// values are the item's present masterwork values, while from-scratch solving
+// and farming advice both assume the same pieces at full masterwork. Planning
+// must use that projection without changing the entered/current-stat display.
+test("upgrade planning uses full-masterwork projections for kept DIM pieces", () => {
+  const grenadier = ARCHETYPES.find(archetype => archetype.id === "Grenadier");
+  const fullStats = BASE_CONFIGS.find(config =>
+    config.archetype === grenadier.name && config.tertiary === "melee"
+  ).baseStats;
+  const currentStats = [
+    fullStats,
+    fullStats,
+    { health: 0, melee: 20, grenade: 30, super: 25, class: 4, weapons: 0 },
+    { health: 0, melee: 20, grenade: 30, super: 25, class: 0, weapons: 0 },
+    fullStats,
+  ];
+  const pieces = currentStats.map((baseStats, index) => normalizeUpgradePiece({
+    archetypeId: "Grenadier",
+    tertiary: "melee",
+    baseStats: { ...baseStats },
+    optimizationBaseStats: { ...fullStats },
+    tuningMode: index === 3 ? "plus3" : "shift",
+    tuningFrom: "class",
+    tuningTo: index === 2 ? "melee" : "super",
+    armorModSize: [5, 5, 10, 10, 10][index],
+    armorModStat: index === 4 ? "melee" : "super",
+    exotic: index === 1,
+    locked: index === 1,
+  }, index));
+  const targets = {
+    health: 35, melee: 100, grenade: 130, super: 200, class: 0, weapons: 25,
+  };
+  const fragments = {
+    health: 10, melee: -20, grenade: 0, super: 10, class: 0, weapons: 0,
+  };
+
+  const analysis = analyzeUpgradeCandidates(
+    pieces, targets, fragments, true, [], true
+  );
+
+  assert.deepEqual(analysis.enteredBaseline.finalTotals, {
+    health: 26, melee: 95, grenade: 150, super: 180, class: 0, weapons: 16,
+  }, "the entered baseline must keep the current DIM/masterwork values");
+  assert.ok(analysis.plan, "the projected full-masterwork loadout has an exact plan");
+  assert.equal(analysis.plan.metrics.allReached, true);
+  assert.equal(
+    analysis.plan.replacementCount, 2,
+    "only legs and class item need farming after retained pieces are projected"
+  );
+  assert.deepEqual(
+    analysis.plan.replacements.map(replacement => replacement.slotIndex).sort(),
+    [3, 4]
+  );
+  assert.ok(analysis.plan.pieces.every(piece => piece.tuningMode !== "plus3"));
+});
+
+test("legacy upgrade drafts reconstruct their full-masterwork projection", () => {
+  const piece = normalizeUpgradePiece({
+    archetypeId: "Grenadier",
+    tertiary: "melee",
+    baseStats: {
+      health: 2, melee: 20, grenade: 30, super: 25, class: 2, weapons: 2,
+    },
+    masterworkTier: 2,
+  }, 0);
+
+  assert.deepEqual(piece.optimizationBaseStats, {
+    health: 5, melee: 20, grenade: 30, super: 25, class: 5, weapons: 5,
+  });
 });
 
 // "Only +5/-5" restricts every proposed plan and candidate, while the entered
@@ -183,9 +271,48 @@ test("only +5/-5 analysis never proposes +3 pieces but keeps the real baseline",
   }
 });
 
-// Regression: a plan that meets the must-meet stats with fewer swaps must beat
-// a bigger plan that also meets them but only narrows the optional shortfall.
-test("must-meet plans prefer fewer swaps; unmet must-meet still outranks swaps", () => {
+// Regression: the +3 pieces the player owns must not leak into the plan output.
+// "Only +5/-5" reads them as +5/-5 pieces everywhere, so the plan's kept pieces
+// and every step's farmed piece carry +5/-5 tuning, never +3.
+test("only +5/-5 plan pieces and steps never carry +3", () => {
+  const pieces = Array.from({ length: 5 }, (_, index) =>
+    normalizeUpgradePiece({
+      archetypeId: ["Brawler", "Grenadier", "Paragon", "Specialist", "Gunner"][index],
+      tertiary: ["grenade", "health", "health", "health", "health"][index],
+      tuningMode: "plus3",
+      tuningFrom: ["melee", "grenade", "super", "class", "weapons"][index],
+      tuningTo: "health",
+      armorModSize: [10, 5, 5, 5, 0][index],
+      armorModStat: ["melee", "grenade", "super", "health", "class"][index],
+      locked: index === 0,
+    }, index));
+  const targets = {
+    health: 80, melee: 55, grenade: 85, super: 105, class: 50, weapons: 90,
+  };
+  const fragments = {
+    health: 9, melee: 14, grenade: 0, super: 2, class: 5, weapons: 8,
+  };
+
+  const restricted = analyzeUpgradeCandidates(pieces, targets, fragments, true, [], true);
+  assert.ok(restricted.plan, "the scenario must produce a plan");
+  assert.ok(
+    restricted.plan.pieces.every(piece => piece.tuningMode !== "plus3"),
+    "kept plan pieces must be read as +5/-5, not +3"
+  );
+  assert.ok(
+    restricted.plan.steps.every(step => step.afterPiece.tuningMode !== "plus3"),
+    "a farmed replacement must never be proposed with +3 tuning"
+  );
+  // The entered state still reports the real +3 pieces.
+  assert.equal(
+    restricted.enteredBaseline.tuningAssignments.filter(t => t && t.mode === "+3").length, 5,
+    "entered baseline must keep reporting the equipped +3 pieces"
+  );
+});
+
+// Full-target feasibility is always the primary goal. Required stats only
+// prioritize partial plans after no full-target plan exists.
+test("full-target plans outrank partial required-stat plans", () => {
   const targets = {
     health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100,
   };
@@ -203,14 +330,20 @@ test("must-meet plans prefer fewer swaps; unmet must-meet still outranks swaps",
   const threeSwap = mkPlan(3, {
     health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100,
   });
-  assert.ok(compareUpgradePlans(twoSwap, threeSwap) < 0,
-    "fewer swaps must win when both plans meet the required stat");
-  // Swap the -5 source around so the required stat is missed on the 2-swap plan.
-  const twoSwapUnmet = mkPlan(2, {
+  assert.ok(compareUpgradePlans(threeSwap, twoSwap) < 0,
+    "a full-target plan must beat a smaller plan that only meets required stats");
+  const threeSwapEquivalent = mkPlan(3, {
+    health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100,
+  });
+  const twoSwapExact = { ...threeSwapEquivalent, replacementCount: 2 };
+  assert.ok(compareUpgradePlans(twoSwapExact, threeSwapEquivalent) < 0,
+    "among full-target plans, fewer replacements must win");
+  // Only when neither plan reaches the full target do required stats decide.
+  const oneSwapUnmet = mkPlan(1, {
     health: 90, melee: 90, grenade: 90, super: 90, class: 90, weapons: 95,
   });
-  assert.ok(compareUpgradePlans(threeSwap, twoSwapUnmet) < 0,
-    "an unmet required stat must still outrank the swap count");
+  assert.ok(compareUpgradePlans(twoSwap, oneSwapUnmet) < 0,
+    "among partial plans, meeting a required stat must outrank the swap count");
   // Without required stats, reaching every target outranks fewer swaps.
   const noRequiredOne = {
     replacementCount: 1,
@@ -230,5 +363,88 @@ test("must-meet plans prefer fewer swaps; unmet must-meet still outranks swaps",
   };
   assert.ok(compareUpgradePlans(noRequiredTwo, noRequiredOne) < 0,
     "without required stats, reaching targets must outrank the swap count");
+  const noRequiredEqualOne = {
+    ...noRequiredTwo,
+    replacementCount: 1,
+  };
+  assert.ok(compareUpgradePlans(noRequiredEqualOne, noRequiredTwo) < 0,
+    "equivalent plans without required stats must still prefer fewer swaps");
 });
 
+test("plan refinement counts swaps against the equipped loadout, not its seed", () => {
+  const equipped = Array.from({ length: 5 }, (_, index) =>
+    createDefaultUpgradePiece(index));
+  const seed = equipped.map((piece, index) => index < 2
+    ? normalizeUpgradePiece({
+      ...piece,
+      tuningTo: STATS.find(stat =>
+        stat !== piece.tuningFrom && stat !== piece.tuningTo),
+    }, index)
+    : { ...piece });
+
+  assert.equal(getUpgradeReplacements(equipped, seed).length, 2,
+    "fixture: the seed starts two swaps away from the equipped loadout");
+
+  const evaluateBySwapCount = candidatePieces => {
+    const swapCount = getUpgradeReplacements(equipped, candidatePieces).length;
+    return {
+      score: swapCount,
+      metrics: {
+        requiredCount: 0,
+        allReached: swapCount === 0,
+        shortfall: swapCount,
+        maxShortfall: swapCount,
+        reachedCount: STATS.length - swapCount,
+        exactCount: STATS.length - swapCount,
+        excess: 0,
+        score: swapCount,
+      },
+    };
+  };
+  const refined = refineUpgradePlanPieces(
+    seed, [0, 1], {}, {}, false, evaluateBySwapCount, false, equipped
+  );
+
+  assert.equal(getUpgradeReplacements(equipped, refined.pieces).length, 0,
+    "refinement should be able to restore seed slots and reduce the real swap count");
+});
+
+test("plan refinement never reduces swaps by breaking a must-meet constraint", () => {
+  const equipped = Array.from({ length: 5 }, (_, index) =>
+    createDefaultUpgradePiece(index));
+  const seed = equipped.map((piece, index) => index < 3
+    ? normalizeUpgradePiece({
+      ...piece,
+      tuningTo: STATS.find(stat =>
+        stat !== piece.tuningFrom && stat !== piece.tuningTo),
+    }, index)
+    : { ...piece });
+  const evaluateRequired = candidatePieces => {
+    const swapCount = getUpgradeReplacements(equipped, candidatePieces).length;
+    const requiredAllReached = swapCount === 3;
+    return {
+      score: swapCount,
+      metrics: {
+        requiredCount: 1,
+        requiredAllReached,
+        requiredShortfall: requiredAllReached ? 0 : 5,
+        requiredMaxShortfall: requiredAllReached ? 0 : 5,
+        requiredReachedCount: requiredAllReached ? 1 : 0,
+        allReached: false,
+        shortfall: requiredAllReached ? 10 : 5,
+        maxShortfall: requiredAllReached ? 10 : 5,
+        reachedCount: requiredAllReached ? 1 : 2,
+        exactCount: 0,
+        excess: 0,
+        score: swapCount,
+      },
+    };
+  };
+  const refined = refineUpgradePlanPieces(
+    seed, [0, 1, 2], {}, {}, false, evaluateRequired, false, equipped
+  );
+
+  assert.equal(getUpgradeReplacements(equipped, refined.pieces).length, 3,
+    "a lower-swap variant that misses a required target must be rejected");
+  assert.equal(refined.evaluation.metrics.requiredAllReached, true);
+});

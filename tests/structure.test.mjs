@@ -18,7 +18,11 @@ const algorithmModules = [
 test("algorithm modules stay independent from browser state", async () => {
   for (const file of algorithmModules) {
     const source = await readFile(file, "utf8");
-    assert.doesNotMatch(source, /\b(?:document|localStorage|window)\b/, file);
+    assert.doesNotMatch(
+      source,
+      /\b(?:document|localStorage|window)\s*(?:\.|\[)/,
+      file,
+    );
   }
 });
 

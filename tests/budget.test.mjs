@@ -60,3 +60,27 @@ test("budget balancing reports an impossible fully locked request", () => {
     null,
   );
 });
+
+test("budget balancing can fill enabled stats above 100 up to the Armor 3.0 cap", () => {
+  const targets = {
+    health: 0,
+    melee: 0,
+    grenade: 0,
+    super: 50,
+    class: 50,
+    weapons: 50,
+  };
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const result = createBalancedTargetPlan({
+    targets,
+    fragments,
+    budget: 450,
+  });
+
+  assert.deepEqual(result, {
+    ...targets,
+    super: 150,
+    class: 150,
+    weapons: 150,
+  });
+});

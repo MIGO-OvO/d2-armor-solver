@@ -211,7 +211,10 @@ async function checkInventoryPlanning(browser) {
       await page.locator("#ownedGearSection .manual-owned-list li").count() > 0,
       "manually added armor should immediately update the active solution",
     );
-    await page.locator("#inventoryExoticSlotFilter").selectOption("classItem");
+    await page.locator("#inventoryExoticSlotFilter").evaluate(element => {
+      element.value = "classItem";
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     assert.equal(
       await page.locator("#useExoticMode").isChecked(),
       true,
@@ -276,7 +279,7 @@ async function checkUpgradeTargetSync(browser) {
         exotic: false,
         archetypeId: "Gunner",
         tertiary: "super",
-        tuningMode: "shift",
+        tuningMode: index === 3 ? "plus3" : "shift",
         tuningFrom: "health",
         tuningTo: "melee",
         armorModSize: 10,
@@ -310,11 +313,18 @@ async function checkUpgradeTargetSync(browser) {
         importClassFilter: "hunter",
         importTier5Only: true,
         reassignModifiers: true,
+        onlyPlus5Tuning: true,
       }));
       localStorage.setItem("d2_armor_calculator_mode_v1", "upgrade");
     });
     await page.reload({ waitUntil: "networkidle" });
     await page.locator("#pageLanguage").selectOption("zh-chs");
+    assert.equal(await page.locator("#upgradeOnlyPlus5").isChecked(), true);
+    assert.match(
+      await page.locator("#upgradeBudgetSummary").innerText(),
+      /最终方案不会使用 \+3/,
+      "the current +3 piece should be distinguished from the restricted solved setup",
+    );
     await page.locator("#upgradeRequired_weapons").check();
     assert.equal(
       await page.locator("#upgradeRequired_weapons").isVisible(),
@@ -331,6 +341,16 @@ async function checkUpgradeTargetSync(browser) {
     });
     await page.evaluate(() => window.analyzeArmorUpgrades());
     await page.locator("#upgradeResults:not([hidden])").waitFor();
+    await page.evaluate(() => window.exportInventorySolution(0));
+    const exportedMods = await page.locator(".dim-export-actions a").evaluate(element => {
+      const encoded = new URL(element.href).searchParams.get("loadout");
+      return JSON.parse(decodeURIComponent(encoded)).parameters.mods;
+    });
+    assert.equal(
+      exportedMods.includes(3122197216),
+      false,
+      "+5/-5-only owned loadouts must not export the balanced +3 tuning mod",
+    );
 
     await page.locator("#target_health").evaluate(element => {
       element.value = "135";

@@ -40,7 +40,7 @@ export function createBalancedTargetPlan({
     const first = trim
       ? Math.floor((current - 1) / 5) * 5
       : Math.ceil((current + 1) / 5) * 5;
-    const limit = trim ? 0 : 100;
+    const limit = trim ? 0 : 200;
 
     for (
       let value = first;

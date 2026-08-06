@@ -2,7 +2,9 @@ import {
   ARCHETYPES, BASE_CONFIGS, STATS,
 } from "./armor-model.mjs";
 import { getEffectiveBaseStats, inferArchetypeFromStats } from "./dim-csv.mjs";
-import { evaluateConfig, scoreStats } from "./solver.mjs";
+import {
+  compareScoreRanks, evaluateConfig, scoreStats, scoreStatsRank,
+} from "./solver.mjs";
 
 export const UPGRADE_SLOTS = [
   { id:'helmet', labels:['头盔','頭盔','Helmet'] },
@@ -45,6 +47,18 @@ export function normalizeUpgradePiece(piece, slotIndex) {
   normalized.archetypeId = archetype.id;
   const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
   if (!tertiaryOptions.includes(normalized.tertiary)) normalized.tertiary = tertiaryOptions[0];
+  // Upgrade drafts saved before optimizationBaseStats existed still carry the
+  // actual DIM stats and masterwork tier. Reconstruct their full-masterwork
+  // projection during normalization so users do not need to re-import a CSV.
+  if (normalized.baseStats && !normalized.optimizationBaseStats &&
+      Number.isFinite(Number(normalized.masterworkTier))) {
+    const currentTier = Math.min(5, Math.max(0, Number(normalized.masterworkTier) || 0));
+    const frameworkStats = new Set([archetype.primary, archetype.secondary, normalized.tertiary]);
+    normalized.optimizationBaseStats = Object.fromEntries(STATS.map(stat => [
+      stat,
+      (normalized.baseStats[stat] || 0) + (frameworkStats.has(stat) ? 0 : 5 - currentTier),
+    ]));
+  }
   if (!['shift', 'plus3'].includes(normalized.tuningMode)) normalized.tuningMode = 'shift';
   if (!STATS.includes(normalized.tuningFrom)) normalized.tuningFrom = archetype.primary;
   if (!STATS.includes(normalized.tuningTo) || normalized.tuningTo === normalized.tuningFrom) {
@@ -60,9 +74,10 @@ export function normalizeUpgradePiece(piece, slotIndex) {
 
 // Build a normalized upgrade piece from an imported DIM item. The real rolled
 // stat distribution and the +5 tuning side (masterwork stat) stay on the piece.
-// baseStats carries the item's ACTUAL stats, including only the masterwork
-// bonus the item really has; the full-masterwork projection is only used to
-// rank replacement candidates (inventory-solver), not the owned piece itself.
+// baseStats carries the item's ACTUAL stats so the current-loadout display can
+// reproduce DIM. optimizationBaseStats carries the same item projected to full
+// masterwork; farming advice uses that projection, matching the from-scratch
+// solver's T5/full-masterwork contract.
 export function createUpgradePieceFromItem(item, slotIndex) {
   const archetypeId = item.archetypeId
     || inferArchetypeFromStats(item.baseStats)
@@ -96,6 +111,12 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     baseStats: { ...(
       item.effectiveBaseStats
       || getEffectiveBaseStats({ ...item, archetypeId, tertiary })
+    ) },
+    optimizationBaseStats: { ...(
+      item.optimizationBaseStats
+      || getEffectiveBaseStats({
+        ...item, archetypeId, tertiary, masterworkTier: 5,
+      })
     ) },
     masterworkTier: Number(item.masterworkTier) || 0,
     modifierInference: item.modifierInference || null,
@@ -178,7 +199,9 @@ function getUpgradeEvaluationConstraints(armorTarget, requiredStats) {
   };
 }
 
-export function getUpgradeMetrics(finalTotals, targets, score = 0, requiredStats = []) {
+export function getUpgradeMetrics(
+  finalTotals, targets, score = 0, requiredStats = [], scoreRank = null
+) {
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   const deficits = STATS.map(stat => Math.max(0, targets[stat] - finalTotals[stat]));
   const excesses = STATS.map(stat => Math.max(0, finalTotals[stat] - targets[stat]));
@@ -201,11 +224,13 @@ export function getUpgradeMetrics(finalTotals, targets, score = 0, requiredStats
     requiredReachedCount,
     requiredShortfall: requiredDeficits.reduce((sum, value) => sum + value, 0),
     requiredMaxShortfall: requiredDeficits.length > 0 ? Math.max(...requiredDeficits) : 0,
+    scoreRank: Array.isArray(scoreRank) ? [...scoreRank] : null,
     score,
   };
 }
 
 export function compareUpgradeMetrics(left, right) {
+  if (left.allReached !== right.allReached) return left.allReached ? -1 : 1;
   const hasRequiredStats = Math.max(left.requiredCount || 0, right.requiredCount || 0) > 0;
   if (hasRequiredStats) {
     if (left.requiredAllReached !== right.requiredAllReached) {
@@ -221,12 +246,15 @@ export function compareUpgradeMetrics(left, right) {
       return right.requiredReachedCount - left.requiredReachedCount;
     }
   }
-  if (left.allReached !== right.allReached) return left.allReached ? -1 : 1;
   if (left.shortfall !== right.shortfall) return left.shortfall - right.shortfall;
   if (left.maxShortfall !== right.maxShortfall) return left.maxShortfall - right.maxShortfall;
   if (left.reachedCount !== right.reachedCount) return right.reachedCount - left.reachedCount;
   if (left.excess !== right.excess) return left.excess - right.excess;
   if (left.exactCount !== right.exactCount) return right.exactCount - left.exactCount;
+  if (left.scoreRank || right.scoreRank) {
+    const scoreRankOrder = compareScoreRanks(left.scoreRank, right.scoreRank);
+    if (scoreRankOrder !== 0) return scoreRankOrder;
+  }
   return left.score - right.score;
 }
 
@@ -251,6 +279,7 @@ export function evaluateUpgradePieces(
       index,
       piece.armorModSize > 0 ? { size:piece.armorModSize, stat:piece.armorModStat } : null
     ])),
+    rank: scoreStatsRank(manualArmorTotals, armorTarget, constraints),
     score: scoreStats(manualArmorTotals, armorTarget, constraints),
   };
   let evaluation = manualEvaluation;
@@ -267,10 +296,12 @@ export function evaluateUpgradePieces(
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
     const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
     const manualMetrics = getUpgradeMetrics(
-      manualFinal, targets, manualEvaluation.score, normalizedRequiredStats
+      manualFinal, targets, manualEvaluation.score, normalizedRequiredStats,
+      manualEvaluation.rank
     );
     const automaticMetrics = getUpgradeMetrics(
-      automaticFinal, targets, automaticEvaluation.score, normalizedRequiredStats
+      automaticFinal, targets, automaticEvaluation.score, normalizedRequiredStats,
+      automaticEvaluation.rank
     );
     if (compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) evaluation = automaticEvaluation;
   }
@@ -280,7 +311,8 @@ export function evaluateUpgradePieces(
     configs,
     finalTotals,
     metrics: getUpgradeMetrics(
-      finalTotals, targets, evaluation.score, normalizedRequiredStats
+      finalTotals, targets, evaluation.score, normalizedRequiredStats,
+      evaluation.rank
     ),
   };
 }
@@ -296,6 +328,7 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
       piece.tuningTo,
       piece.armorModSize,
       piece.armorModStat,
+      ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
     ].join(':')).join('|') + '#' + Number(reassignModifiers) + '#' + Number(onlyPlus5Tuning);
     const cached = cache.get(key);
     if (cached) return cached;
@@ -305,6 +338,44 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
     cache.set(key, evaluation);
     return evaluation;
   };
+}
+
+function projectPiecesToFullMasterwork(pieces) {
+  return pieces.map(piece => piece.optimizationBaseStats
+    ? { ...piece, baseStats: { ...piece.optimizationBaseStats } }
+    : { ...piece });
+}
+
+const fullTargetSearchCache = new Map();
+const MAX_FULL_TARGET_CACHE_ENTRIES = 12;
+
+function getFullTargetSearchKey(
+  pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning
+) {
+  return [
+    ...STATS.map(stat => targets[stat] || 0),
+    ...STATS.map(stat => fragments[stat] || 0),
+    Number(reassignModifiers),
+    Number(onlyPlus5Tuning),
+    ...pieces.flatMap(piece => [
+      piece.archetypeId,
+      piece.tertiary,
+      piece.tuningMode,
+      piece.tuningFrom,
+      piece.tuningTo,
+      piece.armorModSize,
+      piece.armorModStat,
+      Number(Boolean(piece.locked)),
+      ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
+    ]),
+  ].join('|');
+}
+
+function cacheFullTargetSearch(key, result) {
+  fullTargetSearchCache.set(key, result);
+  if (fullTargetSearchCache.size > MAX_FULL_TARGET_CACHE_ENTRIES) {
+    fullTargetSearchCache.delete(fullTargetSearchCache.keys().next().value);
+  }
 }
 
 // A piece's identity for "do I already own this?" purposes. The +5 tuning side
@@ -336,6 +407,7 @@ export function setUpgradePieceConfig(piece, slotIndex, config) {
   // from an imported owned piece must not leak into the hypothetical config.
   const hypothetical = { ...piece };
   delete hypothetical.baseStats;
+  delete hypothetical.optimizationBaseStats;
   delete hypothetical.masterworkStats;
   delete hypothetical.setHash;
   delete hypothetical.itemName;
@@ -409,7 +481,16 @@ export function getUpgradeReplacements(beforePieces, afterPieces) {
 
 export function compareUpgradePlans(left, right) {
   if (!right) return -1;
-  // Must-meet stats are the hard constraint: reaching them outranks everything.
+  // Reaching the complete target is always the primary objective, regardless
+  // of which fallback priorities the user selected.
+  if (left.metrics.allReached !== right.metrics.allReached) {
+    return left.metrics.allReached ? -1 : 1;
+  }
+  if (left.metrics.allReached && left.replacementCount !== right.replacementCount) {
+    return left.replacementCount - right.replacementCount;
+  }
+  // Only partial plans reach this block. Required stats then define their
+  // fallback priority before overall distance and farming cost.
   const hasRequiredStats = Math.max(
     left.metrics.requiredCount || 0, right.metrics.requiredCount || 0
   ) > 0;
@@ -426,18 +507,12 @@ export function compareUpgradePlans(left, right) {
     if (left.metrics.requiredReachedCount !== right.metrics.requiredReachedCount) {
       return right.metrics.requiredReachedCount - left.metrics.requiredReachedCount;
     }
-    // With must-meet stats equally satisfied, fewer swaps win: a loadout that
-    // reaches the required stats with less farming beats a bigger one that only
-    // narrows the optional shortfall.
-    if (left.replacementCount !== right.replacementCount) {
-      return left.replacementCount - right.replacementCount;
-    }
-  } else if (left.metrics.allReached && right.metrics.allReached &&
-             left.replacementCount !== right.replacementCount) {
-    return left.replacementCount - right.replacementCount;
   }
   const metricOrder = compareUpgradeMetrics(left.metrics, right.metrics);
   if (metricOrder !== 0) return metricOrder;
+  if (left.replacementCount !== right.replacementCount) {
+    return left.replacementCount - right.replacementCount;
+  }
   // Same number of swaps: prefer the plan whose swaps only re-roll the +5
   // side. Farming a different archetype/tertiary is strictly more expensive
   // than farming the same armor with a different rolled +5.
@@ -505,15 +580,17 @@ export function getUpgradeSlotVariants(piece, slotIndex, archetypeFilter, onlyPl
 }
 
 export function refineUpgradePlanPieces(
-  pieces, unlockedIndices, targets, fragments, reassignModifiers,
+  seedPieces, unlockedIndices, targets, fragments, reassignModifiers,
   evaluatePieces = (candidatePieces, shouldReassign) => evaluateUpgradePieces(
     candidatePieces, targets, fragments, shouldReassign
   ),
-  onlyPlus5Tuning = false
+  onlyPlus5Tuning = false,
+  equippedPieces = seedPieces
 ) {
-  let bestPieces = pieces.map(piece => ({ ...piece }));
+  let bestPieces = seedPieces.map(piece => ({ ...piece }));
   let bestEvaluation = evaluatePieces(bestPieces, reassignModifiers);
-  let bestReplacementCount = getUpgradeReplacements(pieces, bestPieces).length;
+  let bestReplacements = getUpgradeReplacements(equippedPieces, bestPieces);
+  let bestReplacementCount = bestReplacements.length;
   let improved = true;
   let pass = 0;
   while (improved && pass < 6) {
@@ -529,17 +606,29 @@ export function refineUpgradePlanPieces(
         if (sameUpgradeIdentity(getUpgradePieceIdentity(variant), currentIdentity)) continue;
         const trialPieces = bestPieces.map(piece => ({ ...piece }));
         trialPieces[slotIndex] = variant;
-        const trialReplacementCount = getUpgradeReplacements(pieces, trialPieces).length;
+        const trialReplacements = getUpgradeReplacements(equippedPieces, trialPieces);
+        const trialReplacementCount = trialReplacements.length;
         const trialEvaluation = evaluatePieces(trialPieces, reassignModifiers);
-        // Refine within the seed's replacement count: a variant that adds a
-        // farmed piece is a different plan bucket, and a lower-swap solution
-        // must never be refined away before the plan comparison sees it.
-        const keepsOrReducesSwaps = trialReplacementCount < bestReplacementCount
-          || (trialReplacementCount === bestReplacementCount
-            && compareUpgradeMetrics(trialEvaluation.metrics, bestEvaluation.metrics) < 0);
-        if (keepsOrReducesSwaps) {
+        // Stay within the seed's real swap budget and apply the same ordering
+        // used by final plan selection. In particular, fewer swaps may win
+        // after hard constraints are equally satisfied, but may never break a
+        // must-meet target just to reduce the count.
+        const improvesWithinSwapBudget = trialReplacementCount <= bestReplacementCount
+          && compareUpgradePlans({
+            evaluation: trialEvaluation,
+            metrics: trialEvaluation.metrics,
+            replacements: trialReplacements,
+            replacementCount: trialReplacementCount,
+          }, {
+            evaluation: bestEvaluation,
+            metrics: bestEvaluation.metrics,
+            replacements: bestReplacements,
+            replacementCount: bestReplacementCount,
+          }) < 0;
+        if (improvesWithinSwapBudget) {
           bestPieces = trialPieces;
           bestEvaluation = trialEvaluation;
+          bestReplacements = trialReplacements;
           bestReplacementCount = trialReplacementCount;
           improved = true;
           break;
@@ -633,9 +722,24 @@ export function findUpgradeCompletionPlan(
     Math.max(0, targets[stat] - (fragments[stat] || 0))
   ]));
   const seedPlansByReplacementCount = new Map();
+  const deferredBalancedSeeds = new Map();
+  const seenSeedKeys = new Set();
+  const hasPartialRequiredStats = requiredStats.length > 0
+    && requiredStats.length < STATS.length;
   let bestPlan = null;
 
-  function addSeed(mappedPieces) {
+  const getSeedKey = mappedPieces => mappedPieces.map(piece => [
+    piece.archetypeId,
+    piece.tertiary,
+    piece.tuningMode,
+    piece.tuningTo,
+    ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
+  ].join(':')).join('|');
+
+  function addSeed(mappedPieces, strategy = "focused") {
+    const seedKey = getSeedKey(mappedPieces);
+    if (seenSeedKeys.has(seedKey)) return;
+    seenSeedKeys.add(seedKey);
     const evaluation = evaluatePieces(mappedPieces, reassignModifiers);
     const replacements = getUpgradeReplacements(pieces, mappedPieces);
     const seedPlan = {
@@ -645,18 +749,40 @@ export function findUpgradeCompletionPlan(
       replacements,
       replacementCount: replacements.length,
     };
-    const seeds = seedPlansByReplacementCount.get(seedPlan.replacementCount) || [];
+    const bucketKey = `${seedPlan.replacementCount}|${strategy}`;
+    const seeds = seedPlansByReplacementCount.get(bucketKey) || [];
     seeds.push(seedPlan);
     seeds.sort(compareUpgradePlans);
-    if (seeds.length > 16) seeds.length = 16;
-    seedPlansByReplacementCount.set(seedPlan.replacementCount, seeds);
+    const bucketLimit = hasPartialRequiredStats || strategy === "single" ? 8 : 16;
+    if (seeds.length > bucketLimit) seeds.length = bucketLimit;
+    seedPlansByReplacementCount.set(bucketKey, seeds);
+  }
+
+  function deferBalancedSeed(mappedPieces) {
+    const replacementCount = getUpgradeReplacements(pieces, mappedPieces).length;
+    const roughEvaluation = evaluatePieces(mappedPieces, false);
+    const candidates = deferredBalancedSeeds.get(replacementCount) || [];
+    candidates.push({ pieces: mappedPieces, roughEvaluation });
+    candidates.sort((left, right) => compareUpgradeMetrics(
+      left.roughEvaluation.metrics, right.roughEvaluation.metrics
+    ));
+    if (candidates.length > 32) candidates.length = 32;
+    deferredBalancedSeeds.set(replacementCount, candidates);
   }
 
   function evaluateArchetypeSet(archetypeIndices) {
-    const candidateConfigs = chooseUpgradeTertiaries(
+    const focusedConfigs = chooseUpgradeTertiaries(
       archetypeIndices, lockedConfigs, armorTarget, requiredStats
     );
-    addSeed(mapUpgradeConfigsToPieces(pieces, unlockedIndices, candidateConfigs));
+    addSeed(mapUpgradeConfigsToPieces(pieces, unlockedIndices, focusedConfigs));
+    if (hasPartialRequiredStats) {
+      const balancedConfigs = chooseUpgradeTertiaries(
+        archetypeIndices, lockedConfigs, armorTarget, []
+      );
+      deferBalancedSeed(
+        mapUpgradeConfigsToPieces(pieces, unlockedIndices, balancedConfigs)
+      );
+    }
   }
 
   function enumerate(start, depth, archetypeIndices) {
@@ -672,15 +798,18 @@ export function findUpgradeCompletionPlan(
   }
 
   enumerate(0, 0, []);
+  for (const candidates of deferredBalancedSeeds.values()) {
+    for (const candidate of candidates) addSeed(candidate.pieces, "balanced");
+  }
   // The archetype sweep replaces every unlocked slot, so it never proposes
   // "keep this piece's archetype, just farm a different rolled +5". Those
   // single-slot candidates come in as extra seeds.
-  for (const seedPieces of extraSeedPieces) addSeed(seedPieces);
+  for (const seedPieces of extraSeedPieces) addSeed(seedPieces, "single");
   for (const seeds of seedPlansByReplacementCount.values()) {
     for (const seed of seeds) {
       const refined = refineUpgradePlanPieces(
         seed.pieces, unlockedIndices, targets, fragments, reassignModifiers,
-        evaluatePieces, onlyPlus5Tuning
+        evaluatePieces, onlyPlus5Tuning, pieces
       );
       const replacements = getUpgradeReplacements(pieces, refined.pieces);
       const plan = {
@@ -705,74 +834,158 @@ export function findUpgradeCompletionPlan(
   return bestPlan;
 }
 
+function rankSingleUpgradeCandidates(
+  pieces, baseline, reassignModifiers, evaluatePieces, onlyPlus5Tuning
+) {
+  const rankings = [];
+  if (baseline.metrics.allReached) return rankings;
+  for (let slotIndex = 0; slotIndex < pieces.length; slotIndex++) {
+    if (pieces[slotIndex].locked) continue;
+    const currentIdentity = getUpgradePieceIdentity(pieces[slotIndex]);
+    let bestForSlot = null;
+    // Every archetype, tertiary, and rolled +5 stat is a distinct piece to
+    // farm, so all three vary here.
+    for (const variant of getUpgradeSlotVariants(
+      pieces[slotIndex], slotIndex, null, onlyPlus5Tuning
+    )) {
+      const variantIdentity = getUpgradePieceIdentity(variant);
+      if (sameUpgradeIdentity(variantIdentity, currentIdentity)) continue;
+      const trialPieces = pieces.map(piece => ({ ...piece }));
+      trialPieces[slotIndex] = variant;
+      const evaluation = evaluatePieces(trialPieces, reassignModifiers);
+      const candidate = {
+        slotIndex,
+        beforePiece: pieces[slotIndex],
+        afterPiece: variant,
+        config: getUpgradeConfig(variant),
+        identity: variantIdentity,
+        tuningOnly: sameUpgradeConfig(
+          getUpgradeConfig(variant), getUpgradeConfig(pieces[slotIndex])
+        ),
+        evaluation,
+        metrics: evaluation.metrics,
+        effectiveGain: baseline.metrics.shortfall - evaluation.metrics.shortfall,
+      };
+      if (!bestForSlot || compareUpgradeMetrics(candidate.metrics, bestForSlot.metrics) < 0) {
+        bestForSlot = candidate;
+      }
+    }
+    if (bestForSlot) rankings.push(bestForSlot);
+  }
+  rankings.sort((left, right) => compareUpgradeMetrics(left.metrics, right.metrics));
+  return rankings;
+}
+
+function getSingleSwapSeeds(pieces, rankings) {
+  return rankings.slice(0, 8).map(candidate =>
+    pieces.map((piece, index) => index === candidate.slotIndex
+      ? { ...candidate.afterPiece } : { ...piece }));
+}
+
 export function analyzeUpgradeCandidates(
   pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false
 ) {
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
+  // "Only +5/-5" applies to every plan this analysis proposes: the owned +3
+  // pieces are read as +5/-5 pieces up front, so no seed, refinement, plan
+  // piece, or step summary can carry +3 into the output. Only the entered
+  // baseline keeps reporting the real +3 pieces as they are.
+  const enteredPieces = pieces.map(piece => ({ ...piece }));
+  const projectedMasterworkIndices = enteredPieces
+    .map((piece, index) => piece.optimizationBaseStats && STATS.some(stat =>
+      piece.optimizationBaseStats[stat] !== piece.baseStats?.[stat]
+    ) ? index : -1)
+    .filter(index => index >= 0);
+  pieces = projectPiecesToFullMasterwork(enteredPieces);
+  if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
   const evaluatePieces = createUpgradeEvaluator(
     targets, fragments, normalizedRequiredStats, onlyPlus5Tuning
   );
-  // "Only +5/-5" applies to the plan, not to what is equipped right now: the
-  // entered baseline keeps reporting the real +3 pieces as they are.
   const enteredBaseline = onlyPlus5Tuning
-    ? evaluateUpgradePieces(pieces, targets, fragments, false, normalizedRequiredStats)
-    : evaluatePieces(pieces, false);
+    ? evaluateUpgradePieces(enteredPieces, targets, fragments, false, normalizedRequiredStats)
+    : evaluatePieces(enteredPieces, false);
   const baseline = evaluatePieces(pieces, reassignModifiers);
-  const rankings = [];
+  let rankings = [];
+  let plan = null;
   if (!baseline.metrics.allReached) {
-    for (let slotIndex = 0; slotIndex < pieces.length; slotIndex++) {
-      if (pieces[slotIndex].locked) continue;
-      const currentIdentity = getUpgradePieceIdentity(pieces[slotIndex]);
-      let bestForSlot = null;
-      // Every archetype, tertiary, and rolled +5 stat is a distinct piece to
-      // farm, so all three vary here.
-      for (const variant of getUpgradeSlotVariants(pieces[slotIndex], slotIndex, null, onlyPlus5Tuning)) {
-        const variantIdentity = getUpgradePieceIdentity(variant);
-        if (sameUpgradeIdentity(variantIdentity, currentIdentity)) continue;
-        const trialPieces = pieces.map(piece => ({ ...piece }));
-        trialPieces[slotIndex] = variant;
-        const evaluation = evaluatePieces(trialPieces, reassignModifiers);
-        const candidate = {
-          slotIndex,
-          beforePiece: pieces[slotIndex],
-          afterPiece: variant,
-          config: getUpgradeConfig(variant),
-          identity: variantIdentity,
-          tuningOnly: sameUpgradeConfig(getUpgradeConfig(variant), getUpgradeConfig(pieces[slotIndex])),
+    // Full-target feasibility is invariant under the UI's fallback-priority
+    // checkboxes. Always run the same all-six-stats search first; only if it
+    // cannot reach the complete target may selected required stats steer the
+    // fallback search.
+    const allStatsRequired = normalizedRequiredStats.length === STATS.length;
+    const fullTargetCacheKey = getFullTargetSearchKey(
+      pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning
+    );
+    let fullTargetSearch = fullTargetSearchCache.get(fullTargetCacheKey);
+    if (!fullTargetSearch) {
+      const fullTargetEvaluator = allStatsRequired
+        ? evaluatePieces
+        : createUpgradeEvaluator(targets, fragments, STATS, onlyPlus5Tuning);
+      const fullTargetBaseline = allStatsRequired
+        ? baseline
+        : fullTargetEvaluator(pieces, reassignModifiers);
+      const fullTargetRankings = rankSingleUpgradeCandidates(
+        pieces, fullTargetBaseline, reassignModifiers,
+        fullTargetEvaluator, onlyPlus5Tuning
+      );
+      const fullTargetSeeds = getSingleSwapSeeds(pieces, fullTargetRankings);
+      const fullTargetPlan = findUpgradeCompletionPlan(
+        pieces, targets, fragments, reassignModifiers, fullTargetBaseline,
+        fullTargetSeeds, STATS, fullTargetEvaluator, onlyPlus5Tuning
+      );
+      fullTargetSearch = { plan: fullTargetPlan, rankings: fullTargetRankings };
+      cacheFullTargetSearch(fullTargetCacheKey, fullTargetSearch);
+    }
+    const fullTargetPlan = fullTargetSearch.plan;
+    if (allStatsRequired) rankings = fullTargetSearch.rankings;
+
+    if (fullTargetPlan?.metrics.allReached) {
+      if (allStatsRequired) {
+        plan = fullTargetPlan;
+      } else {
+        // Materialize the exact tuning/mod witness found by the full-target
+        // pass, then classify its metrics using only the user's selected
+        // fallback priorities. This prevents a second heuristic evaluation
+        // from losing an already-proven exact assignment.
+        const configuredPieces = applyUpgradeEvaluationToPieces(
+          fullTargetPlan.pieces, fullTargetPlan.evaluation
+        );
+        const evaluation = evaluatePieces(configuredPieces, false);
+        const replacements = getUpgradeReplacements(pieces, configuredPieces);
+        plan = {
+          pieces: configuredPieces,
           evaluation,
           metrics: evaluation.metrics,
-          effectiveGain: baseline.metrics.shortfall - evaluation.metrics.shortfall,
+          replacements,
+          replacementCount: replacements.length,
         };
-        if (!bestForSlot || compareUpgradeMetrics(candidate.metrics, bestForSlot.metrics) < 0) {
-          bestForSlot = candidate;
-        }
+        plan.steps = buildUpgradePlanSteps(
+          pieces, configuredPieces, targets, fragments, evaluation, evaluatePieces
+        );
       }
-      if (bestForSlot) rankings.push(bestForSlot);
+    } else if (allStatsRequired) {
+      plan = fullTargetPlan;
+    } else {
+      rankings = rankSingleUpgradeCandidates(
+        pieces, baseline, reassignModifiers, evaluatePieces, onlyPlus5Tuning
+      );
+      const singleSwapSeeds = getSingleSwapSeeds(pieces, rankings);
+      plan = findUpgradeCompletionPlan(
+        pieces, targets, fragments, reassignModifiers, baseline, singleSwapSeeds,
+        normalizedRequiredStats, evaluatePieces, onlyPlus5Tuning
+      );
     }
-    rankings.sort((left, right) => compareUpgradeMetrics(left.metrics, right.metrics));
   }
   const bestCandidate = rankings[0] || null;
   const best = bestCandidate && compareUpgradeMetrics(bestCandidate.metrics, baseline.metrics) < 0
     ? bestCandidate : null;
-  // Feed the best single-slot swaps in as plan seeds so a one-piece fix — often
-  // just a different rolled +5 — is not missed by the archetype sweep.
-  const singleSwapSeeds = rankings.slice(0, 8).map(candidate =>
-    pieces.map((piece, index) => index === candidate.slotIndex
-      ? { ...candidate.afterPiece } : { ...piece }));
-  const plan = baseline.metrics.allReached
-    ? null
-    : findUpgradeCompletionPlan(
-      pieces, targets, fragments, reassignModifiers, baseline, singleSwapSeeds,
-      normalizedRequiredStats,
-      evaluatePieces,
-      onlyPlus5Tuning
-    );
   return {
-    pieces: pieces.map(piece => ({ ...piece })),
+    pieces: enteredPieces,
     targets: { ...targets },
     fragments: { ...fragments },
     requiredStats: normalizedRequiredStats,
     reassignModifiers,
+    projectedMasterworkIndices,
     enteredBaseline,
     baseline,
     rankings,

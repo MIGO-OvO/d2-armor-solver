@@ -2,6 +2,132 @@ import {
   ARCHETYPES, BASE_CONFIGS, STATS,
 } from "./armor-model.mjs";
 
+const modifierAllocationCache = new Map();
+
+function getModifierAllocations(numPlus5, numPlus10) {
+  const key = `${numPlus5}|${numPlus10}`;
+  const cached = modifierAllocationCache.get(key);
+  if (cached) return cached;
+  const sizes = [
+    ...Array(numPlus10).fill(10),
+    ...Array(numPlus5).fill(5),
+  ];
+  let states = new Map([[
+    "0,0,0,0,0,0",
+    { gains: STATS.map(() => 0), placements: [] },
+  ]]);
+  for (const size of sizes) {
+    const next = new Map();
+    for (const state of states.values()) {
+      for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
+        const gains = [...state.gains];
+        gains[statIndex] += size;
+        const stateKey = gains.join(",");
+        if (!next.has(stateKey)) {
+          next.set(stateKey, {
+            gains,
+            placements: [...state.placements, statIndex],
+          });
+        }
+      }
+    }
+    states = next;
+  }
+  const result = { sizes, options: [...states.values()] };
+  modifierAllocationCache.set(key, result);
+  return result;
+}
+
+function chooseBestModifierAllocation(
+  totals, target, constraints, numPlus5, numPlus10
+) {
+  const { sizes, options } = getModifierAllocations(numPlus5, numPlus10);
+  let best = null;
+  for (const option of options) {
+    const finalTotals = Object.fromEntries(STATS.map((stat, index) => [
+      stat, totals[stat] + option.gains[index],
+    ]));
+    const rank = scoreStatsRank(finalTotals, target, constraints);
+    if (!best || compareScoreRanks(rank, best.rank) < 0) {
+      const modAssignments = {};
+      for (let pieceIndex = 0; pieceIndex < 5; pieceIndex++) {
+        modAssignments[pieceIndex] = pieceIndex < option.placements.length
+          ? { size: sizes[pieceIndex], stat: STATS[option.placements[pieceIndex]] }
+          : null;
+      }
+      best = { totals: finalTotals, modAssignments, rank };
+    }
+  }
+  return best;
+}
+
+function chooseGreedyModifierAllocation(
+  totals, target, constraints, numPlus5, numPlus10
+) {
+  const finalTotals = { ...totals };
+  const sizes = [
+    ...Array(numPlus10).fill(10),
+    ...Array(numPlus5).fill(5),
+  ];
+  const modAssignments = {};
+  const hasAdvancedConstraints = (constraints?.priorityOrder?.length || 0) > 0
+    || Object.values(constraints?.priorities || {}).some(Boolean)
+    || Object.values(constraints?.minimums || {}).some(value => value > 0)
+    || Object.values(constraints?.exact || {}).some(Boolean)
+    || Object.values(constraints?.le100 || {}).some(Boolean)
+    || Object.values(constraints?.force0 || {}).some(Boolean);
+  let currentRank = hasAdvancedConstraints
+    ? scoreStatsRank(finalTotals, target, constraints)
+    : null;
+  for (let pieceIndex = 0; pieceIndex < sizes.length; pieceIndex++) {
+    const size = sizes[pieceIndex];
+    let bestStat = null;
+    let bestRank = null;
+    let bestImprovement = -Infinity;
+    for (const stat of STATS) {
+      if (!hasAdvancedConstraints) {
+        const oldDifference = finalTotals[stat] - target[stat];
+        const newDifference = finalTotals[stat] + size - target[stat];
+        const oldPenalty = oldDifference < 0
+          ? oldDifference * oldDifference * 3
+          : oldDifference * oldDifference;
+        const newPenalty = newDifference < 0
+          ? newDifference * newDifference * 3
+          : newDifference * newDifference;
+        const improvement = oldPenalty - newPenalty;
+        if (improvement > bestImprovement) {
+          bestImprovement = improvement;
+          bestStat = stat;
+        }
+        continue;
+      }
+      const oldRank = singleStatScoreRank(
+        stat, finalTotals[stat], target[stat], constraints
+      );
+      const newRank = singleStatScoreRank(
+        stat, finalTotals[stat] + size, target[stat], constraints
+      );
+      const rank = currentRank.map((value, index) =>
+        value - oldRank[index] + newRank[index]);
+      if (!bestRank || compareScoreRanks(rank, bestRank) < 0) {
+        bestRank = rank;
+        bestStat = stat;
+      }
+    }
+    finalTotals[bestStat] += size;
+    if (hasAdvancedConstraints) currentRank = bestRank;
+    modAssignments[pieceIndex] = { size, stat: bestStat };
+  }
+  for (let pieceIndex = sizes.length; pieceIndex < 5; pieceIndex++) {
+    modAssignments[pieceIndex] = null;
+  }
+  return {
+    totals: finalTotals,
+    modAssignments,
+    rank: currentRank || scoreStatsRank(finalTotals, target, constraints),
+  };
+}
+
 // ============================================================
 // EVALUATION: compute deterministic tuning + mods for a config
 // ============================================================
@@ -56,33 +182,34 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
     return { from: fromStat, to: toStat || STATS.find(s => s !== fromStat) };
   }
 
-  const p = constraints?.priorities || {};
-  const l100 = constraints?.le100 || {};
-  const f0 = constraints?.force0 || {};
-  const priorityOrder = constraints?.priorityOrder || [];
-  const minimums = constraints?.minimums || {};
-  const exact = constraints?.exact || {};
   const forcedCandidates = STATS.filter(s => (forcedFromHits[s] || 0) > 0 && totals[s] > target[s]);
   const fromCandidates = (forcedCandidates.length > 0 ? forcedCandidates : STATS)
     .filter(s => s !== fixedTo);
   const toCandidates = fixedTo ? [fixedTo] : STATS;
   let best = null;
-  let bestImprovement = -Infinity;
+  let bestRank = null;
+  const currentRank = scoreStatsRank(totals, target, constraints);
 
   for (const from of fromCandidates) {
     for (const to of toCandidates) {
       if (to === from) continue;
-      const fromRank = priorityOrder.indexOf(from);
-      const toRank = priorityOrder.indexOf(to);
-      const oldPenalty =
-        singlePenalty(totals[from], target[from], p[from], l100[from], f0[from], fromRank, minimums[from], exact[from]) +
-        singlePenalty(totals[to], target[to], p[to], l100[to], f0[to], toRank, minimums[to], exact[to]);
-      const newPenalty =
-        singlePenalty(totals[from] - 5, target[from], p[from], l100[from], f0[from], fromRank, minimums[from], exact[from]) +
-        singlePenalty(totals[to] + 5, target[to], p[to], l100[to], f0[to], toRank, minimums[to], exact[to]);
-      const improvement = oldPenalty - newPenalty;
-      if (improvement > bestImprovement) {
-        bestImprovement = improvement;
+      const oldFromRank = singleStatScoreRank(
+        from, totals[from], target[from], constraints
+      );
+      const newFromRank = singleStatScoreRank(
+        from, totals[from] - 5, target[from], constraints
+      );
+      const oldToRank = singleStatScoreRank(
+        to, totals[to], target[to], constraints
+      );
+      const newToRank = singleStatScoreRank(
+        to, totals[to] + 5, target[to], constraints
+      );
+      const rank = currentRank.map((value, index) =>
+        value - oldFromRank[index] + newFromRank[index]
+          - oldToRank[index] + newToRank[index]);
+      if (!bestRank || compareScoreRanks(rank, bestRank) < 0) {
+        bestRank = rank;
         best = { from, to };
       }
     }
@@ -99,6 +226,9 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
 export function evaluateConfig(
   baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints, fixedTuningTargets = null
 ) {
+  const allocateModifiers = !fixedTuningTargets && numPlus5 + numPlus10 <= 2
+    ? chooseBestModifierAllocation
+    : chooseGreedyModifierAllocation;
   const baseTotals = {};
   for (const s of STATS) baseTotals[s] = 0;
   for (let i = 0; i < 5; i++) {
@@ -121,7 +251,7 @@ export function evaluateConfig(
   }
 
   let bestOverall = null;
-  let bestScore = Infinity;
+  let bestRank = null;
 
   // Generate masks with exactly numPlus3 bits set. With fixedTuningTargets the
   // per-piece mode is already known (null entry = that piece runs +3), so the
@@ -165,66 +295,33 @@ export function evaluateConfig(
       if (hitsRemaining[t.from] > 0) hitsRemaining[t.from]--;
     }
 
-    const modSizes = [];
-    for (let i = 0; i < numPlus10; i++) modSizes.push(10);
-    for (let i = 0; i < numPlus5; i++) modSizes.push(5);
-
-    const modAssignments = {};
-    const usedPieces = new Set();
-    const p = constraints?.priorities || {};
-    const l100 = constraints?.le100 || {};
-    const f0 = constraints?.force0 || {};
-    const priorityOrder = constraints?.priorityOrder || [];
-    const minimums = constraints?.minimums || {};
-    const exact = constraints?.exact || {};
-
-    for (const modSize of modSizes) {
-      let bestStat = null, bestPiece = null, bestImprovement = -Infinity;
-      for (const st of STATS) {
-        const rank = priorityOrder.indexOf(st);
-        const oldPen = singlePenalty(totals[st], target[st], p[st], l100[st], f0[st], rank, minimums[st], exact[st]);
-        const newPen = singlePenalty(totals[st] + modSize, target[st], p[st], l100[st], f0[st], rank, minimums[st], exact[st]);
-        const imp = oldPen - newPen;
-        // Tiebreaker: same improvement -> prefer stat further below target; if still tied -> higher target
-        const thisGap = totals[st] - target[st];
-        const bestGap = bestStat ? totals[bestStat] - target[bestStat] : 0;
-        if (imp > bestImprovement ||
-            (Math.abs(imp - bestImprovement) < 0.001 && (thisGap < bestGap ||
-             (Math.abs(thisGap - bestGap) < 0.001 && target[st] > (target[bestStat]||0))))) {
-          for (let pp = 0; pp < 5; pp++) {
-            if (!usedPieces.has(pp)) { bestImprovement = imp; bestStat = st; bestPiece = pp; break; }
-          }
-        }
-      }
-      if (bestPiece !== null) {
-        modAssignments[bestPiece] = { stat: bestStat, size: modSize };
-        usedPieces.add(bestPiece);
-        totals[bestStat] += modSize;
-      }
-    }
-    for (let pp = 0; pp < 5; pp++) {
-      if (!modAssignments[pp]) modAssignments[pp] = null;
-    }
-
-    const finalScore = scoreStats(totals, target, constraints);
-    if (finalScore < bestScore) {
-      bestScore = finalScore;
-      bestOverall = { totals: { ...totals }, tuningAssignments: [...tuningAssignments], modAssignments: { ...modAssignments }, score: finalScore };
-      if (bestScore === 0) break;
+    const modifierResult = allocateModifiers(
+      totals, target, constraints, numPlus5, numPlus10
+    );
+    const finalRank = modifierResult.rank;
+    const finalScore = scoreStats(modifierResult.totals, target, constraints);
+    if (!bestRank || compareScoreRanks(finalRank, bestRank) < 0) {
+      bestRank = finalRank;
+      bestOverall = {
+        totals: { ...modifierResult.totals },
+        tuningAssignments: [...tuningAssignments],
+        modAssignments: { ...modifierResult.modAssignments },
+        rank: [...finalRank],
+        score: finalScore,
+      };
+      if (finalRank.every(value => value === 0)) break;
     }
   }
 
   // Refinement: try swapping each +5/-5 piece's +5 target to improve score
-  const p = constraints?.priorities || {};
-  const l100 = constraints?.le100 || {};
-  const f0 = constraints?.force0 || {};
-  const priorityOrder = constraints?.priorityOrder || [];
   const minimums = constraints?.minimums || {};
   const exact = constraints?.exact || {};
   // Hard minimum/exact constraints must still get a refinement pass when their
   // large penalty pushes the score above the normal near-miss cutoff.
   const hasHardTargetConstraint = Object.values(minimums).some(value => value > 0)
     || Object.values(exact).some(Boolean);
+  const searchFullTuningNeighborhood = hasHardTargetConstraint
+    || (constraints?.priorityOrder?.length || 0) > 0;
   if (bestOverall && bestOverall.score > 0 &&
       (bestOverall.score < 10000 || hasHardTargetConstraint)) {
     let improved = true;
@@ -232,14 +329,22 @@ export function evaluateConfig(
       improved = false;
       for (let i = 0; i < 5; i++) {
         if (bestOverall.tuningAssignments[i].mode !== '+5-5') continue;
-        const curFrom = bestOverall.tuningAssignments[i].from;
-        const curTo = bestOverall.tuningAssignments[i].to;
+        const currentFrom = bestOverall.tuningAssignments[i].from;
+        const currentTo = bestOverall.tuningAssignments[i].to;
         // With a pinned +5 (owned armor) only the -5 source can be retried;
-        // otherwise the +5 target is the thing worth varying.
+        // otherwise both sides of the shift must remain searchable.
         const pinnedTo = fixedTuningTargets?.[i] || null;
         const variants = pinnedTo
-          ? STATS.filter(s => s !== curFrom && s !== pinnedTo).map(altFrom => ({ from: altFrom, to: pinnedTo }))
-          : STATS.filter(s => s !== curTo && s !== curFrom).map(altTo => ({ from: curFrom, to: altTo }));
+          ? STATS
+            .filter(stat => stat !== pinnedTo)
+            .map(altFrom => ({ from: altFrom, to: pinnedTo }))
+          : searchFullTuningNeighborhood
+            ? STATS.flatMap(altFrom => STATS
+              .filter(altTo => altTo !== altFrom)
+              .map(altTo => ({ from: altFrom, to: altTo })))
+            : STATS
+              .filter(altTo => altTo !== currentFrom && altTo !== currentTo)
+              .map(altTo => ({ from: currentFrom, to: altTo }));
         for (const variant of variants) {
           const altFrom = variant.from;
           const altTo = variant.to;
@@ -263,39 +368,24 @@ export function evaluateConfig(
               trialTotals[t.to] += 5;
             }
           }
-          // Redo mod distribution
-          const modSizes2 = [];
-          for (let k = 0; k < numPlus10; k++) modSizes2.push(10);
-          for (let k = 0; k < numPlus5; k++) modSizes2.push(5);
-          const trialMods = {};
-          const used2 = new Set();
-          for (const ms of modSizes2) {
-            let bStat = null, bPiece = null, bImp = -Infinity;
-            for (const st2 of STATS) {
-              const rank = priorityOrder.indexOf(st2);
-              const op = singlePenalty(trialTotals[st2], target[st2], p[st2], l100[st2], f0[st2], rank, minimums[st2], exact[st2]);
-              const np = singlePenalty(trialTotals[st2] + ms, target[st2], p[st2], l100[st2], f0[st2], rank, minimums[st2], exact[st2]);
-              const im = op - np;
-              if (im > bImp) {
-                for (let pp2 = 0; pp2 < 5; pp2++) {
-                  if (!used2.has(pp2)) { bImp = im; bStat = st2; bPiece = pp2; break; }
-                }
-              }
-            }
-            if (bPiece !== null) { trialMods[bPiece] = { stat: bStat, size: ms }; used2.add(bPiece); trialTotals[bStat] += ms; }
-          }
-          for (let pp2 = 0; pp2 < 5; pp2++) { if (!trialMods[pp2]) trialMods[pp2] = null; }
-          const trialScore = scoreStats(trialTotals, target, constraints);
-          if (trialScore < bestScore) {
-            bestScore = trialScore;
+          const modifierResult = allocateModifiers(
+            trialTotals, target, constraints, numPlus5, numPlus10
+          );
+          const trialRank = modifierResult.rank;
+          const trialScore = scoreStats(
+            modifierResult.totals, target, constraints
+          );
+          if (compareScoreRanks(trialRank, bestRank) < 0) {
+            bestRank = trialRank;
             bestOverall = {
-              totals: { ...trialTotals },
+              totals: { ...modifierResult.totals },
               tuningAssignments: bestOverall.tuningAssignments.map((t2, j) => j === i ? { mode: '+5-5', from: altFrom, to: altTo } : { ...t2 }),
-              modAssignments: { ...trialMods },
+              modAssignments: { ...modifierResult.modAssignments },
+              rank: [...trialRank],
               score: trialScore,
             };
             improved = true;
-            if (trialScore === 0) break;
+            if (trialRank.every(value => value === 0)) break;
           }
         }
         if (improved) break;
@@ -318,6 +408,63 @@ export function singlePenalty(actual, target, isPriority, le100, force0, priorit
   if (le100 && actual > 100) penalty += (actual - 100) * (actual - 100) * 500;
   if (force0 && actual > 0) penalty += actual * actual * 500;
   return penalty;
+}
+
+// Structural score used for every internal optimization decision. Keeping hard
+// constraints and priority tiers in separate tuple fields avoids the precision
+// loss caused by encoding lexicographic order with 1e18/1e12 multipliers.
+function singleStatScoreRank(stat, actual, target, constraints) {
+  const priorities = constraints?.priorities || {};
+  const le100 = constraints?.le100 || {};
+  const force0 = constraints?.force0 || {};
+  const priorityOrder = constraints?.priorityOrder || [];
+  const minimums = constraints?.minimums || {};
+  const exact = constraints?.exact || {};
+  const difference = actual - target;
+  let fitPenalty = difference < 0
+    ? difference * difference * 3
+    : difference * difference;
+  if (priorities[stat]) fitPenalty *= 50;
+  const priorityRank = priorityOrder.indexOf(stat);
+  let hardPenalty = 0;
+  let firstPriorityPenalty = priorityRank === 0 ? fitPenalty : 0;
+  let secondPriorityPenalty = priorityRank === 1 ? fitPenalty : 0;
+  let softPenalty = priorityRank < 0 || priorityRank > 1 ? fitPenalty : 0;
+  const minimum = minimums[stat] || 0;
+  if (minimum > 0 && actual < minimum) {
+    hardPenalty += (minimum - actual) ** 2;
+  }
+  if (exact[stat] && actual !== target) hardPenalty += difference ** 2;
+  if (le100[stat] && actual > 100) {
+    softPenalty += (actual - 100) ** 2 * 500;
+  }
+  if (force0[stat] && actual > 0) softPenalty += actual ** 2 * 500;
+  return [
+    hardPenalty,
+    firstPriorityPenalty,
+    secondPriorityPenalty,
+    softPenalty,
+  ];
+}
+
+export function scoreStatsRank(actual, target, constraints) {
+  const total = [0, 0, 0, 0];
+  for (const stat of STATS) {
+    const rank = singleStatScoreRank(
+      stat, actual[stat], target[stat], constraints
+    );
+    for (let index = 0; index < total.length; index++) total[index] += rank[index];
+  }
+  return total;
+}
+
+export function compareScoreRanks(left, right) {
+  const length = Math.max(left?.length || 0, right?.length || 0);
+  for (let index = 0; index < length; index++) {
+    const difference = (left?.[index] || 0) - (right?.[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 export function scoreStats(actual, target, constraints) {
@@ -397,22 +544,27 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
 
         for (let i = 0; i < purpleCount; i++) {
           const archIdx = archIndices[i];
-          let bestPiece = null, bestAfterScore = Infinity;
+          let bestPiece = null, bestAfterRank = null;
           for (let t = 0; t < 4; t++) {
             const piece = BASE_CONFIGS[archIdx * 4 + t];
             const hypo = { ...partialTotals };
             for (const s of STATS) hypo[s] += piece.baseStats[s];
             const completedPieces = i + 1 + (fixedExotic ? 1 : 0);
             const ratio = completedPieces / 5;
-            let s = 0;
-            for (const st of STATS) {
-              const expected = target[st] * ratio;
-              const diff = hypo[st] - expected;
-              const rank = constraints?.priorityOrder?.indexOf(st) ?? -1;
-              const weight = rank === 0 ? 1e12 : (rank === 1 ? 1e6 : 1);
-              s += (diff < 0 ? diff * diff * 3 : diff * diff) * weight;
+            const projectedTarget = Object.fromEntries(STATS.map(stat => [
+              stat, target[stat] * ratio,
+            ]));
+            const projectedConstraints = {
+              ...constraints,
+              minimums: Object.fromEntries(Object.entries(
+                constraints?.minimums || {}
+              ).map(([stat, value]) => [stat, value * ratio])),
+            };
+            const rank = scoreStatsRank(hypo, projectedTarget, projectedConstraints);
+            if (!bestAfterRank || compareScoreRanks(rank, bestAfterRank) < 0) {
+              bestAfterRank = rank;
+              bestPiece = piece;
             }
-            if (s < bestAfterScore) { bestAfterScore = s; bestPiece = piece; }
           }
           config.push(bestPiece);
           for (const s of STATS) partialTotals[s] += bestPiece.baseStats[s];
@@ -434,7 +586,7 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
                 const trial = [...bestConfig];
                 trial[configIndex] = alt;
                 const r = evaluateConfig(trial, target, numPlus5, numPlus10, numPlus3, constraints);
-                if (r.score < bestResult.score) {
+                if (compareScoreRanks(r.rank, bestResult.rank) < 0) {
                   bestConfig = trial; bestResult = r; improved = true; break;
                 }
               }
@@ -447,12 +599,13 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
         const exoticIndex = fixedExotic ? 0 : null;
         const key = archetypeKey(bestConfig, exoticIndex);
         const existing = solutionMap.get(key);
-        if (!existing || bestResult.score < existing.score) {
+        if (!existing || compareScoreRanks(bestResult.rank, existing.rank) < 0) {
           solutionMap.set(key, {
             config: [...bestConfig],
             tuningAssignments: bestResult.tuningAssignments,
             modAssignments: bestResult.modAssignments,
             totals: bestResult.totals,
+            rank: [...bestResult.rank],
             score: bestResult.score,
             exoticIndex,
             exoticSelection: exoticSettings ? {
@@ -483,14 +636,16 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
 
   const solutions = [...solutionMap.values()];
   solutions.sort((a, b) => {
-    if (Math.floor(a.score/100) !== Math.floor(b.score/100)) return a.score - b.score;
+    const rankOrder = compareScoreRanks(a.rank, b.rank);
+    if (rankOrder !== 0) return rankOrder;
     const aF = farmabilityScore(a.config, a.exoticIndex), bF = farmabilityScore(b.config, b.exoticIndex);
     if (aF !== bF) return aF - bF;
     return a.score - b.score;
   });
 
   // Show all perfect solutions, or top 20 imperfect ones
-  const perfectOnes = solutions.filter(s => s.score === 0);
+  const perfectOnes = solutions.filter(solution =>
+    solution.rank.every(value => value === 0));
   if (perfectOnes.length > 0) return perfectOnes;
   return solutions.slice(0, 60);
 }
