@@ -168,6 +168,10 @@
         <input type="checkbox" id="upgradeReassignModifiers" checked onchange="updateUpgradeOption()">
         <span data-i18n="upgradeReassignModifiers">允许重新分配五件护甲的调整与属性模组</span>
       </label>
+      <label>
+        <input type="checkbox" id="upgradeOnlyPlus5" onchange="updateUpgradeOption()">
+        <span data-i18n-html="onlyPlus5TuningLabel">只使用<strong style="color:var(--accent);">+5/-5</strong>调整（不使用+3）</span>
+      </label>
       <div class="upgrade-budget-summary" id="upgradeBudgetSummary" aria-live="polite"></div>
     </div>
   </section>

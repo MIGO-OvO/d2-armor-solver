@@ -158,6 +158,15 @@ export function getUpgradeModifierBudget(pieces) {
   };
 }
 
+// "Only +5/-5" analysis treats every +3 piece as a +5/-5 one. The +3 mod has no
+// rolled +5 side, so the piece is just read as a shift piece with whatever +5
+// direction it carried; the budget and re-picking stay consistent.
+function coercePiecesToPlus5Only(pieces) {
+  return pieces.map((piece, index) => piece.tuningMode === 'plus3'
+    ? normalizeUpgradePiece({ ...piece, tuningMode: 'shift' }, index)
+    : piece);
+}
+
 
 function normalizeRequiredStats(requiredStats = []) {
   return [...new Set(requiredStats)].filter(stat => STATS.includes(stat));
@@ -222,8 +231,9 @@ export function compareUpgradeMetrics(left, right) {
 }
 
 export function evaluateUpgradePieces(
-  pieces, targets, fragments, reassignModifiers, requiredStats = []
+  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false
 ) {
+  if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   const configs = pieces.map(getUpgradeConfig);
   const armorTarget = Object.fromEntries(STATS.map(stat => [
@@ -275,7 +285,7 @@ export function evaluateUpgradePieces(
   };
 }
 
-function createUpgradeEvaluator(targets, fragments, requiredStats) {
+function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuning = false) {
   const cache = new Map();
   return (pieces, reassignModifiers) => {
     const key = pieces.map(piece => [
@@ -286,11 +296,11 @@ function createUpgradeEvaluator(targets, fragments, requiredStats) {
       piece.tuningTo,
       piece.armorModSize,
       piece.armorModStat,
-    ].join(':')).join('|') + '#' + Number(reassignModifiers);
+    ].join(':')).join('|') + '#' + Number(reassignModifiers) + '#' + Number(onlyPlus5Tuning);
     const cached = cache.get(key);
     if (cached) return cached;
     const evaluation = evaluateUpgradePieces(
-      pieces, targets, fragments, reassignModifiers, requiredStats
+      pieces, targets, fragments, reassignModifiers, requiredStats, onlyPlus5Tuning
     );
     cache.set(key, evaluation);
     return evaluation;
@@ -457,12 +467,14 @@ export function chooseUpgradeTertiaries(
 // the same archetype, crossed with each rolled +5 tuning stat (or the +3 mod).
 // The +5 stat has to be enumerated here because it cannot be re-picked later —
 // it comes with the piece.
-export function getUpgradeSlotVariants(piece, slotIndex, archetypeFilter) {
+export function getUpgradeSlotVariants(piece, slotIndex, archetypeFilter, onlyPlus5Tuning = false) {
   const variants = [];
   for (const config of BASE_CONFIGS) {
     if (archetypeFilter && config.archetype !== archetypeFilter) continue;
     const configured = setUpgradePieceConfig(piece, slotIndex, config);
-    variants.push(normalizeUpgradePiece({ ...configured, tuningMode: 'plus3' }, slotIndex));
+    if (!onlyPlus5Tuning) {
+      variants.push(normalizeUpgradePiece({ ...configured, tuningMode: 'plus3' }, slotIndex));
+    }
     for (const tuningTo of STATS) {
       variants.push(normalizeUpgradePiece({
         ...configured, tuningMode: 'shift', tuningTo,
@@ -476,7 +488,8 @@ export function refineUpgradePlanPieces(
   pieces, unlockedIndices, targets, fragments, reassignModifiers,
   evaluatePieces = (candidatePieces, shouldReassign) => evaluateUpgradePieces(
     candidatePieces, targets, fragments, shouldReassign
-  )
+  ),
+  onlyPlus5Tuning = false
 ) {
   let bestPieces = pieces.map(piece => ({ ...piece }));
   let bestEvaluation = evaluatePieces(bestPieces, reassignModifiers);
@@ -488,7 +501,8 @@ export function refineUpgradePlanPieces(
     for (const slotIndex of unlockedIndices) {
       const currentIdentity = getUpgradePieceIdentity(bestPieces[slotIndex]);
       const variants = getUpgradeSlotVariants(
-        bestPieces[slotIndex], slotIndex, getUpgradeConfig(bestPieces[slotIndex]).archetype
+        bestPieces[slotIndex], slotIndex, getUpgradeConfig(bestPieces[slotIndex]).archetype,
+        onlyPlus5Tuning
       );
       for (const variant of variants) {
         if (sameUpgradeIdentity(getUpgradePieceIdentity(variant), currentIdentity)) continue;
@@ -576,7 +590,8 @@ export function findUpgradeCompletionPlan(
   requiredStats = [],
   evaluatePieces = (candidatePieces, shouldReassign) => evaluateUpgradePieces(
     candidatePieces, targets, fragments, shouldReassign, requiredStats
-  )
+  ),
+  onlyPlus5Tuning = false
 ) {
   const unlockedIndices = pieces
     .map((piece, index) => piece.locked ? -1 : index)
@@ -636,7 +651,7 @@ export function findUpgradeCompletionPlan(
     for (const seed of seeds) {
       const refined = refineUpgradePlanPieces(
         seed.pieces, unlockedIndices, targets, fragments, reassignModifiers,
-        evaluatePieces
+        evaluatePieces, onlyPlus5Tuning
       );
       const replacements = getUpgradeReplacements(pieces, refined.pieces);
       const plan = {
@@ -662,11 +677,17 @@ export function findUpgradeCompletionPlan(
 }
 
 export function analyzeUpgradeCandidates(
-  pieces, targets, fragments, reassignModifiers, requiredStats = []
+  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false
 ) {
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
-  const evaluatePieces = createUpgradeEvaluator(targets, fragments, normalizedRequiredStats);
-  const enteredBaseline = evaluatePieces(pieces, false);
+  const evaluatePieces = createUpgradeEvaluator(
+    targets, fragments, normalizedRequiredStats, onlyPlus5Tuning
+  );
+  // "Only +5/-5" applies to the plan, not to what is equipped right now: the
+  // entered baseline keeps reporting the real +3 pieces as they are.
+  const enteredBaseline = onlyPlus5Tuning
+    ? evaluateUpgradePieces(pieces, targets, fragments, false, normalizedRequiredStats)
+    : evaluatePieces(pieces, false);
   const baseline = evaluatePieces(pieces, reassignModifiers);
   const rankings = [];
   if (!baseline.metrics.allReached) {
@@ -676,7 +697,7 @@ export function analyzeUpgradeCandidates(
       let bestForSlot = null;
       // Every archetype, tertiary, and rolled +5 stat is a distinct piece to
       // farm, so all three vary here.
-      for (const variant of getUpgradeSlotVariants(pieces[slotIndex], slotIndex, null)) {
+      for (const variant of getUpgradeSlotVariants(pieces[slotIndex], slotIndex, null, onlyPlus5Tuning)) {
         const variantIdentity = getUpgradePieceIdentity(variant);
         if (sameUpgradeIdentity(variantIdentity, currentIdentity)) continue;
         const trialPieces = pieces.map(piece => ({ ...piece }));
@@ -714,7 +735,8 @@ export function analyzeUpgradeCandidates(
     : findUpgradeCompletionPlan(
       pieces, targets, fragments, reassignModifiers, baseline, singleSwapSeeds,
       normalizedRequiredStats,
-      evaluatePieces
+      evaluatePieces,
+      onlyPlus5Tuning
     );
   return {
     pieces: pieces.map(piece => ({ ...piece })),

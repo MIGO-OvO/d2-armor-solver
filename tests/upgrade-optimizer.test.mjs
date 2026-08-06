@@ -150,3 +150,35 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
     "the plan must land exactly on the target"
   );
 });
+
+// "Only +5/-5" restricts every proposed plan and candidate, while the entered
+// baseline keeps reporting the +3 pieces the player actually has equipped.
+test("only +5/-5 analysis never proposes +3 pieces but keeps the real baseline", () => {
+  const pieces = Array.from({ length: 5 }, (_, index) =>
+    createDefaultUpgradePiece(index));
+  pieces[0].tuningMode = "plus3";
+  pieces[1].tuningMode = "plus3";
+  const targets = {
+    health: 100, melee: 100, grenade: 100, super: 70, class: 70, weapons: 70,
+  };
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const countPlus3 = evaluation =>
+    evaluation.tuningAssignments.filter(t => t && t.mode === "+3").length;
+
+  const restricted = analyzeUpgradeCandidates(
+    pieces, targets, fragments, true, [], true
+  );
+
+  assert.equal(countPlus3(restricted.enteredBaseline), 2,
+    "entered baseline must keep reporting the equipped +3 pieces");
+  assert.equal(countPlus3(restricted.baseline), 0,
+    "baseline must be reachable without +3");
+  assert.ok(restricted.rankings.every(candidate =>
+    candidate.afterPiece.tuningMode !== "plus3"),
+  "no replacement candidate may carry +3");
+  if (restricted.plan) {
+    assert.equal(countPlus3(restricted.plan.evaluation), 0,
+      "the plan must never assign +3");
+  }
+});
+

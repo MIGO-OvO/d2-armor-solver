@@ -3072,6 +3072,7 @@ function saveUpgradeDraft() {
     pieces: upgradeBuildState,
     requiredStats: getUpgradeRequiredStats(),
     reassignModifiers: document.getElementById('upgradeReassignModifiers')?.checked ?? true,
+    onlyPlus5Tuning: document.getElementById('upgradeOnlyPlus5')?.checked === true,
     setRequirement,
     exoticSlotFilter: inventoryExoticSlotFilter,
     fixedExoticKey: inventoryFixedExoticKey,
@@ -3106,6 +3107,8 @@ function loadUpgradeDraft() {
   inventoryImportExpanded = importedInventory.length > 0 && draft?.inventoryImportExpanded !== false;
   const reassign = document.getElementById('upgradeReassignModifiers');
   if (reassign) reassign.checked = draft?.reassignModifiers !== false;
+  const upgradeOnlyPlus5 = document.getElementById('upgradeOnlyPlus5');
+  if (upgradeOnlyPlus5) upgradeOnlyPlus5.checked = draft?.onlyPlus5Tuning === true;
   for (const stat of STATS) {
     const control = document.getElementById('upgradeRequired_' + stat);
     if (control) control.checked = upgradeRequiredStats.includes(stat);
@@ -3855,6 +3858,7 @@ async function analyzeArmorUpgrades() {
   const fragments = getUpgradeFragments();
   const requiredStats = getUpgradeRequiredStats();
   const reassignModifiers = document.getElementById('upgradeReassignModifiers')?.checked !== false;
+  const onlyPlus5Tuning = document.getElementById('upgradeOnlyPlus5')?.checked === true;
   messages.innerHTML = '';
 
   // With an imported inventory the "no farming" option comes from the pieces
@@ -3888,6 +3892,7 @@ async function analyzeArmorUpgrades() {
         fragments,
         reassignModifiers,
         requiredStats,
+        onlyPlus5Tuning,
       });
       renderUpgradeAnalysis(analysis, true);
       messages.innerHTML = inventoryMessage + `<div class="msg info">${icon('check')}${analysis.baseline.metrics.allReached

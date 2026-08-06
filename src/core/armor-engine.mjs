@@ -47,6 +47,7 @@ export function analyzeUpgrade({
   fragments,
   reassignModifiers,
   requiredStats = [],
+  onlyPlus5Tuning = false,
 }) {
   return analyzeUpgradeCandidates(
     pieces,
@@ -54,6 +55,7 @@ export function analyzeUpgrade({
     fragments,
     reassignModifiers,
     requiredStats,
+    onlyPlus5Tuning,
   );
 }
 
