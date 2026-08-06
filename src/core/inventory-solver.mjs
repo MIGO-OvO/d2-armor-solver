@@ -10,6 +10,8 @@ const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
 const MAX_FREE_CANDIDATES = 24;
 const MAX_LOCAL_CANDIDATES = 12;
 const MAX_ASSIGNMENTS = 200;
+const EXACT_COMBINATION_LIMIT = 4096;
+const INVENTORY_BEAM_WIDTH = 64;
 
 // Build a five-piece loadout from the imported inventory that satisfies the
 // set-bonus requirement (or none) and comes as close as possible to the stat
@@ -23,6 +25,7 @@ export function solveInventoryLoadout({
   reassignModifiers = true,
   currentPieces = null,
   requiredStats = [],
+  onlyPlus5Tuning = false,
   maxResults = 12,
 }) {
   if (!setRequirement) return null;
@@ -39,7 +42,8 @@ export function solveInventoryLoadout({
     Math.max(0, (targets[stat] || 0) - (fragments[stat] || 0)),
   ]));
   const evaluate = pieces => evaluateUpgradePieces(
-    pieces, targets, fragments, reassignModifiers, normalizedRequiredStats
+    pieces, targets, fragments, reassignModifiers, normalizedRequiredStats,
+    onlyPlus5Tuning
   );
   const lockedPiecesBySlot = new Map(
     (Array.isArray(currentPieces) ? currentPieces : [])
@@ -65,6 +69,44 @@ export function solveInventoryLoadout({
   for (const assignment of assignments.slice(0, MAX_ASSIGNMENTS)) {
     const freeSlots = assignment.free.filter(slot => !lockedPiecesBySlot.has(slot));
     const constrainedAssignment = { ...assignment, free: freeSlots };
+    const exhaustivePieces = enumerateSmallAssignmentLoadouts(
+      bySlot, constrainedAssignment, lockedPiecesBySlot
+    );
+    if (exhaustivePieces) {
+      for (const pieces of exhaustivePieces) {
+        if (!satisfiesRequirement(pieces, setRequirement)) continue;
+        push(pieces, evaluate(pieces));
+        examined++;
+      }
+      continue;
+    }
+    const beamPieces = searchAssignmentBeam(
+      bySlot,
+      constrainedAssignment,
+      armorTarget,
+      lockedPiecesBySlot,
+      normalizedRequiredStats,
+    );
+    if (beamPieces.length > 0) {
+      const evaluatedBeam = beamPieces.map(pieces => ({
+        pieces,
+        evaluation: evaluate(pieces),
+      })).sort((left, right) =>
+        compareUpgradeMetrics(left.evaluation.metrics, right.evaluation.metrics));
+      for (const entry of evaluatedBeam) {
+        if (!satisfiesRequirement(entry.pieces, setRequirement)) continue;
+        push(entry.pieces, entry.evaluation);
+        examined++;
+      }
+      const searchableSlots = SLOT_ORDER.filter(slot => !lockedPiecesBySlot.has(slot));
+      for (const entry of evaluatedBeam.slice(0, 4)) {
+        examined += localSearch(
+          entry.pieces, searchableSlots, bySlot, constrainedAssignment.fixed,
+          armorTarget, normalizedRequiredStats, evaluate, push
+        );
+      }
+      continue;
+    }
     const filled = greedyFill(
       bySlot, constrainedAssignment, armorTarget, lockedPiecesBySlot,
       normalizedRequiredStats
@@ -108,6 +150,95 @@ export function solveInventoryLoadout({
       modAssignments: entry.evaluation.modAssignments,
     })),
   };
+}
+
+function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot) {
+  const candidatesBySlot = [];
+  let combinationCount = 1;
+  for (const slot of SLOT_ORDER) {
+    const lockedPiece = lockedPiecesBySlot.get(slot);
+    if (lockedPiece) {
+      candidatesBySlot.push([{ piece: { ...lockedPiece } }]);
+      continue;
+    }
+    const requiredSetHash = assignment.fixed.get(slot);
+    const items = requiredSetHash
+      ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
+      : bySlot.get(slot);
+    if (items.length === 0) return [];
+    combinationCount *= items.length;
+    if (combinationCount > EXACT_COMBINATION_LIMIT) return null;
+    candidatesBySlot.push(items.map(item => ({ item })));
+  }
+
+  const loadouts = [];
+  const chosen = Array(SLOT_ORDER.length);
+  const enumerate = slotIndex => {
+    if (slotIndex === SLOT_ORDER.length) {
+      loadouts.push(chosen.map((candidate, index) => candidate.piece
+        ? { ...candidate.piece }
+        : createUpgradePieceFromItem(candidate.item, index)));
+      return;
+    }
+    for (const candidate of candidatesBySlot[slotIndex]) {
+      chosen[slotIndex] = candidate;
+      enumerate(slotIndex + 1);
+    }
+  };
+  enumerate(0);
+  return loadouts;
+}
+
+function searchAssignmentBeam(
+  bySlot, assignment, armorTarget, lockedPiecesBySlot, requiredStats
+) {
+  let states = [{
+    chosen: [],
+    partial: Object.fromEntries(STATS.map(stat => [stat, 0])),
+    score: 0,
+  }];
+  for (let slotIndex = 0; slotIndex < SLOT_ORDER.length; slotIndex++) {
+    const slot = SLOT_ORDER[slotIndex];
+    const lockedPiece = lockedPiecesBySlot.get(slot);
+    const requiredSetHash = assignment.fixed.get(slot);
+    const next = [];
+    for (const state of states) {
+      if (lockedPiece) {
+        const baseStats = getUpgradeConfig(lockedPiece).baseStats;
+        const partial = { ...state.partial };
+        for (const stat of STATS) partial[stat] += baseStats?.[stat] || 0;
+        next.push({
+          chosen: [...state.chosen, { piece: { ...lockedPiece } }],
+          partial,
+          score: fitScore(null, partial, slotIndex + 1, armorTarget, requiredStats),
+        });
+        continue;
+      }
+      const items = requiredSetHash
+        ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
+        : bySlot.get(slot);
+      const candidates = rankSlotCandidates(
+        items, state.partial, slotIndex + 1, armorTarget, requiredStats
+      );
+      for (const item of candidates) {
+        const partial = { ...state.partial };
+        const itemStats = getItemStats(item);
+        for (const stat of STATS) partial[stat] += itemStats[stat] || 0;
+        next.push({
+          chosen: [...state.chosen, { item }],
+          partial,
+          score: fitScore(null, partial, slotIndex + 1, armorTarget, requiredStats),
+        });
+      }
+    }
+    next.sort((left, right) => left.score - right.score);
+    states = next.slice(0, INVENTORY_BEAM_WIDTH);
+    if (states.length === 0) return [];
+  }
+  return states.map(state => state.chosen.map((candidate, index) =>
+    candidate.piece
+      ? { ...candidate.piece }
+      : createUpgradePieceFromItem(candidate.item, index)));
 }
 
 function combinations(items, count) {

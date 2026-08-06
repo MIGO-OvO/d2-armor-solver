@@ -3344,6 +3344,12 @@ a:focus-visible {
   text-align: right;
 }
 .upgrade-budget-summary strong { color: var(--text); }
+.upgrade-budget-summary small {
+  display: block;
+  max-width: 46rem;
+  margin-top: 2px;
+  color: var(--warning);
+}
 .upgrade-target-budget {
   display: none;
   margin-top: 14px;

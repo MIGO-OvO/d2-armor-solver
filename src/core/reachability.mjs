@@ -1,7 +1,14 @@
 import { BASE_CONFIGS, STATS } from "./armor-model.mjs";
-import { runSolver } from "./solver.mjs";
 
 const reachableRangeCache = new Map();
+
+function cacheReachableRange(key, result) {
+  reachableRangeCache.set(key, result);
+  while (reachableRangeCache.size > 24) {
+    reachableRangeCache.delete(reachableRangeCache.keys().next().value);
+  }
+  return result;
+}
 
 export function buildPieceStateOptions(configs, usePlus3) {
   const options = [];
@@ -124,6 +131,112 @@ export function calculateReachableStatRange(
   const modifierMap = new Map(
     modifierOptions.map(option => [option.lockValues.join(','), option])
   );
+  if (lockedStats.length >= 4) {
+    const stateKey = (usedPlus3, lockValues) => {
+      let key = usedPlus3;
+      for (const value of lockValues) key = key * 256 + value;
+      return key;
+    };
+    const mergeState = (map, usedPlus3, lockValues, values) => {
+      const key = stateKey(usedPlus3, lockValues);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          usedPlus3,
+          lockValues,
+          values: new Set(values),
+        });
+      } else {
+        for (const value of values) existing.values.add(value);
+      }
+    };
+    const extendWithPurplePiece = states => {
+      const next = new Map();
+      for (const state of states.values()) {
+        for (let mode = 0; mode <= 1; mode++) {
+          const usedPlus3 = state.usedPlus3 + mode;
+          if (usedPlus3 > numPlus3) continue;
+          for (const option of purpleOptions[mode]) {
+            const lockValues = state.lockValues.map((value, index) =>
+              value + option.lockValues[index]
+            );
+            if (lockValues.some((value, index) => value > armorTargets[index])) {
+              continue;
+            }
+            mergeState(
+              next,
+              usedPlus3,
+              lockValues,
+              addReachableValues(state.values, option.values),
+            );
+          }
+        }
+      }
+      return next;
+    };
+
+    let purplePairStates = new Map([[stateKey(0, lockedStats.map(() => 0)), {
+      usedPlus3: 0,
+      lockValues: lockedStats.map(() => 0),
+      values: new Set([0]),
+    }]]);
+    purplePairStates = extendWithPurplePiece(purplePairStates);
+    purplePairStates = extendWithPurplePiece(purplePairStates);
+
+    const leftStates = new Map();
+    for (let mode = 0; mode <= 1; mode++) {
+      if (mode > numPlus3) continue;
+      for (const option of fixedOptions[mode]) {
+        for (const pair of purplePairStates.values()) {
+          const usedPlus3 = mode + pair.usedPlus3;
+          if (usedPlus3 > numPlus3) continue;
+          const lockValues = option.lockValues.map((value, index) =>
+            value + pair.lockValues[index]
+          );
+          if (lockValues.some((value, index) => value > armorTargets[index])) {
+            continue;
+          }
+          mergeState(
+            leftStates,
+            usedPlus3,
+            lockValues,
+            addReachableValues(option.values, pair.values),
+          );
+        }
+      }
+    }
+
+    const reachableValues = new Set();
+    for (const left of leftStates.values()) {
+      const rightPlus3 = numPlus3 - left.usedPlus3;
+      if (rightPlus3 < 0 || rightPlus3 > 2) continue;
+      for (const modifier of modifierOptions) {
+        const rightLocks = armorTargets.map((targetValue, index) =>
+          targetValue - left.lockValues[index] - modifier.lockValues[index]
+        );
+        if (rightLocks.some(value => value < 0)) continue;
+        const right = purplePairStates.get(stateKey(rightPlus3, rightLocks));
+        if (!right) continue;
+        const armorValues = addReachableValues(left.values, right.values);
+        for (const value of addReachableValues(armorValues, modifier.values)) {
+          reachableValues.add(value);
+        }
+      }
+    }
+    if (reachableValues.size === 0) return null;
+    const fragment = objectiveStat ? (fragments[objectiveStat] || 0) : 0;
+    const rawValues = [...reachableValues].sort((a, b) => a - b);
+    const values = rawValues
+      .map(value => Math.max(0, Math.min(200, value + fragment)))
+      .filter((value, index, array) => array.indexOf(value) === index)
+      .sort((a, b) => a - b);
+    return {
+      min: values[0],
+      max: values[values.length - 1],
+      values,
+      rawValues,
+    };
+  }
   const modifierTotal = numPlus5 * 5 + numPlus10 * 10;
   const purpleBounds = purpleOptions.map(options =>
     lockedStats.map((stat, index) => ({
@@ -206,7 +319,8 @@ export function calculateReachableStatRange(
 
   if (reachableValues.size === 0) return null;
   const fragment = objectiveStat ? (fragments[objectiveStat] || 0) : 0;
-  const values = [...reachableValues]
+  const rawValues = [...reachableValues].sort((a, b) => a - b);
+  const values = rawValues
     .map(value => Math.max(0, Math.min(200, value + fragment)))
     .filter((value, index, array) => array.indexOf(value) === index)
     .sort((a, b) => a - b);
@@ -214,6 +328,7 @@ export function calculateReachableStatRange(
     min: values[0],
     max: values[values.length - 1],
     values,
+    rawValues,
   };
 }
 
@@ -222,116 +337,43 @@ export function calculateDenseLockRanges(
 ) {
   const lockedStats = Object.keys(lockedTargets);
   const unlockedStats = STATS.filter(stat => !lockedStats.includes(stat));
-  const totalFinal = 450 + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10 +
-    STATS.reduce((sum, stat) => sum + (fragments[stat] || 0), 0);
-  const lockedFinalSum = lockedStats.reduce(
-    (sum, stat) => sum + lockedTargets[stat], 0
-  );
-  const remainingFinal = totalFinal - lockedFinalSum;
-  if (remainingFinal < 0) return { feasible: false, ranges: {} };
-
   const lockedArmorTargets = Object.fromEntries(lockedStats.map(stat => [
     stat, lockedTargets[stat] - (fragments[stat] || 0),
   ]));
   if (Object.values(lockedArmorTargets).some(value => value < 0)) {
     return { feasible: false, ranges: {} };
   }
-
-  function solveDenseTarget(finalTargets, priorityStat = null) {
-    const armorTarget = Object.fromEntries(STATS.map(stat => [
-      stat, finalTargets[stat] - (fragments[stat] || 0),
-    ]));
-    if (Object.values(armorTarget).some(value => value < 0)) return null;
-    const exact = Object.fromEntries(STATS.map(stat => [
-      stat, lockedStats.includes(stat),
-    ]));
-    const settings = {
-      config: fixedPiece,
-      classId: 'range-probe',
-      classLabel: '',
-      primaryPerkId: '',
-      primaryPerkName: '',
-      secondaryPerkId: '',
-      secondaryPerkName: '',
-    };
-    const result = runSolver(
-      armorTarget, numPlus5, numPlus10, numPlus3,
-      {
-        exact,
-        priorityOrder: priorityStat ? [priorityStat] : [],
-      },
-      settings
-    )[0];
-    if (!result) return null;
-    const locksSatisfied = lockedStats.every(stat =>
-      result.totals[stat] === lockedArmorTargets[stat]
-    );
-    return locksSatisfied ? result : null;
-  }
-
-  if (unlockedStats.length <= 1) {
-    if (unlockedStats.length === 0 && remainingFinal !== 0) {
-      return { feasible: false, ranges: {} };
-    }
-    const finalTargets = { ...lockedTargets };
-    if (unlockedStats.length === 1) {
-      const stat = unlockedStats[0];
-      if (remainingFinal < 0 || remainingFinal > 200) {
-        return { feasible: false, ranges: {} };
-      }
-      finalTargets[stat] = remainingFinal;
-    }
-    const result = solveDenseTarget(finalTargets);
-    if (!result) return { feasible: false, ranges: {} };
-    return {
-      feasible: true,
-      ranges: Object.fromEntries(STATS.map(stat => {
-        const value = finalTargets[stat];
-        return [stat, { min: value, max: value, values: [value] }];
-      })),
-    };
-  }
-
-  const objective = unlockedStats[0];
-  const companion = unlockedStats[1];
-  const objectiveFloor = Math.max(0, fragments[objective] || 0);
-  const companionFloor = Math.max(0, fragments[companion] || 0);
-  const minimumGoal = Math.max(objectiveFloor, remainingFinal - 200);
-  const maximumGoal = Math.min(200, remainingFinal - companionFloor);
-  if (minimumGoal > maximumGoal) return { feasible: false, ranges: {} };
-  const minimumTargets = {
-    ...lockedTargets,
-    [objective]: minimumGoal,
-    [companion]: remainingFinal - minimumGoal,
-  };
-  const maximumTargets = {
-    ...lockedTargets,
-    [objective]: maximumGoal,
-    [companion]: remainingFinal - maximumGoal,
-  };
-  const minimumResult = solveDenseTarget(minimumTargets, objective);
-  const maximumResult = solveDenseTarget(maximumTargets, objective);
-  const witnesses = [minimumResult, maximumResult].filter(Boolean);
-  if (witnesses.length === 0) return { feasible: false, ranges: {} };
-
-  const objectiveValues = witnesses.map(result =>
-    result.totals[objective] + (fragments[objective] || 0)
-  );
-  const objectiveMin = Math.min(...objectiveValues);
-  const objectiveMax = Math.max(...objectiveValues);
   const ranges = Object.fromEntries(lockedStats.map(stat => [
     stat, { min: lockedTargets[stat], max: lockedTargets[stat], values: [lockedTargets[stat]] },
   ]));
-  ranges[objective] = {
-    min: objectiveMin,
-    max: objectiveMax,
-    exactValuesKnown: false,
-  };
-  ranges[companion] = {
-    min: remainingFinal - objectiveMax,
-    max: remainingFinal - objectiveMin,
-    exactValuesKnown: false,
-  };
+
+  const objective = unlockedStats[0] || null;
+  const probe = calculateReachableStatRange(
+    fixedPiece, numPlus5, numPlus10, numPlus3, fragments,
+    lockedTargets, objective
+  );
+  if (!probe) return { feasible: false, ranges: {} };
+  if (unlockedStats.length === 0) return { feasible: true, ranges };
+  ranges[objective] = probe;
+
+  if (unlockedStats.length === 2) {
+    const companion = unlockedStats[1];
+    const totalArmor = 450 + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
+    const lockedArmorSum = Object.values(lockedArmorTargets)
+      .reduce((sum, value) => sum + value, 0);
+    const remainingArmor = totalArmor - lockedArmorSum;
+    const companionValues = [...new Set(probe.rawValues.map(value =>
+      Math.max(0, Math.min(
+        200,
+        remainingArmor - value + (fragments[companion] || 0),
+      ))
+    ))].sort((left, right) => left - right);
+    ranges[companion] = {
+      min: companionValues[0],
+      max: companionValues[companionValues.length - 1],
+      values: companionValues,
+    };
+  }
   return { feasible: true, ranges };
 }
 
@@ -355,8 +397,7 @@ export function calculateReachableRanges(
     const result = calculateDenseLockRanges(
       fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets
     );
-    reachableRangeCache.set(cacheKey, result);
-    return result;
+    return cacheReachableRange(cacheKey, result);
   }
   const unlockedStats = STATS.filter(stat => !lockedStats.includes(stat));
   const feasibilityProbe = calculateReachableStatRange(
@@ -365,8 +406,7 @@ export function calculateReachableRanges(
   );
   if (!feasibilityProbe) {
     const result = { feasible: false, ranges: {} };
-    reachableRangeCache.set(cacheKey, result);
-    return result;
+    return cacheReachableRange(cacheKey, result);
   }
 
   const ranges = {};
@@ -387,9 +427,5 @@ export function calculateReachableRanges(
   }
 
   const result = { feasible: true, ranges };
-  reachableRangeCache.set(cacheKey, result);
-  if (reachableRangeCache.size > 24) {
-    reachableRangeCache.delete(reachableRangeCache.keys().next().value);
-  }
-  return result;
+  return cacheReachableRange(cacheKey, result);
 }

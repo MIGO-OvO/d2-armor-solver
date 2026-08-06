@@ -11,7 +11,6 @@ import {
   createExoticConfig,
   getArchetypeLabel,
   getExoticArchetypeLabel,
-  getExoticClassData,
   getExoticLanguage,
   getExoticPerkName,
   getPageLanguage,
@@ -462,7 +461,7 @@ function getFragments() {
   return f;
 }
 
-function toggleExoticMode({ syncInventory = true } = {}) {
+function toggleExoticMode({ syncInventory = true, refreshInventory = true } = {}) {
   const enabled = document.getElementById('useExoticMode')?.checked;
   const showSettings = enabled && calculatorMode !== 'upgrade';
   document.getElementById('exoticSettingsBody').style.display = showSettings ? 'block' : 'none';
@@ -479,7 +478,7 @@ function toggleExoticMode({ syncInventory = true } = {}) {
     }
     renderUpgradeImportPanel();
   } else {
-    updateInventorySolveOptions();
+    updateInventorySolveOptions({ refreshPlans: refreshInventory });
   }
 }
 
@@ -544,8 +543,13 @@ function changePageLanguage() {
   }
 }
 
+function getSelectedExoticClassData() {
+  return EXOTIC_CLASSES[document.getElementById('exoticClass')?.value]
+    || EXOTIC_CLASSES.hunter;
+}
+
 function updateExoticPerkOptions() {
-  const data = getExoticClassData();
+  const data = getSelectedExoticClassData();
   const primary = document.getElementById('exoticPrimaryPerk');
   const secondary = document.getElementById('exoticSecondaryPerk');
   const oldPrimary = primary.value;
@@ -585,7 +589,7 @@ function updateExoticFramework() {
 
 function getExoticSettings() {
   if (!document.getElementById('useExoticMode')?.checked) return null;
-  const data = getExoticClassData();
+  const data = getSelectedExoticClassData();
   const primary = data.primary.find(perk => perk[0] === document.getElementById('exoticPrimaryPerk')?.value) || data.primary[0];
   const secondary = data.secondary.find(perk => perk[0] === document.getElementById('exoticSecondaryPerk')?.value) || data.secondary[0];
   const primaryMeta = { id: primary[0], name: primary[1], primary: primary[2], secondary: primary[3], archetype: primary[4] };
@@ -2407,7 +2411,7 @@ function updateImportOptions() {
     if (classSelect) classSelect.value = importClassFilter;
     document.getElementById('useExoticMode').checked = true;
     updateExoticPerkOptions();
-    toggleExoticMode({ syncInventory: false });
+    toggleExoticMode({ syncInventory: false, refreshInventory: false });
   }
   renderUpgradeImportPanel();
 }
@@ -2422,13 +2426,13 @@ function updateInventoryExoticSlot() {
     if (classSelect) classSelect.value = importClassFilter;
     if (useExoticMode) useExoticMode.checked = true;
     updateExoticPerkOptions();
-    toggleExoticMode({ syncInventory: false });
+    toggleExoticMode({ syncInventory: false, refreshInventory: false });
     scheduleRealtimeRanges();
   } else {
     inventoryFixedExoticKey = "";
     if (previousSlot === 'classItem' && useExoticMode?.checked) {
       useExoticMode.checked = false;
-      toggleExoticMode({ syncInventory: false });
+      toggleExoticMode({ syncInventory: false, refreshInventory: false });
       scheduleRealtimeRanges();
     }
   }
@@ -2436,7 +2440,7 @@ function updateInventoryExoticSlot() {
   saveCurrentDraft();
 }
 
-function updateInventorySolveOptions() {
+function updateInventorySolveOptions({ refreshPlans = true } = {}) {
   const slotSelect = document.getElementById("inventoryExoticSlotFilter");
   const nameSelect = document.getElementById("inventoryFixedExoticName");
   if (slotSelect) inventoryExoticSlotFilter = slotSelect.value || "";
@@ -2466,7 +2470,7 @@ function updateInventorySolveOptions() {
               : l('可选。先选异域部位和名称；没有完全匹配时，结果会显示同名最接近的现有件以及建议刷取属性。', '可選。先選異域部位和名稱；沒有完全符合時，結果會顯示同名最接近的現有件以及建議取得數值。', 'Optional. Choose an Exotic slot and name. If no copy fully matches, the result shows the closest owned copy and the roll to farm.');
   }
   saveUpgradeDraft();
-  refreshInventoryPlansFromSolutions();
+  if (refreshPlans) refreshInventoryPlansFromSolutions();
 }
 
 function setImportClass(classId) {
@@ -3059,11 +3063,20 @@ function updateUpgradeBudgetSummary() {
   const budget = getUpgradeModifierBudget(upgradeBuildState);
   updateUpgradeLiveSummary();
   updateUpgradeTargetBudget();
-  summary.innerHTML = l(
+  const currentBudget = l(
     `现在用了：<strong>${budget.numPlus3}</strong> 件 +3 · <strong>${budget.numPlus5}</strong> 个 +5 · <strong>${budget.numPlus10}</strong> 个 +10`,
     `目前用了：<strong>${budget.numPlus3}</strong> 件 +3 · <strong>${budget.numPlus5}</strong> 個 +5 · <strong>${budget.numPlus10}</strong> 個 +10`,
     `In use: <strong>${budget.numPlus3}</strong> × +3 · <strong>${budget.numPlus5}</strong> × +5 · <strong>${budget.numPlus10}</strong> × +10`
   );
+  const onlyPlus5 = document.getElementById('upgradeOnlyPlus5')?.checked === true;
+  const restriction = onlyPlus5 && budget.numPlus3 > 0
+    ? `<small>${l(
+      `当前装备记录中仍有 ${budget.numPlus3} 件 +3；求解和已有护甲方案会把它们重新配置为 +5/-5，最终方案不会使用 +3。`,
+      `目前裝備記錄中仍有 ${budget.numPlus3} 件 +3；求解和已有防具方案會把它們重新配置為 +5/-5，最終方案不會使用 +3。`,
+      `${budget.numPlus3} currently equipped piece(s) still show +3; solved and owned-armor loadouts reconfigure them to +5/-5, so the final setup contains no +3.`
+    )}</small>`
+    : '';
+  summary.innerHTML = currentBudget + restriction;
 }
 
 function saveUpgradeDraft() {
@@ -3228,14 +3241,25 @@ function buildUpgradeRequirementResult(analysis, evaluation) {
 }
 
 function buildUpgradeBaselineNote(analysis, keepOnly = false) {
-  if (!analysis.reassignModifiers || !analysis.enteredBaseline) return '';
+  if (!analysis.enteredBaseline) return '';
+  const projectedCount = analysis.projectedMasterworkIndices?.length || 0;
   const changedStats = STATS.filter(stat =>
     analysis.enteredBaseline.finalTotals[stat] !== analysis.baseline.finalTotals[stat]
   );
-  if (changedStats.length === 0) return '';
-  return `<div class="upgrade-baseline-note">
-    ${icon('refresh', { size:'sm' })}
-    <span><strong>${l('数值说明：','數值說明：','Stats:')}</strong>${l('', '', ' ')}${keepOnly
+  if (changedStats.length === 0 && projectedCount === 0) return '';
+  const explanation = projectedCount > 0
+    ? (keepOnly
+      ? l(
+        `左侧为当前六维；右侧按 ${projectedCount} 件未满大师护甲升满后，再保留五件并重排调谐与模组计算。升级大师不计作刷取新护甲。`,
+        `左側為目前六維；右側按 ${projectedCount} 件未滿傑作防具升滿後，再保留五件並重排調諧與模組計算。升級傑作不計作取得新防具。`,
+        `Left shows current stats. Right projects ${projectedCount} not-yet-fully-masterworked piece(s) to full masterwork, then keeps all five and rearranges tuning/mods. Masterworking is not counted as farming a replacement.`
+      )
+      : l(
+        `左侧为当前六维；右侧的替换方案按所有保留护甲升满大师后的属性计算。共有 ${projectedCount} 件现有护甲需要升满大师，但不计作刷取替换件。`,
+        `左側為目前六維；右側的替換方案按所有保留防具升滿傑作後的數值計算。共有 ${projectedCount} 件目前防具需要升滿傑作，但不計作取得替換件。`,
+        `Left shows current stats. The replacement result projects every retained piece to full masterwork. ${projectedCount} current piece(s) need masterworking, but are not counted as farmed replacements.`
+      ))
+    : (keepOnly
       ? l(
         '左侧为当前六维，右侧为保留现有护甲、只重排调谐与模组后的六维。',
         '左側為目前六維，右側為保留目前防具、只重排調諧與模組後的六維。',
@@ -3245,7 +3269,10 @@ function buildUpgradeBaselineNote(analysis, keepOnly = false) {
         '左侧为当前六维，右侧为替换并重配模组后的六维。',
         '左側為目前六維，右側為替換並重配模組後的六維。',
         'Left shows current stats; right shows the result after swaps and mod changes.'
-      )}</span>
+      ));
+  return `<div class="upgrade-baseline-note">
+    ${icon('refresh', { size:'sm' })}
+    <span><strong>${l('数值说明：','數值說明：','Stats:')}</strong>${l('', '', ' ')}${explanation}</span>
   </div>`;
 }
 
@@ -3342,12 +3369,15 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
 
   if (analysis.baseline.metrics.allReached) {
     const enteredAlreadyReached = analysis.enteredBaseline.metrics.allReached;
+    const needsMasterwork = (analysis.projectedMasterworkIndices?.length || 0) > 0;
     body.innerHTML = `<div class="upgrade-hero">
       <div>
         <div class="upgrade-eyebrow">${l('当前配装','目前配裝','Current loadout')}</div>
         <div class="upgrade-recommendation">${enteredAlreadyReached
           ? l('不用换护甲','不用換防具','Keep all five pieces')
-          : l('只要重配模组','只要重配模組','Just rearrange the mods')}</div>
+          : (needsMasterwork
+            ? l('升满大师并重配模组','升滿傑作並重配模組','Fully masterwork and rearrange mods')
+            : l('只要重配模组','只要重配模組','Just rearrange the mods'))}</div>
         <p class="upgrade-recommendation-copy">${l(
           enteredAlreadyReached
             ? '现在这套已经达标。下面是最后的模组分配，照着核对一遍就行。'
@@ -3496,6 +3526,7 @@ async function solveInventoryRequirement({
   targets = getUpgradeTargets(),
   fragments = getUpgradeFragments(),
   requiredStats = getUpgradeRequiredStats(),
+  onlyPlus5Tuning = document.getElementById('upgradeOnlyPlus5')?.checked === true,
 } = {}) {
   const button = document.getElementById("btnUpgradeAnalyze");
   const loading = document.getElementById("loading");
@@ -3535,6 +3566,7 @@ async function solveInventoryRequirement({
       reassignModifiers,
       currentPieces: upgradeBuildState,
       requiredStats,
+      onlyPlus5Tuning,
     });
     if (solveRevision !== inventorySolveRevision ||
         !sameSetRequirement(requirementSnapshot, setRequirement)) {
@@ -3865,7 +3897,9 @@ async function analyzeArmorUpgrades() {
   // you already own; the theoretical plan below is the "farming" option.
   let inventoryMessage = '';
   if (importedInventory.length > 0) {
-    inventoryMessage = await solveInventoryRequirement({ targets, fragments, requiredStats });
+    inventoryMessage = await solveInventoryRequirement({
+      targets, fragments, requiredStats, onlyPlus5Tuning,
+    });
     if (inventoryMessage === null) return;
   }
 

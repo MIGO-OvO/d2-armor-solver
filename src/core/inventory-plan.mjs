@@ -26,6 +26,13 @@ function getItemKey(item) {
   return item?.sourceId || item?.id || `${item?.hash || 0}:${item?.slot || ""}:${item?.name || ""}`;
 }
 
+function getEligibilityKey({
+  slot, archetypeId, tertiary, tuningMode, exotic,
+}) {
+  const normalizedMode = tuningMode === "plus3" ? "plus3" : "shift";
+  return `${slot}|${archetypeId}|${tertiary}|${normalizedMode}|${Number(Boolean(exotic))}`;
+}
+
 function getSetRequirement(requirement = { type: "none" }) {
   if (!requirement || requirement.type === "none") return { type: "none" };
   if (requirement.type === "set") {
@@ -163,6 +170,32 @@ function getSetCoverage(pieces, setRequirement) {
     + Math.min(2, counts.get(Number(setRequirement.b)) || 0);
 }
 
+function getMaximumSetCoverage(setRequirement) {
+  if (setRequirement.type === "set") return Number(setRequirement.count);
+  if (setRequirement.type === "split") return 4;
+  return 0;
+}
+
+// Candidate identity is irrelevant to exact stat reachability once slot,
+// archetype, tertiary, and tuning mode have matched. Only the pinned +5 side
+// and (when requested) set membership can change the assignment outcome.
+// Keeping the first sorted item for each signature preserves equipped/locked/
+// masterwork preferences without re-exploring equivalent search states.
+function compressAssignmentCandidates(candidates, setRequirement) {
+  const compressed = [];
+  const seen = new Set();
+  for (const item of candidates) {
+    const setKey = setRequirement.type === "none"
+      ? ""
+      : Number(item.setHash) || 0;
+    const key = `${getItemTuningTo(item) || "free"}|${setKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    compressed.push(item);
+  }
+  return compressed;
+}
+
 function canCompleteSetRequirement(chosen, missing, setRequirement) {
   if (setRequirement.type === "none") return true;
   const farmableSlots = missing.filter(entry => !entry.requirement.exotic).length;
@@ -212,10 +245,27 @@ function getSetTargetLabels(missing, chosen, setRequirement) {
   });
 }
 
-function chooseBestAssignment(requirements, candidatesBySlot, setRequirement) {
+function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequirement) {
   let best = null;
+  let optimalFound = false;
   const chosen = [];
   const used = new Set();
+  const exactnessCache = new Map();
+  const maximumSetCoverage = getMaximumSetCoverage(setRequirement);
+
+  function canReachExact() {
+    const pinnedCounts = Object.fromEntries(STATS.map(stat => [stat, 0]));
+    for (let index = 0; index < chosen.length; index++) {
+      if (solution.tuningAssignments?.[index]?.mode === "+3") continue;
+      const tuningTo = getItemTuningTo(chosen[index]);
+      if (tuningTo) pinnedCounts[tuningTo]++;
+    }
+    const key = STATS.map(stat => pinnedCounts[stat]).join(",");
+    if (!exactnessCache.has(key)) {
+      exactnessCache.set(key, assignmentCanReachExact(solution, chosen));
+    }
+    return exactnessCache.get(key);
+  }
 
   function consider() {
     const owned = chosen.filter(Boolean);
@@ -231,15 +281,23 @@ function chooseBestAssignment(requirements, candidatesBySlot, setRequirement) {
       setFeasible: canCompleteSetRequirement(owned, missing, setRequirement),
       farmSetHashes: getSetTargetLabels(missing, owned, setRequirement),
     };
-    if (!best || (candidate.setFeasible && !best.setFeasible) ||
-        (candidate.setFeasible === best.setFeasible && candidate.ownedCount > best.ownedCount) ||
-        (candidate.setFeasible === best.setFeasible && candidate.ownedCount === best.ownedCount &&
+    candidate.feasible = candidate.setFeasible && canReachExact();
+    if (!best || (candidate.feasible && !best.feasible) ||
+        (candidate.feasible === best.feasible && candidate.ownedCount > best.ownedCount) ||
+        (candidate.feasible === best.feasible && candidate.ownedCount === best.ownedCount &&
           candidate.setCoverage > best.setCoverage)) {
       best = candidate;
+      optimalFound = candidate.feasible
+        && candidate.ownedCount === requirements.length
+        && candidate.setCoverage === maximumSetCoverage;
     }
   }
 
-  function walk(index) {
+  function walk(index, ownedSoFar) {
+    if (optimalFound) return;
+    if (best?.feasible && ownedSoFar + requirements.length - index < best.ownedCount) {
+      return;
+    }
     if (index >= requirements.length) {
       consider();
       return;
@@ -248,14 +306,14 @@ function chooseBestAssignment(requirements, candidatesBySlot, setRequirement) {
       if (item && used.has(getItemKey(item))) continue;
       if (item) used.add(getItemKey(item));
       chosen[index] = item;
-      walk(index + 1);
+      walk(index + 1, ownedSoFar + Number(Boolean(item)));
       if (item) used.delete(getItemKey(item));
+      if (optimalFound) return;
     }
     chosen[index] = null;
   }
 
-  walk(0);
-  consider();
+  walk(0, 0);
   return best;
 }
 
@@ -410,6 +468,13 @@ export function rankInventoryPlans({
 } = {}) {
   const normalizedSetRequirement = getSetRequirement(setRequirement);
   const pool = items.filter(item => !classId || item.classId === classId);
+  const eligibleItemsByKey = new Map();
+  for (const item of pool) {
+    const key = getEligibilityKey(item);
+    const bucket = eligibleItemsByKey.get(key) || [];
+    bucket.push(item);
+    eligibleItemsByKey.set(key, bucket);
+  }
   const plans = [];
 
   for (const solution of solutions) {
@@ -418,13 +483,18 @@ export function rankInventoryPlans({
     if (solution.exoticIndex !== null && solution.exoticIndex !== undefined && fixedExotic) continue;
 
     const candidatesBySlot = requirements.map(requirement => {
-      const candidates = pool
+      const candidates = compressAssignmentCandidates((
+        eligibleItemsByKey.get(getEligibilityKey(requirement)) || []
+      )
         .filter(item => isItemEligible(item, requirement, { classId, fixedExotic }))
-        .sort((left, right) => sortCandidates(left, right, normalizedSetRequirement))
-        .slice(0, MAX_MATCH_CANDIDATES);
+        .sort((left, right) => sortCandidates(left, right, normalizedSetRequirement)),
+        normalizedSetRequirement,
+      ).slice(0, MAX_MATCH_CANDIDATES);
       return [...candidates, null];
     });
-    const assignment = chooseBestAssignment(requirements, candidatesBySlot, normalizedSetRequirement);
+    const assignment = chooseBestAssignment(
+      solution, requirements, candidatesBySlot, normalizedSetRequirement
+    );
     if (!assignment) continue;
     assignment.chosen = repairChosenForExactness(solution, assignment.chosen, normalizedSetRequirement);
     assignment.ownedCount = assignment.chosen.filter(Boolean).length;

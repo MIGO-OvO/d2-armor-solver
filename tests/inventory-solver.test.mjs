@@ -270,3 +270,40 @@ test("required stat targets outrank owned loadouts with a smaller total gap", ()
   assert.equal(result.results[0].metrics.requiredAllReached, true);
   assert.ok(result.results[0].finalTotals.weapons >= 180);
 });
+
+test("only +5/-5 reconfigures owned +3 pieces in inventory loadouts", () => {
+  const items = SLOTS.map((slot, index) => ({
+    ...makeItem(`Plus3 ${slot}`, slot, null, {
+      ...zero,
+      weapons: 30,
+      grenade: 25,
+      super: 20,
+    }, index + 1),
+    tuningMode: "plus3",
+    tuningFrom: null,
+    tuningTo: null,
+    armorModSize: 0,
+    armorModStat: "health",
+  }));
+
+  const unrestricted = solveInventoryLoadout({
+    items,
+    targets: zero,
+    fragments: zero,
+    setRequirement: { type: "none" },
+  });
+  assert.ok(unrestricted.results.length > 0, "fixture: +3-only inventory is usable normally");
+
+  const restricted = solveInventoryLoadout({
+    items,
+    targets: zero,
+    fragments: zero,
+    setRequirement: { type: "none" },
+    onlyPlus5Tuning: true,
+  });
+  assert.ok(restricted.results.length > 0,
+    "owned armor remains usable after changing its installed tuning mod");
+  assert.ok(restricted.results.every(entry =>
+    entry.tuningAssignments.every(assignment => assignment?.mode !== "+3")
+  ), "every configured owned loadout must obey the +5/-5-only constraint");
+});

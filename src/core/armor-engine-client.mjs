@@ -1,13 +1,15 @@
-let worker = null;
+const workers = new Map();
 let nextRequestId = 1;
 const pendingRequests = new Map();
 
-function createWorker() {
-  if (worker || typeof Worker === "undefined") return worker;
-  worker = new Worker(
+function createWorker(operation) {
+  const existing = workers.get(operation);
+  if (existing || typeof Worker === "undefined") return existing || null;
+  const worker = new Worker(
     new URL("../workers/armor-engine.worker.mjs", import.meta.url),
-    { type: "module", name: "armor-engine" },
+    { type: "module", name: `armor-engine-${operation}` },
   );
+  workers.set(operation, worker);
   worker.addEventListener("message", ({ data }) => {
     const pending = pendingRequests.get(data?.id);
     if (!pending) return;
@@ -23,16 +25,38 @@ function createWorker() {
   });
   worker.addEventListener("error", (event) => {
     const error = event.error || new Error(event.message || "Armor worker failed");
-    for (const pending of pendingRequests.values()) pending.reject(error);
-    pendingRequests.clear();
-    worker?.terminate();
-    worker = null;
+    for (const [id, pending] of pendingRequests) {
+      if (pending.operation !== operation) continue;
+      pending.reject(error);
+      pendingRequests.delete(id);
+    }
+    worker.terminate();
+    workers.delete(operation);
   });
   return worker;
 }
 
+function cancelOperation(operation) {
+  const worker = workers.get(operation);
+  if (worker) {
+    worker.terminate();
+    workers.delete(operation);
+  }
+  for (const [id, pending] of pendingRequests) {
+    if (pending.operation !== operation) continue;
+    const error = new Error(`Superseded ${operation} request`);
+    error.name = "AbortError";
+    pending.reject(error);
+    pendingRequests.delete(id);
+  }
+}
+
 function run(operation, payload) {
-  const activeWorker = createWorker();
+  if (operation === "calculateReachability" &&
+      [...pendingRequests.values()].some(pending => pending.operation === operation)) {
+    cancelOperation(operation);
+  }
+  const activeWorker = createWorker(operation);
   if (!activeWorker) {
     return import("./armor-engine.mjs").then(engine => {
       const localOperations = {
@@ -47,7 +71,7 @@ function run(operation, payload) {
 
   const id = nextRequestId++;
   return new Promise((resolve, reject) => {
-    pendingRequests.set(id, { resolve, reject });
+    pendingRequests.set(id, { resolve, reject, operation });
     activeWorker.postMessage({ id, operation, payload });
   });
 }
