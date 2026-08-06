@@ -409,15 +409,35 @@ export function getUpgradeReplacements(beforePieces, afterPieces) {
 
 export function compareUpgradePlans(left, right) {
   if (!right) return -1;
-  if (left.metrics.allReached && right.metrics.allReached &&
-      left.replacementCount !== right.replacementCount) {
+  // Must-meet stats are the hard constraint: reaching them outranks everything.
+  const hasRequiredStats = Math.max(
+    left.metrics.requiredCount || 0, right.metrics.requiredCount || 0
+  ) > 0;
+  if (hasRequiredStats) {
+    if (left.metrics.requiredAllReached !== right.metrics.requiredAllReached) {
+      return left.metrics.requiredAllReached ? -1 : 1;
+    }
+    if (left.metrics.requiredShortfall !== right.metrics.requiredShortfall) {
+      return left.metrics.requiredShortfall - right.metrics.requiredShortfall;
+    }
+    if (left.metrics.requiredMaxShortfall !== right.metrics.requiredMaxShortfall) {
+      return left.metrics.requiredMaxShortfall - right.metrics.requiredMaxShortfall;
+    }
+    if (left.metrics.requiredReachedCount !== right.metrics.requiredReachedCount) {
+      return right.metrics.requiredReachedCount - left.metrics.requiredReachedCount;
+    }
+    // With must-meet stats equally satisfied, fewer swaps win: a loadout that
+    // reaches the required stats with less farming beats a bigger one that only
+    // narrows the optional shortfall.
+    if (left.replacementCount !== right.replacementCount) {
+      return left.replacementCount - right.replacementCount;
+    }
+  } else if (left.metrics.allReached && right.metrics.allReached &&
+             left.replacementCount !== right.replacementCount) {
     return left.replacementCount - right.replacementCount;
   }
   const metricOrder = compareUpgradeMetrics(left.metrics, right.metrics);
   if (metricOrder !== 0) return metricOrder;
-  if (left.replacementCount !== right.replacementCount) {
-    return left.replacementCount - right.replacementCount;
-  }
   // Same number of swaps: prefer the plan whose swaps only re-roll the +5
   // side. Farming a different archetype/tertiary is strictly more expensive
   // than farming the same armor with a different rolled +5.
@@ -493,6 +513,7 @@ export function refineUpgradePlanPieces(
 ) {
   let bestPieces = pieces.map(piece => ({ ...piece }));
   let bestEvaluation = evaluatePieces(bestPieces, reassignModifiers);
+  let bestReplacementCount = getUpgradeReplacements(pieces, bestPieces).length;
   let improved = true;
   let pass = 0;
   while (improved && pass < 6) {
@@ -508,10 +529,18 @@ export function refineUpgradePlanPieces(
         if (sameUpgradeIdentity(getUpgradePieceIdentity(variant), currentIdentity)) continue;
         const trialPieces = bestPieces.map(piece => ({ ...piece }));
         trialPieces[slotIndex] = variant;
+        const trialReplacementCount = getUpgradeReplacements(pieces, trialPieces).length;
         const trialEvaluation = evaluatePieces(trialPieces, reassignModifiers);
-        if (compareUpgradeMetrics(trialEvaluation.metrics, bestEvaluation.metrics) < 0) {
+        // Refine within the seed's replacement count: a variant that adds a
+        // farmed piece is a different plan bucket, and a lower-swap solution
+        // must never be refined away before the plan comparison sees it.
+        const keepsOrReducesSwaps = trialReplacementCount < bestReplacementCount
+          || (trialReplacementCount === bestReplacementCount
+            && compareUpgradeMetrics(trialEvaluation.metrics, bestEvaluation.metrics) < 0);
+        if (keepsOrReducesSwaps) {
           bestPieces = trialPieces;
           bestEvaluation = trialEvaluation;
+          bestReplacementCount = trialReplacementCount;
           improved = true;
           break;
         }

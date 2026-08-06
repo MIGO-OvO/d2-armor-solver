@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   analyzeUpgradeCandidates,
   compareUpgradeMetrics,
+  compareUpgradePlans,
   createDefaultUpgradePiece,
   evaluateUpgradePieces,
   getUpgradeMetrics,
@@ -180,5 +181,54 @@ test("only +5/-5 analysis never proposes +3 pieces but keeps the real baseline",
     assert.equal(countPlus3(restricted.plan.evaluation), 0,
       "the plan must never assign +3");
   }
+});
+
+// Regression: a plan that meets the must-meet stats with fewer swaps must beat
+// a bigger plan that also meets them but only narrows the optional shortfall.
+test("must-meet plans prefer fewer swaps; unmet must-meet still outranks swaps", () => {
+  const targets = {
+    health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100,
+  };
+  const required = ["weapons"];
+  const mkPlan = (swaps, totals) => ({
+    replacementCount: swaps,
+    replacements: [],
+    metrics: getUpgradeMetrics(totals, targets, 0, required),
+    evaluation: { score: 0 },
+  });
+  // 2 swaps: weapons met, other stats short. 3 swaps: everything met.
+  const twoSwap = mkPlan(2, {
+    health: 90, melee: 90, grenade: 90, super: 90, class: 90, weapons: 100,
+  });
+  const threeSwap = mkPlan(3, {
+    health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100,
+  });
+  assert.ok(compareUpgradePlans(twoSwap, threeSwap) < 0,
+    "fewer swaps must win when both plans meet the required stat");
+  // Swap the -5 source around so the required stat is missed on the 2-swap plan.
+  const twoSwapUnmet = mkPlan(2, {
+    health: 90, melee: 90, grenade: 90, super: 90, class: 90, weapons: 95,
+  });
+  assert.ok(compareUpgradePlans(threeSwap, twoSwapUnmet) < 0,
+    "an unmet required stat must still outrank the swap count");
+  // Without required stats, reaching every target outranks fewer swaps.
+  const noRequiredOne = {
+    replacementCount: 1,
+    replacements: [],
+    metrics: getUpgradeMetrics({
+      health: 90, melee: 90, grenade: 90, super: 90, class: 90, weapons: 90,
+    }, targets, 0, []),
+    evaluation: { score: 0 },
+  };
+  const noRequiredTwo = {
+    replacementCount: 2,
+    replacements: [],
+    metrics: getUpgradeMetrics({
+      health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100,
+    }, targets, 0, []),
+    evaluation: { score: 0 },
+  };
+  assert.ok(compareUpgradePlans(noRequiredTwo, noRequiredOne) < 0,
+    "without required stats, reaching targets must outrank the swap count");
 });
 
