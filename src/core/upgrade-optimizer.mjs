@@ -347,9 +347,19 @@ export function mapUpgradeConfigsToPieces(pieces, unlockedIndices, candidateConf
 
   for (const slotIndex of unlockedIndices) {
     const currentConfig = getUpgradeConfig(pieces[slotIndex]);
-    const matchIndex = remaining.findIndex(config => sameUpgradeConfig(config, currentConfig));
+    // Prefer the exact archetype+tertiary match: it both keeps the owned piece
+    // and consumes the matching candidate config, so the configs that remain
+    // can serve the slots that genuinely need replacing. When the greedy
+    // tertiary pass picked a different tertiary for this archetype, fall back
+    // to matching on the archetype alone: the piece the player already owns
+    // stays untouched (real stats and tertiary), instead of being turned into
+    // a farmed replacement that inflates the seed's replacement count and
+    // pushes the exact solution out of the per-bucket top-N that gets refined.
+    let matchIndex = remaining.findIndex(config => sameUpgradeConfig(config, currentConfig));
+    if (matchIndex < 0) {
+      matchIndex = remaining.findIndex(config => config.archetype === currentConfig.archetype);
+    }
     if (matchIndex >= 0) {
-      mapped[slotIndex] = setUpgradePieceConfig(mapped[slotIndex], slotIndex, remaining[matchIndex]);
       remaining.splice(matchIndex, 1);
     } else {
       unassignedSlots.push(slotIndex);
@@ -398,6 +408,12 @@ export function compareUpgradePlans(left, right) {
   if (left.replacementCount !== right.replacementCount) {
     return left.replacementCount - right.replacementCount;
   }
+  // Same number of swaps: prefer the plan whose swaps only re-roll the +5
+  // side. Farming a different archetype/tertiary is strictly more expensive
+  // than farming the same armor with a different rolled +5.
+  const leftNonTuningOnly = (left.replacements || []).filter(r => !r.tuningOnly).length;
+  const rightNonTuningOnly = (right.replacements || []).filter(r => !r.tuningOnly).length;
+  if (leftNonTuningOnly !== rightNonTuningOnly) return leftNonTuningOnly - rightNonTuningOnly;
   return left.evaluation.score - right.evaluation.score;
 }
 
