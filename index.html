@@ -6,7 +6,7 @@
 <meta name="description" content="Destiny 2 Armor 3.0 六维属性配装、可达范围与现有护甲替换规划工具">
 <meta name="theme-color" content="#0f1117">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f1117'/%3E%3Cpath d='M15 18h34v8H36v23h-8V26H15z' fill='%23f4b53d'/%3E%3C/svg%3E">
-<title>命运2 T5配装求解器</title>
+<title>命运2 T5配装求解器·优化版</title>
 <link rel="stylesheet" href="./src/styles/app.css">
 </head>
 <body>
@@ -77,6 +77,9 @@
     <symbol id="i-down" viewBox="0 0 24 24">
       <path d="M12 4.6v14.2M5.6 12.4 12 18.8l6.4-6.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
     <symbol id="i-caret-up" viewBox="0 0 24 24">
       <path d="M5.6 15.4 12 8.6l6.4 6.8Z" fill="currentColor"/>
     </symbol>
@@ -141,7 +144,7 @@
     </button>
   </div>
 
-  <section class="inventory-import-card" id="inventoryImportCard" hidden aria-label="DIM护甲清单" data-i18n-aria="inventoryImportAriaLabel">
+  <section class="inventory-import-card" id="inventoryImportCard" hidden aria-label="已有护甲" data-i18n-aria="inventoryImportAriaLabel">
     <div id="upgradeImportPanel" class="upgrade-import-panel"></div>
   </section>
 
@@ -267,7 +270,6 @@
 
   <div id="messages" aria-live="polite" aria-atomic="false"></div>
 
-  <section class="card inventory-plan-results" id="inventoryPlanResults" hidden aria-live="polite" aria-labelledby="inventoryPlanHeading"></section>
   <section class="card inventory-results" id="inventoryResults" hidden aria-live="polite"></section>
 
   <section class="card upgrade-results" id="upgradeResults" hidden aria-labelledby="upgradeResultsHeading">
@@ -311,7 +313,7 @@
     </div>
 
     <div class="card" id="piecesCard">
-      <h2 data-i18n="recommendedBuildHeading">推荐配装方案</h2>
+      <h2 data-i18n="recommendedBuildHeading">方案详情</h2>
       <div id="piecesOutput"></div>
     </div>
 
@@ -326,10 +328,10 @@
   </div>
 
   <div class="footer" data-i18n-html="footerContent">
-    <div class="footer-title">命运2 T5配装求解器 · 最终版本（马拉松杀死了命运2）</div>
-    <div class="footer-credit"><span class="footer-role">原作者</span><span>B站 UID: 57597346</span><span>QQ群: 1050912445</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者B站主页</a></div>
-    <div class="footer-credit"><span class="footer-role">贡献者</span><span>MIGO-OvO</span><span>B站 UID: 23930138</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub主页</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">B站主页</a></div>
-  </div>
+    <div class="footer-title">命运2 T5配装求解器·优化版 Ver 2.0.1</div>
+    <div class="footer-credit"><span class="footer-role">优化版作者</span><span>MIGO-OvO</span><span>B站 UID: 23930138</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub主页</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">B站主页</a></div>
+    <div class="footer-credit"><span class="footer-role">原版作者</span><span>B站 UID: 57597346</span><span>QQ群: 1050912445</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者B站主页</a></div>
+    </div>
 </main>
 
 <script type="module" src="./src/app.mjs"></script>

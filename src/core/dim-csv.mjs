@@ -1,6 +1,7 @@
 import {
   ARCHETYPES,
   ARCHETYPE_LABELS,
+  EXOTIC_CLASSES,
   STATS,
 } from "./armor-model.mjs";
 import { getArmorSetByItemHash } from "./armor-sets.mjs";
@@ -172,6 +173,14 @@ function inferInstalledModifiers(item, displayedStats, tuningStat) {
     tuningFrom: null,
     tuningTo: null,
     changes: Object.fromEntries(STATS.map(stat => [stat, framework.has(stat) ? 0 : 1])),
+  }, {
+    // No Tuning Mod installed: the displayed stats carry no tuning layer, so
+    // nothing changes here. The piece's fixed +5 roll comes from the DIM
+    // "Tuning Stat" column (null when the export omits it).
+    tuningMode: "shift",
+    tuningFrom: null,
+    tuningTo: tuningStat || null,
+    changes: {},
   }];
   for (const from of STATS) {
     for (const to of STATS) {
@@ -242,17 +251,37 @@ export function normalizeDimItem(record) {
   const hash = parseInt(record.Hash, 10) || 0;
   const slot = SLOT_BY_NAME.get(record.Type) || null;
   const classId = CLASS_BY_NAME.get(record.Equippable) || null;
-  const archetypeId = ARCHETYPE_BY_NAME.get(record.Archetype) || null;
   const baseStats = parseBaseStats(record);
   const displayedStats = parseDisplayedStats(record);
   const tuningStat = STAT_BY_NAME.get(record["Tuning Stat"]) || null;
   const set = getArmorSetByItemHash(hash);
+
+  // Exotic Class Items (Relativism / Solipsism / Stoicism) carry a fixed
+  // 30/25/20 roll: the 30/25 pair identifies the frame and the 20 stat is the
+  // tertiary. DIM's Archetype column is empty for these, so derive them here.
+  const exoticClassItem = Object.values(EXOTIC_CLASSES)
+    .find(entry => entry.itemHash === hash) || null;
+  let archetypeId = ARCHETYPE_BY_NAME.get(record.Archetype) || null;
+  let exoticStat20 = null;
+  if (exoticClassItem) {
+    const stat30 = STATS.find(stat => baseStats[stat] === 30);
+    const stat25 = STATS.find(stat => baseStats[stat] === 25);
+    exoticStat20 = STATS.find(stat => baseStats[stat] === 20) || null;
+    const frame = ARCHETYPES.find(
+      archetype => archetype.primary === stat30 && archetype.secondary === stat25
+    );
+    if (frame) archetypeId = frame.id;
+  }
+
   const fallbackTertiary = STATS
     .filter(stat => {
       const archetype = ARCHETYPES.find(item => item.id === archetypeId);
       return !archetype || (stat !== archetype.primary && stat !== archetype.secondary);
     })
     .sort((left, right) => (baseStats[right] || 0) - (baseStats[left] || 0))[0];
+  const tertiary = exoticClassItem
+    ? (exoticStat20 || STAT_BY_NAME.get(record["Tertiary Stat"]) || fallbackTertiary)
+    : (STAT_BY_NAME.get(record["Tertiary Stat"]) || fallbackTertiary || null);
 
   const item = {
     id: cleanId(record.Id),
@@ -264,7 +293,7 @@ export function normalizeDimItem(record) {
     rarity: record.Rarity || "",
     exotic: String(record.Rarity || "").toLowerCase() === "exotic",
     archetypeId,
-    tertiary: STAT_BY_NAME.get(record["Tertiary Stat"]) || fallbackTertiary || null,
+    tertiary,
     tuningStat,
     baseStats,
     masterworkTier: parseInt(record["Masterwork Tier"], 10) || 0,

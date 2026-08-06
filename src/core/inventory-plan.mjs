@@ -1,4 +1,4 @@
-import { ARCHETYPES } from "./armor-model.mjs";
+import { ARCHETYPES, STATS } from "./armor-model.mjs";
 import { farmabilityScore } from "./solver.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
@@ -13,7 +13,9 @@ const LEGENDARY_SLOTS = INVENTORY_PLAN_SLOTS.slice(0, 4);
 const MAX_MATCH_CANDIDATES = 8;
 
 function archetypeIdForName(name) {
-  return ARCHETYPES.find(archetype => archetype.name === name)?.id || null;
+  // Exotic class item configs carry the archetype ID (e.g. "Brawler") while
+  // legendary configs carry the localized name; accept both.
+  return ARCHETYPES.find(archetype => archetype.name === name || archetype.id === name)?.id || null;
 }
 
 function getItemTuningTo(item) {
@@ -95,9 +97,14 @@ function isItemEligible(item, requirement, options) {
   if (options.classId && item.classId !== options.classId) return false;
   if (item.archetypeId !== requirement.archetypeId) return false;
   if (item.tertiary !== requirement.tertiary) return false;
+  // The tuning MODE is installed on the piece and can be read from the export,
+  // but the fixed +5 side of a +5/-5 roll must NOT disqualify a piece here: the
+  // -5 sources and armor mods are free, so any +5 roll may still fit the
+  // solution. Whether the roll actually works is decided by the whole-assignment
+  // feasibility check (assignmentCanReachExact) after matching.
   if (requirement.tuningMode === "plus3") {
     if (item.tuningMode !== "plus3") return false;
-  } else if (item.tuningMode === "plus3" || getItemTuningTo(item) !== requirement.tuningTo) {
+  } else if (item.tuningMode === "plus3") {
     return false;
   }
 
@@ -252,7 +259,138 @@ function chooseBestAssignment(requirements, candidatesBySlot, setRequirement) {
   return best;
 }
 
+// ============================================================
+// EXACT-REACHABILITY OF AN OWNED ASSIGNMENT
+// ============================================================
+// An owned piece pins only its fixed +5 roll (the +5 side of a Tuning Mod).
+// The -5 sources, the armor mods, and every roll of a farmed piece stay free.
+// This checks whether the solution's exact totals are still reachable given
+// the pinned +5 rolls, by counting how the +5/+10 mods and the free +5 sides
+// can absorb the residual. (mods contribute +5s without a matching -5, so the
+// -5 budget is exactly one per shift piece, while the +5 budget is one per
+// shift piece plus every mod.)
+function forEachModAllocation(numPlus5, numPlus10, visit) {
+  const m = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  function walk(statIndex, c5Left, c10Left) {
+    if (statIndex === STATS.length) {
+      if (c5Left === 0 && c10Left === 0) visit(m);
+      return;
+    }
+    const stat = STATS[statIndex];
+    for (let c5 = 0; c5 <= c5Left; c5++) {
+      for (let c10 = 0; c10 <= c10Left; c10++) {
+        m[stat] = c5 * 5 + c10 * 10;
+        walk(statIndex + 1, c5Left - c5, c10Left - c10);
+      }
+    }
+    m[stat] = 0;
+  }
+  walk(0, numPlus5, numPlus10);
+}
+
+export function assignmentCanReachExact(solution, chosen) {
+  const config = solution?.config;
+  const totals = solution?.totals;
+  const hasTotals = Boolean(totals) &&
+    STATS.every(stat => Number.isFinite(totals[stat]));
+  if (!config || config.length !== 5 || !hasTotals) return true;
+
+  let numPlus5 = 0;
+  let numPlus10 = 0;
+  for (const assignment of Object.values(solution.modAssignments || {})) {
+    if (assignment?.size === 5) numPlus5++;
+    else if (assignment?.size === 10) numPlus10++;
+  }
+
+  const base = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const pinned = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  let numShift = 0;
+  let freeCount = 0;
+  for (let index = 0; index < 5; index++) {
+    const piece = config[index];
+    for (const stat of STATS) base[stat] += piece.baseStats[stat];
+    if (solution.tuningAssignments?.[index]?.mode === "+3") {
+      for (const stat of piece.masterworkStats || []) base[stat] += 1;
+      continue;
+    }
+    numShift++;
+    const item = chosen[index];
+    const pinnedTo = item ? getItemTuningTo(item) : null;
+    if (item && pinnedTo) pinned[pinnedTo]++;
+    else freeCount++;
+  }
+  // Nothing pinned: the stored solution itself is the exact witness.
+  if (freeCount === numShift) return true;
+
+  const residual = Object.fromEntries(STATS.map(stat => [
+    stat, totals[stat] - base[stat] - 5 * pinned[stat],
+  ]));
+
+  // For a given mod placement the residual must decompose into the free +5
+  // sides (t) and free -5 sources (f) of the shift pieces. With to/from counts
+  // t_s/f_s: need_s = (residual - mods)/5 = t_s - f_s, sum(t) = sum(f) =
+  // numShift, t_s >= pinned_s. Hall's condition on the "from != to" pairing
+  // reduces to t_s <= (numShift + need_s)/2 per stat, so a closed form works.
+  let feasible = false;
+  forEachModAllocation(numPlus5, numPlus10, m => {
+    if (feasible) return;
+    let lowerSum = 0;
+    let upperSum = 0;
+    for (const stat of STATS) {
+      const value = residual[stat] - m[stat];
+      if (value % 5 !== 0) return;
+      const need = value / 5;
+      const lower = Math.max(pinned[stat], need);
+      const upper = Math.floor((numShift + need) / 2);
+      if (lower > upper) return;
+      lowerSum += lower;
+      upperSum += upper;
+    }
+    if (lowerSum <= numShift && numShift <= upperSum) feasible = true;
+  });
+  return feasible;
+}
+
+function combinations(items, count) {
+  const out = [];
+  const pick = (start, chosen) => {
+    if (chosen.length === count) {
+      out.push([...chosen]);
+      return;
+    }
+    for (let index = start; index < items.length; index++) {
+      chosen.push(items[index]);
+      pick(index + 1, chosen);
+      chosen.pop();
+    }
+  };
+  pick(0, []);
+  return out;
+}
+
+// When the pinned +5 rolls of the chosen owned pieces make the exact totals
+// unreachable, downgrade the smallest number of owned pieces back to "farm"
+// until the remaining assignment is feasible again. Set-constrained plans keep
+// the original assignment: their slots must keep their set membership.
+function repairChosenForExactness(solution, chosen, setRequirement) {
+  if (setRequirement.type !== "none") return chosen;
+  if (assignmentCanReachExact(solution, chosen)) return chosen;
+  const ownedIndexes = chosen
+    .map((item, index) => (item ? index : -1))
+    .filter(index => index >= 0);
+  for (let removeCount = 1; removeCount <= ownedIndexes.length; removeCount++) {
+    for (const subset of combinations(ownedIndexes, removeCount)) {
+      const trial = [...chosen];
+      for (const index of subset) trial[index] = null;
+      if (assignmentCanReachExact(solution, trial)) return trial;
+    }
+  }
+  return chosen;
+}
+
 function comparePlans(left, right) {
+  // Plans whose owned pieces can actually reach the exact totals rank first.
+  if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
   if (left.farmCount !== right.farmCount) return left.farmCount - right.farmCount;
   if (left.fixedExoticDistance !== right.fixedExoticDistance) {
     return left.fixedExoticDistance - right.fixedExoticDistance;
@@ -288,6 +426,9 @@ export function rankInventoryPlans({
     });
     const assignment = chooseBestAssignment(requirements, candidatesBySlot, normalizedSetRequirement);
     if (!assignment) continue;
+    assignment.chosen = repairChosenForExactness(solution, assignment.chosen, normalizedSetRequirement);
+    assignment.ownedCount = assignment.chosen.filter(Boolean).length;
+    assignment.farmCount = requirements.length - assignment.ownedCount;
 
     const missingIndexes = requirements
       .map((requirement, index) => ({ requirement, index }))
@@ -315,6 +456,7 @@ export function rankInventoryPlans({
       ownedCount: assignment.ownedCount,
       farmCount: assignment.farmCount,
       setCoverage: assignment.setCoverage,
+      feasible: assignmentCanReachExact(solution, assignment.chosen),
       fixedExoticDistance: !fixedExotic || fixedExoticPiece?.item
         ? 0
         : fixedExoticPiece?.closestMismatch?.score ?? Number.MAX_SAFE_INTEGER,

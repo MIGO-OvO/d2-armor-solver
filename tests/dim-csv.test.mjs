@@ -127,6 +127,38 @@ test("DIM import preserves negative displayed stats caused by tuning", () => {
   assert.equal(item.armorModStat, "weapons");
 });
 
+test("DIM import resolves a bare piece with no Tuning or armor mod installed", () => {
+  const csv = [
+    "Name,Hash,Id,Rarity,Tier,Type,Equippable,Archetype,Tertiary Stat,Tuning Stat,Masterwork Tier,Owner,Equipped,Power,Weapons,Health,Class,Grenade,Super,Melee,Total,Weapons (Base),Health (Base),Class (Base),Grenade (Base),Super (Base),Melee (Base),Total (Base)",
+    "Bare Helm,656307180,bare-helm,Legendary,5,头盔,猎人,高能者,grenade,melee,5,Hunter,false,500,30,10,10,20,25,10,105,30,5,5,20,25,5,90",
+  ].join("\n");
+  const item = normalizeDimItem(parseCsv(csv)[0]);
+
+  // No tuning/mod layer to subtract: the displayed stats equal the effective
+  // base, and the piece's fixed +5 roll is the exported Tuning Stat.
+  assert.equal(item.modifierInference.status, "exact");
+  assert.equal(item.tuningMode, "shift");
+  assert.equal(item.tuningTo, "melee");
+  assert.equal(item.tuningFrom, null);
+});
+
+test("DIM import derives the Exotic Class Item frame from its fixed 30/25/20 roll", () => {
+  const csv = [
+    "Name,Hash,Id,Rarity,Tier,Type,Equippable,Archetype,Tertiary Stat,Tuning Stat,Masterwork Tier,Owner,Equipped,Power,Weapons,Health,Class,Grenade,Super,Melee,Total,Weapons (Base),Health (Base),Class (Base),Grenade (Base),Super (Base),Melee (Base),Total (Base)",
+    'Relativism,2809120022,relativism-1,Exotic,5,猎人披风,猎人,"","","",5,Vault,false,500,10,20,10,20,10,35,105,5,25,5,20,5,30,90',
+  ].join("\n");
+  const item = normalizeDimItem(parseCsv(csv)[0]);
+
+  // DIM leaves the Archetype column empty for Exotic Class Items; the frame is
+  // recovered from the rolled 30/25/20 distribution (melee 30 / health 25 is
+  // Brawler, grenade 20 is the tertiary) and tuning inference works after that.
+  assert.equal(item.archetypeId, "Brawler");
+  assert.equal(item.tertiary, "grenade");
+  assert.equal(item.modifierInference.status, "exact");
+  assert.equal(item.tuningMode, "shift");
+  assert.equal(item.tuningTo, "melee");
+});
+
 test("filterArmorItems applies class and Tier 5 filters", () => {
   const items = parseCsv(CSV_FIXTURE).map(normalizeDimItem);
   assert.equal(filterArmorItems(items, { tier5Only: true }).length, 3);

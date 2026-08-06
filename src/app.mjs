@@ -31,7 +31,6 @@ import {
 import {
   createBalancedTargetPlan,
 } from "./core/budget.mjs";
-import { farmabilityScore } from "./core/solver.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
 import { buildRepository } from "./core/build-repository.mjs";
 import {
@@ -71,7 +70,6 @@ let allSolutions = [];
 let currentSolutionIdx = 0;
 let lastExoticSettings = null;
 let showAllSolutions = false;
-let lastInventoryPlans = [];
 
 function displayArchetypeKey(config, exoticIndex = null) {
   const freq = {};
@@ -464,12 +462,25 @@ function getFragments() {
   return f;
 }
 
-function toggleExoticMode() {
+function toggleExoticMode({ syncInventory = true } = {}) {
   const enabled = document.getElementById('useExoticMode')?.checked;
   const showSettings = enabled && calculatorMode !== 'upgrade';
   document.getElementById('exoticSettingsBody').style.display = showSettings ? 'block' : 'none';
   if (showSettings) updateExoticFramework();
-  updateInventorySolveOptions();
+  if (syncInventory && calculatorMode === 'solve') {
+    if (enabled) {
+      const classId = document.getElementById('exoticClass')?.value || 'hunter';
+      importClassFilter = classId;
+      inventoryExoticSlotFilter = 'classItem';
+      inventoryFixedExoticKey = getExoticClassItemKey(classId);
+    } else if (inventoryExoticSlotFilter === 'classItem') {
+      inventoryExoticSlotFilter = '';
+      inventoryFixedExoticKey = '';
+    }
+    renderUpgradeImportPanel();
+  } else {
+    updateInventorySolveOptions();
+  }
 }
 
 function renderExoticInputs() {
@@ -548,6 +559,14 @@ function updateExoticPerkOptions() {
   primary.value = data.primary.some(perk => perk[0] === oldPrimary) ? oldPrimary : data.primary[0][0];
   secondary.value = data.secondary.some(perk => perk[0] === oldSecondary) ? oldSecondary : data.secondary[0][0];
   updateExoticFramework();
+  if (document.getElementById('useExoticMode')?.checked && inventoryExoticSlotFilter === 'classItem') {
+    const classId = document.getElementById('exoticClass')?.value || 'hunter';
+    if (importClassFilter !== classId || inventoryFixedExoticKey !== getExoticClassItemKey(classId)) {
+      importClassFilter = classId;
+      inventoryFixedExoticKey = getExoticClassItemKey(classId);
+      renderUpgradeImportPanel();
+    }
+  }
 }
 
 function updateExoticFramework() {
@@ -1014,7 +1033,6 @@ async function solve() {
   msgs.innerHTML = '';
   delete msgs.dataset.imperfectShown;
   showAllSolutions = false;
-  ownedGearState = {};
   results.classList.remove('show');
   document.getElementById('refineCard').style.display = 'none';
   document.getElementById('floatJump').style.display = 'none';
@@ -1473,358 +1491,168 @@ function generateExoticRecommendation(result) {
   html += '</table>'; return html;
 }
 
-function requirementCounts(values) {
-  const counts = {};
-  for (const value of values) counts[value] = (counts[value] || 0) + 1;
-  return counts;
+function renderSolutionStatRows(counts, prefix = '') {
+  return Object.entries(counts).map(([stat, count]) => `
+    <div class="solution-stat-row">
+      <span style="color:${STAT_COLORS[stat]};">${prefix}${STAT_LABELS[stat]}</span>
+      <strong>×${count}</strong>
+    </div>`).join('');
 }
 
-function requirementsCanCoverPieces(candidates, property, requirements) {
-  if (candidates.length > requirements.length) return false;
-  const available = requirementCounts(requirements);
-  for (const candidate of candidates) {
-    const value = candidate.piece[property];
-    if (!value) continue;
-    if (!available[value]) return false;
-    available[value]--;
+function formatFarmTuning(piece) {
+  return piece.tuningMode === 'plus3'
+    ? l('+3模式', '+3模式', '+3 mode')
+    : l(`固定 +5 ${STAT_LABELS[piece.tuningTo]}`, `固定 +5 ${STAT_LABELS[piece.tuningTo]}`, `Fixed +5 ${STAT_LABELS[piece.tuningTo]}`);
+}
+
+function renderFarmRequirements(result) {
+  const plan = getOwnedArmorPlan(result, { allowEmpty: true });
+  if (!plan) return '';
+  const missing = plan.pieces.filter(piece => !piece.item);
+  if (missing.length === 0) {
+    return `<section class="farm-requirements is-complete">
+      <div class="farm-requirements-heading">
+        <h3>${l('已有护甲已满足方案', '已有防具已符合方案', 'Owned armor completes this solution')}</h3>
+        <span>${icon('check')}${l('无需刷取', '無需取得', 'No farming needed')}</span>
+      </div>
+    </section>`;
   }
-  return true;
-}
 
-function getValidTertiaryAssignments(armorSlots, requiredTerts) {
-  const remaining = requirementCounts(requiredTerts);
-  const values = Object.keys(remaining);
-  const assignments = [];
-
-  function visit(slotIndex, current) {
-    if (slotIndex === armorSlots.length) {
-      assignments.push([...current]);
-      return;
+  const fixedExotic = getSelectedInventoryExotic();
+  const classItemSettings = document.getElementById('useExoticMode')?.checked ? getExoticSettings() : null;
+  const rows = missing.map(piece => {
+    const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
+    const frame = getArchetypeLabel(piece.archetype);
+    const setName = piece.farmSetHash ? formatInventoryPlanSet(piece.farmSetHash) : '';
+    let identity = frame;
+    if (piece.exotic && piece.slot === 'classItem') {
+      identity = `${getExoticClassItemName(classItemSettings?.classId || importClassFilter || 'hunter')} · ${frame}`;
+    } else if (piece.exotic && fixedExotic?.slot === piece.slot) {
+      identity = `${escapeHtml(fixedExotic.name)} · ${frame}`;
     }
-    const slot = armorSlots[slotIndex];
-    for (const value of values) {
-      if (!remaining[value] || value === slot.primary || value === slot.secondary) continue;
-      remaining[value]--;
-      current.push(value);
-      visit(slotIndex + 1, current);
-      current.pop();
-      remaining[value]++;
-    }
-  }
+    const detail = [
+      `${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]}`,
+      formatFarmTuning(piece),
+      setName,
+    ].filter(Boolean).join(' · ');
+    return `<div class="farm-requirement-row">
+      <span class="farm-requirement-kind">${piece.exotic ? l('异域', '異域', 'Exotic') : l('待刷', '待取得', 'Farm')}</span>
+      <strong>${getUpgradeSlotLabel(slotIndex)}</strong>
+      <span class="farm-requirement-body"><b>${identity}</b><small>${detail}</small></span>
+    </div>`;
+  }).join('');
 
-  visit(0, []);
-  return assignments;
-}
-
-function tertiaryAssignmentCanCoverPieces(candidates, armorSlots, assignment) {
-  const availableByArchetype = {};
-  for (let index = 0; index < armorSlots.length; index++) {
-    const name = armorSlots[index].name;
-    if (!availableByArchetype[name]) availableByArchetype[name] = {};
-    const value = assignment[index];
-    availableByArchetype[name][value] = (availableByArchetype[name][value] || 0) + 1;
-  }
-  for (const candidate of candidates) {
-    const value = candidate.piece.tertiary;
-    if (!value) continue;
-    const available = availableByArchetype[candidate.name];
-    if (!available?.[value]) return false;
-    available[value]--;
-  }
-  return true;
-}
-
-function assignTertiaries(candidates, armorSlots, assignment) {
-  const remainingByArchetype = {};
-  for (let index = 0; index < armorSlots.length; index++) {
-    const name = armorSlots[index].name;
-    if (!remainingByArchetype[name]) remainingByArchetype[name] = [];
-    remainingByArchetype[name].push(assignment[index]);
-  }
-
-  const assignments = new Map();
-  const specified = candidates.filter(candidate => candidate.piece.tertiary);
-  const unspecified = candidates.filter(candidate => !candidate.piece.tertiary);
-  for (const candidate of specified) {
-    const remaining = remainingByArchetype[candidate.name];
-    const index = remaining.indexOf(candidate.piece.tertiary);
-    assignments.set(candidate, remaining[index]);
-    remaining.splice(index, 1);
-  }
-  for (const candidate of unspecified) {
-    assignments.set(candidate, remainingByArchetype[candidate.name].shift());
-  }
-
-  return {
-    assignments,
-    remaining: Object.values(remainingByArchetype).flat()
-  };
-}
-
-function assignGlobalRequirements(candidates, property, requirements) {
-  const remaining = [...requirements];
-  const assignments = new Map();
-  const specified = candidates.filter(candidate => candidate.piece[property]);
-  const unspecified = candidates.filter(candidate => !candidate.piece[property]);
-  for (const candidate of specified) {
-    const index = remaining.indexOf(candidate.piece[property]);
-    assignments.set(candidate, remaining[index]);
-    remaining.splice(index, 1);
-  }
-  for (const candidate of unspecified) assignments.set(candidate, remaining.shift());
-  return { assignments, remaining };
-}
-
-function getTertiaryOptionsByArchetype(armorSlots, requiredTerts) {
-  const options = {};
-  for (const assignment of getValidTertiaryAssignments(armorSlots, requiredTerts)) {
-    for (let index = 0; index < armorSlots.length; index++) {
-      const name = armorSlots[index].name;
-      if (!options[name]) options[name] = new Set();
-      options[name].add(assignment[index]);
-    }
-  }
-  return Object.fromEntries(
-    Object.entries(options).map(([name, values]) => [name, [...values]])
-  );
-}
-
-function selectOwnedArmorMatches(armorSlots, ownedState, requiredTerts, requiredTunes, requireSpecifiedTertiary = false) {
-  const archCount = {};
-  for (const slot of armorSlots) archCount[slot.name] = (archCount[slot.name] || 0) + 1;
-  const candidates = [];
-  for (const [name, needed] of Object.entries(archCount)) {
-    const state = ownedState[name] || { count: 0, pieces: [] };
-    const owned = Math.min(state.count || 0, needed);
-    for (let index = 0; index < owned; index++) {
-      const piece = state.pieces[index] || {};
-      if (requireSpecifiedTertiary && !piece.tertiary) continue;
-      candidates.push({ name, index, piece });
-    }
-  }
-
-  let best = [];
-  let bestTertiaryAssignment = null;
-  let bestSpecificity = -1;
-  for (const tertiaryAssignment of getValidTertiaryAssignments(armorSlots, requiredTerts)) {
-    for (let mask = 0; mask < (1 << candidates.length); mask++) {
-      const selected = candidates.filter((_, index) => mask & (1 << index));
-      if (selected.length < best.length) continue;
-      if (!tertiaryAssignmentCanCoverPieces(selected, armorSlots, tertiaryAssignment) ||
-          !requirementsCanCoverPieces(selected, 'tuneTo', requiredTunes)) continue;
-      const specificity = selected.reduce(
-        (score, candidate) => score + (candidate.piece.tertiary ? 1 : 0) + (candidate.piece.tuneTo ? 1 : 0),
-        0
-      );
-      if (selected.length > best.length || specificity > bestSpecificity) {
-        best = selected;
-        bestTertiaryAssignment = tertiaryAssignment;
-        bestSpecificity = specificity;
-      }
-    }
-  }
-
-  const fallbackAssignment = getValidTertiaryAssignments(armorSlots, requiredTerts)[0] || [];
-  const tertiaryResult = assignTertiaries(best, armorSlots, bestTertiaryAssignment || fallbackAssignment);
-  const tuningResult = assignGlobalRequirements(best, 'tuneTo', requiredTunes);
-  const selectedSet = new Set(best);
-  const remainingArchCount = { ...archCount };
-  const matches = best.map(candidate => {
-    remainingArchCount[candidate.name]--;
-    return {
-      ...candidate,
-      tertiary: tertiaryResult.assignments.get(candidate),
-      tuning: tuningResult.assignments.get(candidate)
-    };
-  });
-  const remainingSlots = [...armorSlots];
-  for (const match of matches) {
-    const slotIndex = remainingSlots.findIndex(slot => slot.name === match.name);
-    remainingSlots.splice(slotIndex, 1);
-  }
-
-  return {
-    matches,
-    mismatches: candidates.filter(candidate => !selectedSet.has(candidate)),
-    remainingArchCount,
-    remainingTerts: tertiaryResult.remaining,
-    remainingTunes: tuningResult.remaining,
-    tertiaryOptions: getTertiaryOptionsByArchetype(remainingSlots, tertiaryResult.remaining)
-  };
-}
-
-function formatRequirementCounts(values, formatValue) {
-  return Object.entries(requirementCounts(values))
-    .map(([value, count]) => `${formatValue(value)} ×${count}`)
-    .join(l('，','，',', '));
-}
-
-function formatTuningRequirement(value) {
-  return value === '+3'
-    ? l('+3模式','+3模式','+3 mode')
-    : `+5 ${STAT_LABELS[value]}`;
+  return `<section class="farm-requirements">
+    <div class="farm-requirements-heading">
+      <div>
+        <h3 class="farm-requirements-title">${l('还需刷取', '還需取得', 'Still to farm')}</h3>
+        <p>${l('以下护甲尚未在已有清单或手动新增中找到精确匹配。', '以下防具尚未在已有清單或手動新增中找到精確符合。', 'These pieces have no exact match in the imported or manually added armor.')}</p>
+      </div>
+      <span>${missing.length} ${l('件', '件', 'piece(s)')}</span>
+    </div>
+    <div class="farm-requirement-list">${rows}</div>
+    <p class="farm-requirements-note">${l(
+      '刷取时优先核对框架、第三属性和固定 +5 属性；−5 属性可在装备上自由选择，并按上方建议分配以达到方案总属性。',
+      '取得時優先核對原型、第三數值和固定 +5 數值；−5 數值可在裝備上自由選擇，並依上方建議分配以達到方案總數值。',
+      'When farming, prioritize the frame, tertiary stat, and fixed +5 roll. The −5 stat is freely selected and can follow the suggestion above to reach the final totals.'
+    )}</p>
+  </section>`;
 }
 
 function displayPieceResults(result, _fragments) {
   const piecesOutput = document.getElementById('piecesOutput');
-  let piecesHTML = '';
-
-  // === Section 1: Archetype requirements (per piece matters) ===
-  piecesHTML += `<h3 style="color:var(--text);margin-bottom:8px;">${l('护甲框架需求（需按件刷取）','防具原型需求（需逐件取得）','Armor archetype requirements (farm per piece)')}</h3>`;
   const archCount = {};
-  for (let i = 0; i < 5; i++) {
-    if (i === result.exoticIndex) continue;
-    const name = result.config[i].archetype;
-    archCount[name] = (archCount[name] || 0) + 1;
-  }
-  if (result.exoticIndex !== null && result.exoticIndex !== undefined) {
-    const exotic = result.config[result.exoticIndex];
-    const exoticFixedLabel = getPageLanguage() === 'en'
-      ? `${t('exoticClassItem')} ${l('固定框架','固定原型','archetype')}:`
-      : `${t('exoticClassItem')} ${l('固定框架','固定原型','archetype')}：`;
-    const statSpace = getPageLanguage() === 'en' ? ' ' : '';
-    piecesHTML += `<div style="padding:8px 12px;border-radius:6px;border:1px solid rgba(244,181,61,0.35);background:rgba(244,181,61,0.06);font-size:13px;margin-bottom:10px;">
-      <strong style="color:var(--accent);">${exoticFixedLabel}</strong>${getArchetypeLabel(exotic.archetype)}${getPageLanguage() === 'en' ? ' · ' : '，'}
-      ${t('primaryStat')}${statSpace}${STAT_LABELS[exotic.primary]} / ${t('secondaryStat')}${statSpace}${STAT_LABELS[exotic.secondary]} / ${t('tertiaryStat')}${statSpace}${STAT_LABELS[exotic.tertiary]}
-    </div>`;
-  }
-  piecesHTML += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">';
-  for (const [name, count] of Object.entries(archCount)) {
-    piecesHTML += '<div style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);font-size:13px;">' +
-      '<span style="color:#d4956b;font-weight:600;">' + getArchetypeLabel(name) + '</span> ×<strong>' + count + '</strong> ' + l('件','件','pieces') + '</div>';
-  }
-  piecesHTML += '</div>';
-
-  // === Section 2: Flexible counts (tertiary stats must remain compatible with each archetype) ===
-  piecesHTML += `<h3 style="color:var(--text);margin-bottom:8px;">${l('灵活分配（第三属性须兼容框架）','彈性分配（第三屬性須相容原型）','Flexible assignments (tertiary stats must fit the archetype)')}</h3>`;
-  piecesHTML += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px;">';
-
-  // Tertiary stats
-  piecesHTML += '<div style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);">' +
-    `<div style="font-weight:600;margin-bottom:4px;">${t('tertiaryStat')}(20)</div>`;
   const tertCount = {};
-  for (let i = 0; i < 5; i++) {
-    if (i === result.exoticIndex) continue;
-    const t = result.config[i].tertiary;
-    tertCount[t] = (tertCount[t] || 0) + 1;
-  }
-  for (const [s, c] of Object.entries(tertCount)) {
-    piecesHTML += '<div style="color:' + STAT_COLORS[s] + ';">' + STAT_LABELS[s] + ' ×' + c + '</div>';
-  }
-  piecesHTML += '</div>';
-
-  // Tuning
-  piecesHTML += '<div style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);">' +
-    `<div style="font-weight:600;margin-bottom:4px;">${t('tuningMod')}</div>`;
-  const tuneFromCount = {}, tuneToCount = {}, plus3Count = result.tuningAssignments.filter(t => t.mode === '+3').length;
-  for (let i = 0; i < 5; i++) {
-    const t = result.tuningAssignments[i];
-    if (t.mode === '+3') continue;
-    tuneFromCount[t.from] = (tuneFromCount[t.from] || 0) + 1;
-    tuneToCount[t.to] = (tuneToCount[t.to] || 0) + 1;
-  }
-  if (plus3Count > 0) {
-    piecesHTML += '<div style="color:var(--accent);">+3模式 ×' + plus3Count + '</div>';
-  }
-  for (const [s, c] of Object.entries(tuneFromCount)) {
-    piecesHTML += '<div style="color:' + STAT_COLORS[s] + ';">-5 ' + STAT_LABELS[s] + ' ×' + c + '</div>';
-  }
-  for (const [s, c] of Object.entries(tuneToCount)) {
-    piecesHTML += '<div style="color:' + STAT_COLORS[s] + ';">+5 ' + STAT_LABELS[s] + ' ×' + c + '</div>';
-  }
-  piecesHTML += '</div>';
-
-  // Mods
-  piecesHTML += '<div style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);">' +
-    `<div style="font-weight:600;margin-bottom:4px;">${t('armorMod')}</div>`;
+  const tuneFromCount = {};
+  const tuneToCount = {};
   const modCount = {};
-  for (let i = 0; i < 5; i++) {
-    const ma = result.modAssignments[i];
-    if (!ma) continue;
-    const key = ma.stat + '|' + ma.size;
-    modCount[key] = (modCount[key] || 0) + 1;
+
+  for (let index = 0; index < 5; index++) {
+    if (index !== result.exoticIndex) {
+      const config = result.config[index];
+      archCount[config.archetype] = (archCount[config.archetype] || 0) + 1;
+      tertCount[config.tertiary] = (tertCount[config.tertiary] || 0) + 1;
+    }
+    const tuning = result.tuningAssignments[index];
+    if (tuning.mode !== '+3') {
+      tuneFromCount[tuning.from] = (tuneFromCount[tuning.from] || 0) + 1;
+      tuneToCount[tuning.to] = (tuneToCount[tuning.to] || 0) + 1;
+    }
+    const armorMod = result.modAssignments[index];
+    if (armorMod) {
+      const key = `${armorMod.stat}|${armorMod.size}`;
+      modCount[key] = (modCount[key] || 0) + 1;
+    }
   }
-  for (const [key, c] of Object.entries(modCount)) {
+
+  const plus3Count = result.tuningAssignments.filter(assignment => assignment.mode === '+3').length;
+  const exoticConfig = result.exoticIndex !== null && result.exoticIndex !== undefined
+    ? result.config[result.exoticIndex]
+    : null;
+  const exoticSummary = exoticConfig
+    ? `<div class="solution-exotic-summary">
+        <strong>${t('exoticClassItem')}</strong>
+        <span>${getArchetypeLabel(exoticConfig.archetype)} · ${t('primaryStat')} ${STAT_LABELS[exoticConfig.primary]} 30 / ${t('secondaryStat')} ${STAT_LABELS[exoticConfig.secondary]} 25 / ${t('tertiaryStat')} ${STAT_LABELS[exoticConfig.tertiary]} 20</span>
+      </div>`
+    : '';
+  const archetypeRows = Object.entries(archCount).map(([name, count]) => `
+    <div class="solution-archetype-row">
+      <span>${getArchetypeLabel(name)}</span>
+      <strong>×${count}</strong>
+    </div>`).join('');
+  const fixedTuningRows = Object.keys(tuneToCount).length > 0
+    ? renderSolutionStatRows(tuneToCount, '+5 ')
+    : `<p class="solution-allocation-empty">${l('本方案没有固定 +5 调整。', '本方案沒有固定 +5 調整。', 'This solution has no fixed +5 Tuning.')}</p>`;
+  const suggestedMinusRows = Object.keys(tuneFromCount).length > 0
+    ? renderSolutionStatRows(tuneFromCount, '−5 ')
+    : `<p class="solution-allocation-empty">${l('无需分配 −5。', '無需分配 −5。', 'No −5 allocation needed.')}</p>`;
+  const armorModRows = Object.entries(modCount).map(([key, count]) => {
     const [stat, size] = key.split('|');
-    piecesHTML += '<div style="color:' + STAT_COLORS[stat] + ';">+' + size + ' ' + STAT_LABELS[stat] + ' ×' + c + '</div>';
-  }
-  if (Object.keys(modCount).length === 0) piecesHTML += `<div style="color:var(--text-dim);">${l('无','無','None')}</div>`;
-  piecesHTML += '</div>';
+    return `<div class="solution-stat-row"><span style="color:${STAT_COLORS[stat]};">+${size} ${STAT_LABELS[stat]}</span><strong>×${count}</strong></div>`;
+  }).join('') || `<p class="solution-allocation-empty">${l('无', '無', 'None')}</p>`;
 
-  piecesHTML += '</div>';
+  piecesOutput.innerHTML = `
+    <section class="solution-detail-section">
+      <div class="solution-detail-heading">
+        <h3>${l('护甲构成', '防具構成', 'Armor composition')}</h3>
+        <p>${l('框架和第三属性属于装备固定内容，刷取时需要逐件核对。', '原型和第三數值屬於裝備固定內容，取得時需要逐件核對。', 'Frames and tertiary stats are fixed on the item and must be checked per piece.')}</p>
+      </div>
+      ${exoticSummary}
+      <div class="solution-archetype-list">${archetypeRows}</div>
+    </section>
 
-  // === Section 3: What still needs farming (dynamic based on owned gear) ===
-  const farmLines = [], mismatchLines = [], correctLines = [];
-  const armorSlots = [];
-  const requiredTerts = [];
-  const requiredTunes = [];
-  for (let i = 0; i < 5; i++) {
-    if (i === result.exoticIndex) continue;
-    const tune = result.tuningAssignments[i];
-    armorSlots.push({
-      name: result.config[i].archetype,
-      primary: result.config[i].primary,
-      secondary: result.config[i].secondary
-    });
-    requiredTerts.push(result.config[i].tertiary);
-    requiredTunes.push(tune.mode === '+5-5' ? tune.to : '+3');
-  }
-  const ownedMatch = selectOwnedArmorMatches(armorSlots, ownedGearState, requiredTerts, requiredTunes);
+    <section class="solution-detail-section solution-allocation-section">
+      <div class="solution-detail-heading">
+        <h3>${l('属性与模组分配', '數值與模組分配', 'Stats and mod allocation')}</h3>
+        <p>${l('先核对装备固定属性，再按建议配置可自由调整的内容。', '先核對裝備固定數值，再依建議配置可自由調整的內容。', 'Check fixed item rolls first, then configure the freely adjustable choices.')}</p>
+      </div>
+      <div class="solution-allocation-grid">
+        <div class="solution-allocation-group">
+          <div class="solution-allocation-title"><strong>${t('tertiaryStat')}</strong><span>${l('装备固定 20', '裝備固定 20', 'Fixed roll · 20')}</span></div>
+          <div class="solution-stat-list">${renderSolutionStatRows(tertCount)}</div>
+        </div>
+        <div class="solution-allocation-group solution-tuning-group">
+          <div class="solution-allocation-title"><strong>${t('tuningMod')}</strong><span>${l('固定 +5 优先核对', '固定 +5 優先核對', 'Check fixed +5 first')}</span></div>
+          <div class="solution-tuning-primary">
+            <span>${l('固定 +5 属性', '固定 +5 數值', 'Fixed +5 rolls')}</span>
+            <div class="solution-stat-list">${fixedTuningRows}</div>
+          </div>
+          ${plus3Count > 0 ? `<div class="solution-tuning-plus3"><span>${l('+3模式', '+3模式', '+3 mode')}</span><strong>×${plus3Count}</strong></div>` : ''}
+          <div class="solution-tuning-secondary">
+            <span>${l('建议 −5 分配（可自由选择）', '建議 −5 分配（可自由選擇）', 'Suggested -5 allocation (freely selected)')}</span>
+            <div class="solution-stat-list">${suggestedMinusRows}</div>
+          </div>
+        </div>
+        <div class="solution-allocation-group">
+          <div class="solution-allocation-title"><strong>${t('armorMod')}</strong><span>${l('玩家安装', '玩家安裝', 'Player-installed')}</span></div>
+          <div class="solution-stat-list">${armorModRows}</div>
+        </div>
+      </div>
+    </section>
 
-  for (const match of ownedMatch.matches) {
-    const desc = t('tertiaryStat') + STAT_LABELS[match.tertiary] +
-      l('，调整','，調整',', Tuning ') + formatTuningRequirement(match.tuning);
-    correctLines.push(
-      getArchetypeLabel(match.name) + l('第','第',' piece ') + (match.index + 1) + l('件：','件：',': ') + desc
-    );
-  }
-  for (const mismatch of ownedMatch.mismatches) {
-    const tertOptions = (ownedMatch.tertiaryOptions[mismatch.name] || [])
-      .map(stat => STAT_LABELS[stat]).join(l('、','、',', '));
-    const tuneOptions = [...new Set(ownedMatch.remainingTunes)].map(formatTuningRequirement).join(l('、','、',', '));
-    mismatchLines.push(
-      getArchetypeLabel(mismatch.name) + l('第','第',' piece ') + (mismatch.index + 1) +
-      l('件可接受：','件可接受：',' accepts: ') +
-      t('tertiaryStat') + tertOptions +
-      l('；调整','；調整','; Tuning ') + tuneOptions
-    );
-  }
-  for (const [name, remaining] of Object.entries(ownedMatch.remainingArchCount)) {
-    if (remaining <= 0) continue;
-    const tertiaryOptions = (ownedMatch.tertiaryOptions[name] || [])
-      .map(stat => STAT_LABELS[stat]).join(l('、','、',', '));
-    farmLines.push(
-      `<div><strong>${getArchetypeLabel(name)} ×${remaining}${l('件','件',' piece(s)')}</strong>` +
-      `<span style="color:var(--text-dim);">${l('，第三属性可选：','，第三屬性可選：',', tertiary: ')}${tertiaryOptions}</span></div>`
-    );
-  }
+    ${renderFarmRequirements(result)}
+  `;
 
-  if (correctLines.length > 0) {
-    piecesHTML += '<div style="margin-top:14px;padding:10px 14px;border-radius:8px;background:rgba(74,217,139,0.08);border:2px solid rgba(74,217,139,0.3);font-size:13px;line-height:1.8;">' +
-      `<div style="font-weight:700;font-size:14px;color:#4ad98b;margin-bottom:4px;">${l('已正确匹配','已正確匹配','Correctly matched')}</div>` + correctLines.join('<br>') + '</div>';
-  }
-  if (mismatchLines.length > 0) {
-    piecesHTML += '<div style="margin-top:14px;padding:10px 14px;border-radius:8px;background:rgba(255,107,107,0.1);border:2px solid rgba(255,107,107,0.4);font-size:13px;line-height:1.8;">' +
-      `<div style="font-weight:700;font-size:14px;color:#ff8888;margin-bottom:4px;">${l('已有护甲不匹配','已有防具不匹配','Owned armor mismatch')}</div>` + mismatchLines.join('<br>') + '</div>';
-  }
-  if (farmLines.length > 0) {
-    const tertiaryRequirements = formatRequirementCounts(ownedMatch.remainingTerts, stat => STAT_LABELS[stat]);
-    const tuningRequirements = formatRequirementCounts(ownedMatch.remainingTunes, formatTuningRequirement);
-    piecesHTML += '<div style="margin-top:14px;padding:12px 16px;border-radius:8px;background:rgba(244,181,61,0.1);border:2px solid rgba(244,181,61,0.35);font-size:13px;line-height:2;">' +
-      `<div style="font-weight:700;font-size:14px;color:#ffd866;margin-bottom:6px;">${l('还需刷取','還需取得','Still to farm')}</div>
-      <div style="margin-bottom:6px;">${farmLines.join('')}</div>
-      <div>${t('tertiaryStat')}：${tertiaryRequirements}</div>
-      <div>${t('tuningMod')}：${tuningRequirements}</div>
-      <div style="color:var(--text-dim);line-height:1.6;margin-top:4px;">${l(
-        '第三属性须从对应框架行内的可选项中选择，不能与该框架的主属性或副属性重复；调整属性不绑定框架。两项无需逐件对应，最终总数符合即可。',
-        '第三屬性須從對應原型行內的可選項中選擇，不能與該原型的主要屬性或次要屬性重複；調整屬性不綁定原型。兩項無需逐件對應，最終總數符合即可。',
-        'Choose a tertiary stat from the options shown for that archetype; it cannot duplicate the archetype primary or secondary stat. Tuning is not tied to an archetype. The two fields do not need to be paired per piece; only the final totals matter.'
-      )}</div></div>`;
-  }
-
-  piecesOutput.innerHTML = piecesHTML;
-
-  // Show exotic recommendation
   const exoticCard = document.getElementById('exoticCard');
   const exoticRec = document.getElementById('exoticRecommendation');
   exoticRec.innerHTML = generateExoticRecommendation(result);
@@ -1909,12 +1737,6 @@ function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
   if (scroll) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function formatInventoryPlanTuning(piece) {
-  return piece.tuningMode === 'plus3'
-    ? l('+3调整', '+3調整', '+3 Tuning')
-    : l(`+5${STAT_LABELS[piece.tuningTo]} 调谐`, `+5${STAT_LABELS[piece.tuningTo]} 調諧`, `+5 ${STAT_LABELS[piece.tuningTo]} Tuning`);
-}
-
 function formatInventoryItemTuning(item) {
   if (item?.tuningMode === 'plus3') return l('+3调整', '+3調整', '+3 Tuning');
   const tuningTo = item?.tuningTo || item?.tuningStat;
@@ -1923,127 +1745,59 @@ function formatInventoryItemTuning(item) {
     : l('调整属性未知', '調整數值未知', 'Unknown Tuning');
 }
 
-function formatClosestExoticMismatch(piece) {
-  const labels = {
-    archetype: l('框架', '原型', 'frame'),
-    tertiary: t('tertiaryStat'),
-    tuningMode: l('调整类型', '調整類型', 'Tuning type'),
-    tuningTo: l('+5调整属性', '+5調整數值', '+5 Tuning stat'),
-  };
-  return (piece.closestMismatch?.fields || []).map(field => labels[field] || field).join(l('、', '、', ', '));
-}
-
 function formatInventoryPlanSet(setHash) {
   if (!setHash) return '';
   const set = getArmorSetByHash(setHash);
   return set ? getSetName(set) : String(setHash);
 }
 
-function renderInventoryPlanResults(plans) {
-  const section = document.getElementById('inventoryPlanResults');
-  if (!section) return;
-  if (!plans.length) {
-    section.hidden = true;
-    section.innerHTML = '';
-    return;
-  }
-
-  const best = plans[0];
-  section.hidden = calculatorMode !== 'solve';
-  section.innerHTML = `
-    <div class="inventory-plan-heading">
-      <div>
-        <h2 id="inventoryPlanHeading">${l('DIM库存混合方案', 'DIM庫存混合方案', 'DIM inventory plans')}</h2>
-        <p>${l(
-          '优先复用清单中框架、第三属性和调谐 +5 属性都吻合的护甲；剩余件数按最少刷取量，再按框架集中度排列。',
-          '優先重用清單中原型、第三數值和調諧 +5 數值都吻合的防具；剩餘欄位依最少取得量，再依原型集中度排列。',
-          'Owned pieces must match the archetype, tertiary, and rolled +5 tuning stat. Plans are ranked by the fewest pieces to farm, then by archetype concentration.'
-        )}</p>
-      </div>
-      <span class="inventory-plan-best">${l(`首选：已有 ${best.ownedCount}/5 件`, `首選：已有 ${best.ownedCount}/5 件`, `Best: ${best.ownedCount}/5 owned`)}</span>
-    </div>
-    <div class="inventory-plan-list" role="list">
-      ${plans.map((plan, index) => `
-        <article class="inventory-plan-card${index === 0 ? ' is-best' : ''}" role="listitem">
-          <div class="inventory-plan-card-head">
-            <div class="inventory-plan-rank">#${index + 1}</div>
-            <div class="inventory-plan-card-title">
-              <strong>${l(`已有 ${plan.ownedCount}/5 · 需刷 ${plan.farmCount} 件`, `已有 ${plan.ownedCount}/5 · 需取得 ${plan.farmCount} 件`, `${plan.ownedCount}/5 owned · farm ${plan.farmCount}`)}</strong>
-              <span>${l(`框架集中度 ${plan.farmability}（越低越易刷）`, `原型集中度 ${plan.farmability}（越低越易取得）`, `Archetype concentration ${plan.farmability} (lower is easier)`)}</span>
-            </div>
-            <button type="button" class="btn inventory-plan-view" onclick="switchSolution(${allSolutions.indexOf(plan.solution)})">${icon('down')}${l('查看方案','查看方案','View solution')}</button>
-          </div>
-          <div class="inventory-plan-pieces">
-            ${plan.pieces.map(piece => {
-              const slotLabel = getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot));
-              const requirement = `${getArchetypeLabel(piece.archetype)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${formatInventoryPlanTuning(piece)}`;
-              if (piece.item) {
-                return `<div class="inventory-plan-piece is-owned"><span class="inventory-plan-piece-status">${icon('check')}${l('已有','已有','Owned')}</span><strong>${slotLabel}</strong><span>${escapeHtml(piece.item.name || requirement)}</span><small>${requirement}</small></div>`;
-              }
-              const exoticLabel = piece.exotic ? l('异域','異域','Exotic') : l('待刷','待取得','Farm');
-              const setLabel = piece.farmSetHash ? ` · ${formatInventoryPlanSet(piece.farmSetHash)}` : '';
-              const closestRoll = piece.closestItem
-                ? `${getArchetypeLabel(piece.closestItem.archetypeId)} · ${t('tertiaryStat')} ${STAT_LABELS[piece.closestItem.tertiary] || '—'} · ${formatInventoryItemTuning(piece.closestItem)}`
-                : '';
-              const farmHelp = piece.exotic
-                ? (piece.closestItem
-                  ? l(
-                    `同名已有件中最接近的是“${escapeHtml(piece.closestItem.name)}”：${closestRoll}；仍不匹配${formatClosestExoticMismatch(piece)}，建议刷取上方目标框架。`,
-                    `同名現有件中最接近的是「${escapeHtml(piece.closestItem.name)}」：${closestRoll}；仍不符合${formatClosestExoticMismatch(piece)}，建議取得上方目標原型。`,
-                    `Closest owned copy of “${escapeHtml(piece.closestItem.name)}”: ${closestRoll}. It still misses ${formatClosestExoticMismatch(piece)}; farm the target roll above.`,
-                  )
-                  : l('清单中没有符合目标属性的同名异域，建议优先刷取上方框架。', '清單中沒有符合目標數值的同名異域，建議優先取得上方原型。', 'No owned copy of the selected Exotic matches; farm the target roll above.'))
-                : l('需要新护甲，框架、第三属性和调谐 +5 属性均需吻合。', '需要新防具，原型、第三數值和調諧 +5 數值均需吻合。', 'Farm a new piece matching the frame, tertiary, and rolled +5 tuning stat.');
-              return `<div class="inventory-plan-piece is-farm"><span class="inventory-plan-piece-status">${icon(piece.exotic ? 'warn' : 'trend-up')}${exoticLabel}</span><strong>${slotLabel}</strong><span>${requirement}${setLabel}</span><small>${farmHelp}</small></div>`;
-            }).join('')}
-          </div>
-        </article>`).join('')}
-    </div>`;
-}
-
-function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
-  const section = document.getElementById('inventoryPlanResults');
-  if (calculatorMode !== 'solve' || importedInventory.length === 0 || allSolutions.length === 0) {
-    lastInventoryPlans = [];
-    if (section) {
-      section.hidden = true;
-      section.innerHTML = '';
-    }
-    return;
-  }
-
+function createOwnedArmorPlanRequest(solutions, maxResults, { allowEmpty = false } = {}) {
+  if (calculatorMode !== 'solve' || solutions.length === 0) return null;
   const classItemSettings = document.getElementById('useExoticMode')?.checked
     ? getExoticSettings()
     : null;
-  // In Exotic Class Item mode the selected class defines the legal class-item
-  // slot and must win over a stale DIM class filter from another character.
   const classId = classItemSettings?.classId || importClassFilter || null;
-  if (!classId) {
-    lastInventoryPlans = [];
-    if (section) {
-      section.hidden = true;
-      section.innerHTML = '';
-    }
-    return;
-  }
-  const plans = rankInventoryPlans({
-    solutions: allSolutions,
-    items: filterArmorItems(importedInventory, {
-      classId,
-      tier5Only: importTier5Only,
-    }),
+  const importedItems = classId
+    ? filterArmorItems(importedInventory, { classId, tier5Only: importTier5Only })
+    : [];
+  const manualItems = manualOwnedItems.map(item => ({
+    ...item,
+    classId: item.classId || classId,
+  }));
+  const items = [...importedItems, ...manualItems];
+  if (items.length === 0 && !allowEmpty) return null;
+  return {
+    solutions,
+    items,
     classId,
     fixedExotic: classItemSettings ? null : getSelectedInventoryExotic(),
     setRequirement: snapshotSetRequirement(),
-    maxResults: Math.max(SOLUTION_PREVIEW_COUNT, 12),
-  });
-  lastInventoryPlans = plans;
+    maxResults,
+  };
+}
+
+function getOwnedArmorPlan(solution, { allowEmpty = true } = {}) {
+  const request = createOwnedArmorPlanRequest([solution], 1, { allowEmpty });
+  return request ? rankInventoryPlans(request)[0] || null : null;
+}
+
+function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
+  const request = createOwnedArmorPlanRequest(
+    allSolutions,
+    Math.max(SOLUTION_PREVIEW_COUNT, 12),
+  );
+  if (!request) {
+    if (calculatorMode === 'solve' && rerender && allSolutions.length > 0 && lastTargets && lastFragments) {
+      displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false });
+    }
+    return;
+  }
+  const plans = rankInventoryPlans(request);
   const rank = new Map(plans.map((plan, index) => [plan.solution, index]));
   allSolutions.sort((left, right) =>
     (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER)
   );
   currentSolutionIdx = Math.max(0, allSolutions.indexOf(plans[0]?.solution));
-  renderInventoryPlanResults(plans);
   if (rerender && allSolutions.length > 0) {
     displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false });
   }
@@ -2162,197 +1916,176 @@ function switchSolution(realIdx) {
   displayAllResults(allSolutions[realIdx], lastTargets, lastFragments, { scroll: false });
 }
 
-// Global owned gear state (persists across solution switches)
-let ownedGearState = {}; // { 'archetypeName': { count: N, pieces: [{tertiary: 'stat', tuneTo: 'stat'}, ...] } }
+function getManualOwnedDefault(plan) {
+  const piece = plan?.pieces?.find(entry => !entry.exotic && !entry.item)
+    || plan?.pieces?.find(entry => !entry.exotic)
+    || plan?.pieces?.[0];
+  return {
+    slot: piece?.slot || 'helmet',
+    archetypeId: ARCHETYPES.find(entry => entry.name === piece?.archetype)?.id || ARCHETYPES[0].id,
+    tertiary: piece?.tertiary || STATS[0],
+    tuning: piece?.tuningMode === 'plus3' ? '+3' : piece?.tuningTo || '+3',
+  };
+}
 
-function ownedGearControlId(name) {
-  return name.replace(/[^a-zA-Z一-鿿]/g, '_');
+function getManualTertiaryOptions(archetypeId) {
+  const archetype = ARCHETYPES.find(entry => entry.id === archetypeId) || ARCHETYPES[0];
+  return STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
+}
+
+function renderOwnedArmorMatch(piece) {
+  const item = piece.item;
+  const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
+  const sourceLabel = item.manualOwned
+    ? l('手动', '手動', 'Manual')
+    : l('清单', '清單', 'Inventory');
+  const itemName = item.name || l('手动新增护甲', '手動新增防具', 'Manually added armor');
+  const setName = item.setHash ? formatInventoryPlanSet(item.setHash) : '';
+  const details = [
+    getArchetypeLabel(item.archetypeId || piece.archetype),
+    `${t('tertiaryStat')} ${STAT_LABELS[item.tertiary || piece.tertiary] || '—'}`,
+    formatInventoryItemTuning(item),
+    setName,
+  ].filter(Boolean).join(' · ');
+  return `<div class="owned-armor-match">
+    <span class="owned-armor-source${item.manualOwned ? ' is-manual' : ''}">${sourceLabel}</span>
+    <strong>${getUpgradeSlotLabel(slotIndex)}</strong>
+    <span class="owned-armor-match-body"><b>${escapeHtml(itemName)}</b><small>${details}</small></span>
+  </div>`;
+}
+
+function renderManualOwnedItem(item, index) {
+  const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === item.slot);
+  const tuning = item.tuningMode === 'plus3' ? l('+3调整', '+3調整', '+3 Tuning') : `+5 ${STAT_LABELS[item.tuningTo]}`;
+  const removeLabel = l(`移除手动护甲 ${index + 1}`, `移除手動防具 ${index + 1}`, `Remove manual armor ${index + 1}`);
+  return `<li>
+    <span>${getUpgradeSlotLabel(slotIndex)}</span>
+    <strong>${getArchetypeLabel(item.archetypeId)}</strong>
+    <small>${t('tertiaryStat')} ${STAT_LABELS[item.tertiary]} · ${tuning}</small>
+    <button type="button" class="btn" onclick="removeManualOwnedArmor('${item.sourceId}')" aria-label="${removeLabel}">${icon('trash')}</button>
+  </li>`;
 }
 
 function buildOwnedGearSection(_finalTotals, _targets) {
   const section = document.getElementById('ownedGearSection');
-  // Get all archetypes across ALL solutions
-  const allArchs = new Set();
-  const archMax = {}; // max needed across all solutions
-  for (const sol of allSolutions) {
-    const cnt = {};
-    for (let i = 0; i < 5; i++) {
-      if (i === sol.exoticIndex) continue;
-      const name = sol.config[i].archetype;
-      allArchs.add(name);
-      cnt[name] = (cnt[name] || 0) + 1;
-    }
-    for (const [n, c] of Object.entries(cnt)) {
-      archMax[n] = Math.max(archMax[n] || 0, c);
-    }
-  }
-  if (allArchs.size <= 1) { section.style.display = 'none'; return; }
+  const solution = allSolutions[currentSolutionIdx];
+  if (!section || !solution) return;
+  const plan = getOwnedArmorPlan(solution);
+  const matches = plan?.pieces?.filter(piece => piece.item) || [];
+  const defaultPiece = getManualOwnedDefault(plan);
+  const tertiaryOptions = getManualTertiaryOptions(defaultPiece.archetypeId);
+  if (!tertiaryOptions.includes(defaultPiece.tertiary)) defaultPiece.tertiary = tertiaryOptions[0];
+  const summary = plan
+    ? l(`匹配 ${plan.ownedCount}/5 件 · 还需 ${plan.farmCount} 件`, `符合 ${plan.ownedCount}/5 件 · 尚需 ${plan.farmCount} 件`, `${plan.ownedCount}/5 matched · ${plan.farmCount} remaining`)
+    : l('尚无可匹配的已有护甲', '尚無可符合的已有防具', 'No owned armor available to match');
+  const matchContent = matches.length > 0
+    ? `<div class="owned-armor-match-list">${matches.map(renderOwnedArmorMatch).join('')}</div>`
+    : `<p class="owned-armor-empty">${l(
+      importedInventory.length > 0 && !importClassFilter
+        ? '请先在上方选择职业，再匹配清单中的已有护甲。'
+        : '当前方案没有精确匹配的已有护甲，可在下方手动新增。',
+      importedInventory.length > 0 && !importClassFilter
+        ? '請先在上方選擇職業，再符合清單中的已有防具。'
+        : '目前方案沒有精確符合的已有防具，可在下方手動新增。',
+      importedInventory.length > 0 && !importClassFilter
+        ? 'Choose a class above before matching imported armor.'
+        : 'No owned armor exactly matches this solution. You can add a piece manually below.'
+    )}</p>`;
+  const manualList = manualOwnedItems.length > 0
+    ? `<ul class="manual-owned-list">${manualOwnedItems.map(renderManualOwnedItem).join('')}</ul>`
+    : '';
 
-  const totalOwned = [...allArchs].reduce(
-    (sum, name) => sum + (ownedGearState[name]?.count || 0), 0
-  );
-  let html2 = `<div class="owned-gear-header">
+  document.body.classList.toggle('is-editing-owned-armor', manualOwnedEditorOpen);
+  section.innerHTML = `<div class="owned-gear-header">
     <div>
-      <h3 class="owned-gear-title">${l('匹配已有护甲','匹配已有防具','Match owned armor')}</h3>
+      <h3 class="owned-gear-title">${l('已有护甲', '已有防具', 'Owned armor')}</h3>
       <p class="owned-gear-copy">${l(
-        '录入已有框架与属性，再按匹配度重新排序方案。切换方案时会保留这些内容。',
-        '輸入已有原型與屬性，再依匹配度重新排序方案。切換方案時會保留這些內容。',
-        'Enter the archetypes and stats you own, then re-sort solutions by fit. Your entries persist when switching solutions.'
+        '这里只显示与当前方案精确匹配的已有件；导入清单或手动新增后，方案会自动更新。',
+        '此處只顯示與目前方案精確符合的現有件；匯入清單或手動新增後，方案會自動更新。',
+        'Only exact matches for this solution appear here. Importing or manually adding armor updates the solution automatically.'
       )}</p>
     </div>
-    <div class="owned-gear-summary">${l('已录入','已輸入','Entered')} <strong>${totalOwned}</strong> ${l('件','件','piece(s)')}</div>
-  </div><div class="owned-gear-list">`;
-
-  for (const name of [...allArchs].sort()) {
-    const needed = archMax[name] || 1;
-    // Init state if needed
-    if (!ownedGearState[name]) ownedGearState[name] = { count: 0, pieces: [] };
-    const st = ownedGearState[name];
-    const controlId = ownedGearControlId(name);
-    const archetypeLabel = getArchetypeLabel(name);
-    const decreaseLabel = l(`减少${archetypeLabel}已有数量`,`減少${archetypeLabel}已有數量`,`Decrease owned ${archetypeLabel}`);
-    const increaseLabel = l(`增加${archetypeLabel}已有数量`,`增加${archetypeLabel}已有數量`,`Increase owned ${archetypeLabel}`);
-    const countLabel = l(`${archetypeLabel}已有数量`,`${archetypeLabel}已有數量`,`Owned ${archetypeLabel} count`);
-
-    html2 += `<div class="owned-gear-row${st.count > 0 ? ' is-active' : ''}">
-      <div class="owned-gear-row-head">
-        <div class="owned-gear-identity">
-          <span class="owned-gear-archetype">${archetypeLabel}</span>
-          <span class="owned-gear-needed">${l('方案最多需要','方案最多需要','Solution needs up to')} <strong>${needed}</strong> ${l('件','件','piece(s)')}</span>
-        </div>
-        <div class="owned-count-control">
-          <span>${l('已有','已有','Owned')}</span>
-          <div class="owned-count-stepper">
-            <button type="button" aria-label="${decreaseLabel}" onclick="changeOwnedCount('${name}',-1,${needed})" ${st.count <= 0 ? 'disabled' : ''}>−</button>
-            <input type="number" id="ownedCnt_${controlId}" value="${st.count}" min="0" max="${needed}"
-              inputmode="numeric" aria-label="${countLabel}" onchange="updateOwnedCount('${name}',this.value,${needed})">
-            <button type="button" aria-label="${increaseLabel}" onclick="changeOwnedCount('${name}',1,${needed})" ${st.count >= needed ? 'disabled' : ''}>+</button>
-          </div>
-          <span>${l('件','件','piece(s)')}</span>
-        </div>
-      </div>`;
-
-    // Show owned piece details if count > 0
-    if (st.count > 0) {
-      html2 += '<div class="owned-piece-list">';
-      for (let p = 0; p < Math.min(st.count, needed); p++) {
-        if (!st.pieces[p]) st.pieces[p] = { tertiary: '', tuneTo: '' };
-        const pieceLabel = l(`${archetypeLabel}第${p + 1}件`,`${archetypeLabel}第${p + 1}件`,`${archetypeLabel} piece ${p + 1}`);
-        html2 += `<div class="owned-piece-row" role="group" aria-label="${pieceLabel}">
-          <span class="owned-piece-index" aria-hidden="true">${String(p + 1).padStart(2, '0')}</span>
-          <label class="owned-piece-field"><span>${t('tertiaryStat')}</span>
-          <select id="ownedTert_${controlId}_${p}" onchange="updateOwnedPiece('${name}',${p})">`;
-        html2 += `<option value="">${l('未填写','未填寫','Not set')}</option>`;
-        for (const s of STATS) {
-          html2 += '<option value="' + s + '" ' + (st.pieces[p].tertiary === s ? 'selected' : '') + '>' + STAT_LABELS[s] + '</option>';
-        }
-        html2 += `</select></label>
-          <label class="owned-piece-field"><span>${l('+5调整属性','+5調整屬性','+5 Tuning stat')}</span>
-          <select id="ownedTune_${controlId}_${p}" onchange="updateOwnedPiece2('${name}',${p})">`;
-        html2 += `<option value="">${l('未填写','未填寫','Not set')}</option>`;
-        for (const s of STATS) {
-          html2 += '<option value="' + s + '" ' + (st.pieces[p].tuneTo === s ? 'selected' : '') + '>' + STAT_LABELS[s] + '</option>';
-        }
-        html2 += '</select></label></div>';
-      }
-      html2 += '</div>';
-    }
-    html2 += '</div>';
-  }
-
-  html2 += `</div><div class="owned-gear-actions">
-    <button class="btn" type="button" onclick="clearOwnedGear()" ${totalOwned === 0 ? 'disabled' : ''}>
-      ${icon('trash')}${l('清空录入','清除輸入','Clear entries')}
-    </button>
-    <button class="btn owned-gear-apply" type="button" onclick="resortByOwned()" ${totalOwned === 0 ? 'disabled' : ''}>
-      ${icon('refresh')}${l('按已有护甲排序方案','按已有防具排序方案','Sort solutions by owned armor')}
-    </button>
-  </div>`;
-  section.innerHTML = html2;
+    <div class="owned-gear-summary">${summary}</div>
+  </div>
+  ${matchContent}
+  <details class="manual-owned-editor" ${manualOwnedEditorOpen ? 'open' : ''} ontoggle="setManualOwnedEditorOpen(this.open)">
+    <summary>${icon('plus')}${l('手动新增已有护甲', '手動新增已有防具', 'Add owned armor manually')}<span>${manualOwnedItems.length}</span></summary>
+    <div class="manual-owned-form">
+      <label><span>${l('部位', '部位', 'Slot')}</span><select id="manualOwnedSlot">
+        ${UPGRADE_SLOTS.map((slot, index) => `<option value="${slot.id}" ${slot.id === defaultPiece.slot ? 'selected' : ''}>${getUpgradeSlotLabel(index)}</option>`).join('')}
+      </select></label>
+      <label><span>${l('框架', '原型', 'Archetype')}</span><select id="manualOwnedArchetype" onchange="updateManualOwnedTertiaryOptions()">
+        ${ARCHETYPES.map(archetype => `<option value="${archetype.id}" ${archetype.id === defaultPiece.archetypeId ? 'selected' : ''}>${getArchetypeLabel(archetype.id)}</option>`).join('')}
+      </select></label>
+      <label><span>${t('tertiaryStat')}</span><select id="manualOwnedTertiary">
+        ${tertiaryOptions.map(stat => `<option value="${stat}" ${stat === defaultPiece.tertiary ? 'selected' : ''}>${STAT_LABELS[stat]}</option>`).join('')}
+      </select></label>
+      <label><span>${l('调整', '調整', 'Tuning')}</span><select id="manualOwnedTuning">
+        <option value="+3" ${defaultPiece.tuning === '+3' ? 'selected' : ''}>${l('+3模式', '+3模式', '+3 mode')}</option>
+        ${STATS.map(stat => `<option value="${stat}" ${stat === defaultPiece.tuning ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
+      </select></label>
+      <button type="button" class="btn owned-gear-add" id="addManualOwnedButton" onclick="addManualOwnedArmor()">${icon('plus')}${l('添加并更新方案', '新增並更新方案', 'Add and update')}</button>
+    </div>
+    ${manualList}
+    ${manualOwnedItems.length > 0 ? `<button type="button" class="btn manual-owned-clear" onclick="clearOwnedGear()">${icon('trash')}${l('清空手动新增', '清空手動新增', 'Clear manual armor')}</button>` : ''}
+  </details>`;
   section.style.display = 'block';
 }
 
-function updateOwnedCount(name, val, max = 5) {
-  const n = Math.max(0, Math.min(max, parseInt(val) || 0));
-  if (!ownedGearState[name]) ownedGearState[name] = { count: 0, pieces: [] };
-  ownedGearState[name].count = n;
-  while (ownedGearState[name].pieces.length < n) ownedGearState[name].pieces.push({ tertiary: '', tuneTo: '' });
-  // Rebuild the form to show/hide piece detail dropdowns, but don't refresh the solution
-  buildOwnedGearSection(null, null);
-}
-function changeOwnedCount(name, delta, max) {
-  const current = ownedGearState[name]?.count || 0;
-  updateOwnedCount(name, current + delta, max);
-}
-function updateOwnedPiece(name, idx) {
-  const el = document.getElementById('ownedTert_' + ownedGearControlId(name) + '_' + idx);
-  if (el && ownedGearState[name] && ownedGearState[name].pieces[idx]) {
-    ownedGearState[name].pieces[idx].tertiary = el.value;
-  }
-}
-function updateOwnedPiece2(name, idx) {
-  const el = document.getElementById('ownedTune_' + ownedGearControlId(name) + '_' + idx);
-  if (el && ownedGearState[name] && ownedGearState[name].pieces[idx]) {
-    ownedGearState[name].pieces[idx].tuneTo = el.value;
-  }
-}
-function clearOwnedGear() {
-  ownedGearState = {};
-  buildOwnedGearSection(null, null);
+function setManualOwnedEditorOpen(open) {
+  manualOwnedEditorOpen = Boolean(open);
+  document.body.classList.toggle('is-editing-owned-armor', manualOwnedEditorOpen);
 }
 
-function resortByOwned() {
-  if (allSolutions.length <= 1) return;
-  const activeSolution = allSolutions[currentSolutionIdx];
+function updateManualOwnedTertiaryOptions() {
+  const archetypeId = document.getElementById('manualOwnedArchetype')?.value;
+  const select = document.getElementById('manualOwnedTertiary');
+  if (!select) return;
+  select.innerHTML = getManualTertiaryOptions(archetypeId)
+    .map(stat => `<option value="${stat}">${STAT_LABELS[stat]}</option>`)
+    .join('');
+}
 
-  // Build owned count map per archetype
-  const ownedCount = {};
-  let totalOwned = 0;
-  for (const [name, st] of Object.entries(ownedGearState)) {
-    ownedCount[name] = st.count || 0;
-    totalOwned += st.count || 0;
-  }
-  if (totalOwned === 0) { alert(l('请先输入至少一件已有护甲。','請先輸入至少一件已有防具。','Enter at least one owned armor piece first.')); return; }
-
-  // Count how many owned pieces match a solution (archetype + tertiary + tuning)
-  function countOwnedMatches(sol, requireSpecifiedTertiary = false) {
-    const armorSlots = [];
-    const requiredTerts = [];
-    const requiredTunes = [];
-    for (let i = 0; i < 5; i++) {
-      if (i === sol.exoticIndex) continue;
-      const name = sol.config[i].archetype;
-      armorSlots.push({
-        name,
-        primary: sol.config[i].primary,
-        secondary: sol.config[i].secondary
-      });
-      const tune = sol.tuningAssignments[i];
-      requiredTerts.push(sol.config[i].tertiary);
-      requiredTunes.push(tune.mode === '+5-5' ? tune.to : '+3');
-    }
-    return selectOwnedArmorMatches(
-      armorSlots, ownedGearState, requiredTerts, requiredTunes, requireSpecifiedTertiary
-    ).matches.length;
-  }
-
-  const activeFullyMatches = countOwnedMatches(activeSolution, true) === totalOwned;
-
-  // Sort: solutions with more owned pieces (including properties) rank higher
-  allSolutions.sort((a, b) => {
-    const aOwned = countOwnedMatches(a);
-    const bOwned = countOwnedMatches(b);
-    if (aOwned !== bOwned) return bOwned - aOwned;
-    return farmabilityScore(a.config, a.exoticIndex) - farmabilityScore(b.config, b.exoticIndex);
+function addManualOwnedArmor() {
+  const slot = document.getElementById('manualOwnedSlot')?.value;
+  const archetypeId = document.getElementById('manualOwnedArchetype')?.value;
+  const tertiary = document.getElementById('manualOwnedTertiary')?.value;
+  const tuning = document.getElementById('manualOwnedTuning')?.value;
+  if (!slot || !archetypeId || !tertiary || !tuning) return;
+  const classId = document.getElementById('useExoticMode')?.checked
+    ? document.getElementById('exoticClass')?.value || null
+    : importClassFilter || null;
+  const sourceId = `manual-owned-${Date.now()}-${++manualOwnedSequence}`;
+  manualOwnedItems.push({
+    id: sourceId,
+    sourceId,
+    name: '',
+    slot,
+    classId,
+    tier: '5',
+    exotic: false,
+    archetypeId,
+    tertiary,
+    tuningMode: tuning === '+3' ? 'plus3' : 'shift',
+    tuningTo: tuning === '+3' ? null : tuning,
+    setHash: null,
+    manualOwned: true,
   });
+  manualOwnedEditorOpen = true;
+  saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
+}
 
-  const preservedIndex = allSolutions.indexOf(activeSolution);
-  currentSolutionIdx = activeFullyMatches && preservedIndex >= 0 ? preservedIndex : 0;
-  displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments);
-  const notice = document.getElementById('messages');
-  notice.innerHTML += activeFullyMatches
-    ? `<div class="msg info">${icon('check')}${l('已有护甲全部准确符合当前方案。方案列表已重新排序，当前方案保持不变。','已有防具全部準確符合目前方案。方案列表已重新排序，目前方案保持不變。','All owned armor matches the current solution. The list was re-sorted and the current solution was kept.')}</div>`
-    : `<div class="msg info">${icon('check')}${l('已有护甲不完全符合原方案，已切换到匹配数最多且更好刷的方案。','已有防具不完全符合原方案，已切換到匹配數最多且較容易取得的方案。','Owned armor does not fully match the original solution; switched to the solution with the most matches and better farmability.')}</div>`;
+function removeManualOwnedArmor(sourceId) {
+  manualOwnedItems = manualOwnedItems.filter(item => item.sourceId !== sourceId);
+  saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
+}
+
+function clearOwnedGear() {
+  manualOwnedItems = [];
+  saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
 }
 
 // ============================================================
@@ -2363,9 +2096,13 @@ let upgradeBuildState = [];
 let lastUpgradeAnalysis = null;
 let upgradeRequiredStats = [];
 
-// Imported DIM armor inventory and the set-bonus requirement for the upgrade
-// mode. Imported pieces carry their real stat distribution and set membership.
+// Owned armor can come from an imported inventory or compact manual entries.
+// Both sources feed the same plan ranking and active-solution match view.
 let importedInventory = [];
+let manualOwnedItems = [];
+let manualOwnedSequence = 0;
+let manualOwnedEditorOpen = false;
+let inventoryImportExpanded = false;
 let importClassFilter = "";
 let importTier5Only = true;
 let setRequirement = { type: "none" };
@@ -2373,7 +2110,8 @@ let manualLocked = [];
 let inventoryExoticSlotFilter = "";
 let inventoryFixedExoticKey = "";
 
-const REGULAR_EXOTIC_SLOTS = new Set(["helmet", "arms", "chest", "legs"]);
+const EXOTIC_SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
+const EXOTIC_SLOTS = new Set(EXOTIC_SLOT_ORDER);
 
 function getInventoryExoticKey(item) {
   const name = String(item?.name || "").trim().toLocaleLowerCase();
@@ -2382,16 +2120,25 @@ function getInventoryExoticKey(item) {
   return `hash:${hash}`;
 }
 
+function getExoticClassItemKey(classId) {
+  return `class-item:${classId}`;
+}
+
+function getExoticClassItemName(classId) {
+  const label = EXOTIC_CLASS_LABELS[classId]?.[getExoticLanguage()] || '';
+  return label.split('·').slice(1).join('·').trim() || t('exoticClassItem');
+}
+
 function getFilteredInventoryExotics() {
   if (!importClassFilter) return [];
   return filterArmorItems(importedInventory, {
     classId: importClassFilter,
     tier5Only: importTier5Only,
-  }).filter(item => Boolean(item.exotic) && REGULAR_EXOTIC_SLOTS.has(item.slot));
+  }).filter(item => Boolean(item.exotic) && EXOTIC_SLOTS.has(item.slot));
 }
 
 function getSelectedInventoryExotic() {
-  if (!inventoryFixedExoticKey) return null;
+  if (!inventoryFixedExoticKey || inventoryExoticSlotFilter === 'classItem') return null;
   const item = getFilteredInventoryExotics().find(candidate =>
     candidate.slot === inventoryExoticSlotFilter &&
     getInventoryExoticKey(candidate) === inventoryFixedExoticKey
@@ -2416,23 +2163,42 @@ function escapeHtml(value) {
 
 function getInventoryExoticPickerData() {
   const pool = getFilteredInventoryExotics();
-  const slots = [...new Set(pool.map(item => item.slot))]
-    .sort((left, right) => [...REGULAR_EXOTIC_SLOTS].indexOf(left) - [...REGULAR_EXOTIC_SLOTS].indexOf(right));
+  const slots = importClassFilter
+    ? EXOTIC_SLOT_ORDER.filter(slot => slot === 'classItem' || pool.some(item => item.slot === slot))
+    : [];
   if (!slots.includes(inventoryExoticSlotFilter)) {
     inventoryExoticSlotFilter = "";
     inventoryFixedExoticKey = "";
   }
 
-  const groups = new Map();
-  for (const item of pool) {
-    if (item.slot !== inventoryExoticSlotFilter) continue;
-    const key = getInventoryExoticKey(item);
-    if (!groups.has(key)) groups.set(key, { key, item, count: 0 });
-    groups.get(key).count++;
+  let names;
+  if (inventoryExoticSlotFilter === 'classItem' && importClassFilter) {
+    const key = getExoticClassItemKey(importClassFilter);
+    const data = EXOTIC_CLASSES[importClassFilter];
+    names = [{
+      key,
+      item: {
+        classId: importClassFilter,
+        slot: 'classItem',
+        hash: data?.itemHash || 0,
+        name: getExoticClassItemName(importClassFilter),
+        exotic: true,
+      },
+      count: pool.filter(item => item.slot === 'classItem').length,
+    }];
+    inventoryFixedExoticKey = key;
+  } else {
+    const groups = new Map();
+    for (const item of pool) {
+      if (item.slot !== inventoryExoticSlotFilter) continue;
+      const key = getInventoryExoticKey(item);
+      if (!groups.has(key)) groups.set(key, { key, item, count: 0 });
+      groups.get(key).count++;
+    }
+    names = [...groups.values()].sort((left, right) =>
+      String(left.item.name || "").localeCompare(String(right.item.name || ""), localeCode())
+    );
   }
-  const names = [...groups.values()].sort((left, right) =>
-    String(left.item.name || "").localeCompare(String(right.item.name || ""), localeCode())
-  );
   if (!names.some(entry => entry.key === inventoryFixedExoticKey)) {
     inventoryFixedExoticKey = "";
   }
@@ -2443,21 +2209,19 @@ function renderUpgradeImportPanel() {
   const el = document.getElementById("upgradeImportPanel");
   if (!el) return;
   const isScratchMode = calculatorMode === "solve";
-  const importHeading = isScratchMode
-    ? l("从零配装：导入 DIM 护甲清单", "從零配裝：匯入 DIM 防具清單", "Build from scratch: import DIM armor")
-    : l("从 DIM 导入装备", "從 DIM 匯入裝備", "Import gear from DIM");
+  const importHeading = l("已有护甲", "已有防具", "Owned armor");
   const importDescription = isScratchMode
     ? l(
-      "导入后选择职业，再设置目标、碎片、套装和异域。求解会优先使用匹配的已有护甲，并列出仍需刷取的件数与框架。",
-      "匯入後選擇職業，再設定目標、碎片、套裝和異域。求解會優先使用符合的現有防具，並列出仍需取得的件數與原型。",
-      "Import, choose a class, then set targets, Fragments, a set, and an Exotic. Matching owned armor is used first; remaining pieces and frames are listed to farm.",
+      "导入清单后，求解会自动优先匹配你已有的护甲。",
+      "匯入清單後，求解會自動優先符合你已有的防具。",
+      "Import an inventory to prioritize armor you already own.",
     )
     : l(
-      "上传护甲清单后，会自动识别当前穿戴并填入下方五个栏位；也可以按套装要求直接从清单中求解。",
-      "上傳防具清單後，會自動辨識目前穿戴並填入下方五個欄位；也可以依套裝要求直接從清單中求解。",
-      "Upload an armor inventory to fill the five slots below from your equipped loadout, or solve directly from the list with a set requirement.",
+      "导入清单后，可填入当前穿戴或直接查找已有护甲方案。",
+      "匯入清單後，可填入目前穿戴或直接尋找已有防具方案。",
+      "Import an inventory to fill the equipped loadout or search owned armor directly.",
     );
-  const { pool: exoticPool, slots: exoticSlots, names: exoticNames } = getInventoryExoticPickerData();
+  const { slots: exoticSlots, names: exoticNames } = getInventoryExoticPickerData();
   const classOptions = [
     ["", isScratchMode
       ? l("请选择职业", "請選擇職業", "Choose a class")
@@ -2475,31 +2239,44 @@ function renderUpgradeImportPanel() {
       return `<option value="${slot}" ${slot === inventoryExoticSlotFilter ? "selected" : ""}>${getUpgradeSlotLabel(slotIndex)}</option>`;
     }),
   ].join("");
+  const isClassItemSlot = inventoryExoticSlotFilter === 'classItem';
   const exoticNameOptions = [
-    `<option value="">${inventoryExoticSlotFilter
+    ...(isClassItemSlot ? [] : [`<option value="">${inventoryExoticSlotFilter
       ? l("不固定异域", "不固定異域", "No fixed Exotic")
-      : l("请先选择部位", "請先選擇部位", "Choose a slot first")}</option>`,
-    ...exoticNames.map(entry => `<option value="${escapeHtml(entry.key)}" ${entry.key === inventoryFixedExoticKey ? "selected" : ""}>${escapeHtml(entry.item.name || l("未命名异域", "未命名異域", "Unnamed Exotic"))} ×${entry.count}</option>`),
+      : l("请先选择部位", "請先選擇部位", "Choose a slot first")}</option>`]),
+    ...exoticNames.map(entry => `<option value="${escapeHtml(entry.key)}" ${entry.key === inventoryFixedExoticKey ? "selected" : ""}>${escapeHtml(entry.item.name || l("未命名异域", "未命名異域", "Unnamed Exotic"))}${entry.count > 0 ? ` ×${entry.count}` : ''}</option>`),
   ].join("");
+  const importState = importedInventory.length > 0
+    ? l(`已导入 ${importedInventory.length} 件`, `已匯入 ${importedInventory.length} 件`, `${importedInventory.length} imported`)
+    : l("未导入", "未匯入", "Not imported");
+  const toggleLabel = inventoryImportExpanded
+    ? l("收起", "收起", "Collapse")
+    : l("展开", "展開", "Expand");
 
+  el.classList.toggle('is-collapsed', !inventoryImportExpanded);
   el.innerHTML = `
     <div class="upgrade-import-heading">
       <div>
         <h3>${importHeading}</h3>
         <p>${importDescription}</p>
       </div>
-      <label class="upgrade-import-file">
-        <span class="btn upgrade-import-primary">${icon("folder")}${l("选择 DIM CSV", "選擇 DIM CSV", "Choose DIM CSV")}</span>
-        <input type="file" id="dimCsvFile" accept=".csv,text/csv" onchange="handleDimCsvFile(this)">
-      </label>
+      <div class="upgrade-import-heading-actions">
+        <span class="upgrade-import-state">${importState}</span>
+        <label class="upgrade-import-file">
+          <span class="btn upgrade-import-primary">${icon("folder")}${importedInventory.length > 0 ? l("重新导入", "重新匯入", "Replace inventory") : l("导入清单", "匯入清單", "Import inventory")}</span>
+          <input type="file" id="dimCsvFile" accept=".csv,text/csv" onchange="handleDimCsvFile(this)">
+        </label>
+        <button type="button" class="btn upgrade-import-toggle" id="toggleInventoryImportButton" aria-expanded="${inventoryImportExpanded}" aria-controls="upgradeImportBody" onclick="toggleInventoryImportPanel()">${icon(inventoryImportExpanded ? 'up' : 'down')}<span>${toggleLabel}</span></button>
+      </div>
     </div>
-    <p class="upgrade-import-hint">${l(
-      "导出路径：DIM → 设置 → 电子表格 → 防具（Export CSV），仅处理文件中的护甲行。",
-      "匯出路徑：DIM → 設定 → 試算表 → 防具（Export CSV），僅處理檔案中的防具列。",
-      "Export path: DIM → Settings → Spreadsheets → Armor (Export CSV). Only armor rows are processed."
-    )}</p>
-    <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
-    <div class="upgrade-import-toolbar" aria-label="${l("导入筛选与操作", "匯入篩選與操作", "Import filters and actions")}">
+    <div class="upgrade-import-body" id="upgradeImportBody" ${inventoryImportExpanded ? '' : 'hidden'}>
+      <p class="upgrade-import-hint">${l(
+        "清单可从 DIM → 设置 → 电子表格 → 防具（Export CSV）导出；文件只在浏览器本地处理。",
+        "清單可從 DIM → 設定 → 試算表 → 防具（Export CSV）匯出；檔案只在瀏覽器本機處理。",
+        "Export the list from DIM → Settings → Spreadsheets → Armor (Export CSV). The file stays in your browser."
+      )}</p>
+      <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
+      <div class="upgrade-import-toolbar" aria-label="${l("已有护甲筛选与操作", "已有防具篩選與操作", "Owned armor filters and actions")}">
       <label class="import-class-select">
         <span>${l("职业", "職業", "Class")}</span>
         <select id="importClass" data-import-dependent onchange="updateImportOptions()">${classOptions}</select>
@@ -2512,8 +2289,8 @@ function renderUpgradeImportPanel() {
         ${isScratchMode ? "" : `<button type="button" class="btn" data-import-dependent onclick="applyEquippedLoadout()">${icon("refresh")}${l("填入当前穿戴", "填入目前穿戴", "Fill equipped loadout")}</button>`}
         <button type="button" class="btn danger" data-import-dependent onclick="clearImportedInventory()">${icon("trash")}${l("清空", "清空", "Clear")}</button>
       </div>
-    </div>
-    <div class="inventory-solve-options" id="inventorySolveOptions">
+      </div>
+      <div class="inventory-solve-options" id="inventorySolveOptions">
       <div class="inventory-solve-option-copy">
         <strong>${l("从零配装：优先使用已有护甲", "從零配裝：優先使用已有防具", "Build from scratch: prefer owned armor")}</strong>
         <span>${l("按职业筛选库存；如需固定普通异域，再按部位和名称选择。方案优先减少刷取件数，其次选择最接近需求的同名异域。", "依職業篩選庫存；如需固定一般異域，再依部位和名稱選擇。方案優先減少取得件數，其次選擇最接近需求的同名異域。", "Filter inventory by class. To fix a regular Exotic, choose its slot and name. Plans minimize farming first, then prefer the closest owned copy of that Exotic.")}</span>
@@ -2521,11 +2298,11 @@ function renderUpgradeImportPanel() {
       <div class="inventory-exotic-picker" aria-label="${l("固定异域筛选", "固定異域篩選", "Fixed Exotic filters")}">
         <label class="inventory-fixed-exotic-control">
           <span>${l("异域部位", "異域部位", "Exotic slot")}</span>
-          <select id="inventoryExoticSlotFilter" onchange="updateInventoryExoticSlot()" ${!importClassFilter || exoticPool.length === 0 ? "disabled" : ""}>${exoticSlotOptions}</select>
+          <select id="inventoryExoticSlotFilter" onchange="updateInventoryExoticSlot()" ${!importClassFilter || exoticSlots.length === 0 ? "disabled" : ""}>${exoticSlotOptions}</select>
         </label>
         <label class="inventory-fixed-exotic-control">
           <span>${l("异域名称", "異域名稱", "Exotic name")}</span>
-          <select id="inventoryFixedExoticName" onchange="updateInventorySolveOptions()" ${!inventoryExoticSlotFilter || exoticNames.length === 0 ? "disabled" : ""}>${exoticNameOptions}</select>
+          <select id="inventoryFixedExoticName" onchange="updateInventorySolveOptions()" ${isClassItemSlot || !inventoryExoticSlotFilter || exoticNames.length === 0 ? "disabled" : ""}>${exoticNameOptions}</select>
         </label>
       </div>
       <p class="inventory-solve-option-hint" id="inventorySolveOptionHint">${l(
@@ -2533,15 +2310,26 @@ function renderUpgradeImportPanel() {
         "先選擇職業，再從該職業現有異域中選擇部位和名稱；同名多件會自動比較原型、第三數值與 +5 調整。",
         "Choose a class, slot, and Exotic name. Multiple owned copies are compared by frame, tertiary, and rolled +5 Tuning."
       )}</p>
+      </div>
+      <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
     </div>
-    <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
   `;
   updateImportSummary();
   updateInventorySolveOptions();
   renderSetEffects();
 }
 
+function toggleInventoryImportPanel() {
+  inventoryImportExpanded = !inventoryImportExpanded;
+  renderUpgradeImportPanel();
+  saveUpgradeDraft();
+}
+
 function showImportMessage(text, tone = "error") {
+  if (!inventoryImportExpanded) {
+    inventoryImportExpanded = true;
+    renderUpgradeImportPanel();
+  }
   const el = document.getElementById("upgradeImportSummary");
   if (!el) return;
   el.innerHTML = `<div class="msg ${tone}">${icon(tone === "error" ? "block" : "check")}<span>${escapeHtml(text)}</span></div>`;
@@ -2565,6 +2353,7 @@ function handleDimCsvFile(input) {
         return;
       }
       importedInventory = items;
+      inventoryImportExpanded = true;
       input.value = "";
       clearInventoryResults();
       const importedClasses = new Set(items.map(item => item.classId).filter(Boolean));
@@ -2612,14 +2401,39 @@ function updateImportOptions() {
   if (!importClassFilter) {
     inventoryExoticSlotFilter = "";
     inventoryFixedExoticKey = "";
+  } else if (inventoryExoticSlotFilter === 'classItem') {
+    inventoryFixedExoticKey = getExoticClassItemKey(importClassFilter);
+    const classSelect = document.getElementById('exoticClass');
+    if (classSelect) classSelect.value = importClassFilter;
+    document.getElementById('useExoticMode').checked = true;
+    updateExoticPerkOptions();
+    toggleExoticMode({ syncInventory: false });
   }
   renderUpgradeImportPanel();
 }
 
 function updateInventoryExoticSlot() {
+  const previousSlot = inventoryExoticSlotFilter;
   inventoryExoticSlotFilter = document.getElementById("inventoryExoticSlotFilter")?.value || "";
-  inventoryFixedExoticKey = "";
+  const useExoticMode = document.getElementById('useExoticMode');
+  if (inventoryExoticSlotFilter === 'classItem' && importClassFilter) {
+    inventoryFixedExoticKey = getExoticClassItemKey(importClassFilter);
+    const classSelect = document.getElementById('exoticClass');
+    if (classSelect) classSelect.value = importClassFilter;
+    if (useExoticMode) useExoticMode.checked = true;
+    updateExoticPerkOptions();
+    toggleExoticMode({ syncInventory: false });
+    scheduleRealtimeRanges();
+  } else {
+    inventoryFixedExoticKey = "";
+    if (previousSlot === 'classItem' && useExoticMode?.checked) {
+      useExoticMode.checked = false;
+      toggleExoticMode({ syncInventory: false });
+      scheduleRealtimeRanges();
+    }
+  }
   renderUpgradeImportPanel();
+  saveCurrentDraft();
 }
 
 function updateInventorySolveOptions() {
@@ -2630,16 +2444,16 @@ function updateInventorySolveOptions() {
   const exoticClassItemMode = calculatorMode === 'solve' &&
     document.getElementById('useExoticMode')?.checked === true;
   if (slotSelect) slotSelect.disabled = exoticClassItemMode || !importClassFilter;
-  if (nameSelect) nameSelect.disabled = exoticClassItemMode || !importClassFilter || !inventoryExoticSlotFilter;
+  if (nameSelect) nameSelect.disabled = exoticClassItemMode || !importClassFilter || !inventoryExoticSlotFilter || inventoryExoticSlotFilter === 'classItem';
   const hint = document.getElementById("inventorySolveOptionHint");
   if (hint) {
     hint.classList.toggle('is-class-item', exoticClassItemMode);
     const selected = getSelectedInventoryExotic();
     hint.textContent = exoticClassItemMode
       ? l(
-        '职业异域物品模式已固定职业物品；库存规划会匹配这件职业物品，并为其余四件传说护甲计算已有件与刷取缺口。',
-        '職業異域物品模式已固定職業物品；庫存規劃會匹配這件職業物品，並為其餘四件傳說防具計算已有件與取得缺口。',
-        'Exotic Class Item mode already fixes the class item. Inventory planning matches it and calculates owned/farm gaps for the other four Legendary pieces.'
+        `已固定${getExoticClassItemName(importClassFilter || document.getElementById('exoticClass')?.value || 'hunter')}，并自动开启异域职业物品模式。`,
+        `已固定${getExoticClassItemName(importClassFilter || document.getElementById('exoticClass')?.value || 'hunter')}，並自動開啟異域職業物品模式。`,
+        `${getExoticClassItemName(importClassFilter || document.getElementById('exoticClass')?.value || 'hunter')} is fixed and Exotic Class Item mode is enabled automatically.`
       )
       : !importClassFilter
         ? l('请先选择职业，库存规划不会混用不同职业的护甲。', '請先選擇職業，庫存規劃不會混用不同職業的防具。', 'Choose a class first; inventory planning never mixes armor across classes.')
@@ -2677,14 +2491,14 @@ function updateImportSummary() {
   if (importedInventory.length === 0) {
     el.innerHTML = `<div class="upgrade-import-empty">${icon("folder")}<span>${l(
       calculatorMode === "solve"
-        ? "尚未导入护甲清单。导入 DIM CSV 后选择职业，已有护甲会用于从零配装规划。"
-        : "尚未导入护甲清单。导入 DIM CSV 后可按当前穿戴填入，或在下方逐件手动填写。",
+        ? "尚未导入已有护甲清单。导入后选择职业即可参与方案匹配。"
+        : "尚未导入已有护甲清单。导入后可填入当前穿戴。",
       calculatorMode === "solve"
-        ? "尚未匯入防具清單。匯入 DIM CSV 後選擇職業，現有防具會用於從零配裝規劃。"
-        : "尚未匯入防具清單。匯入 DIM CSV 後可依目前穿戴填入，或在下方逐件手動填寫。",
+        ? "尚未匯入已有防具清單。匯入後選擇職業即可參與方案符合。"
+        : "尚未匯入已有防具清單。匯入後可填入目前穿戴。",
       calculatorMode === "solve"
-        ? "No armor inventory imported. Import a DIM CSV, choose a class, and use owned armor in scratch-build planning."
-        : "No armor inventory imported. Import a DIM CSV to fill the equipped loadout, or enter each piece manually below."
+        ? "No owned-armor inventory imported. Import one and choose a class to match it against solutions."
+        : "No owned-armor inventory imported. Import one to fill the equipped loadout."
     )}</span></div>`;
     return;
   }
@@ -2707,6 +2521,7 @@ function updateImportSummary() {
 
 function clearImportedInventory() {
   importedInventory = [];
+  inventoryImportExpanded = false;
   setRequirement = { type: "none" };
   manualLocked = [];
   inventoryExoticSlotFilter = "";
@@ -2715,6 +2530,7 @@ function clearImportedInventory() {
   updateImportOptions();
   renderSetEffects();
   saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
 }
 
 function applyLoadoutItems(items) {
@@ -3263,6 +3079,8 @@ function saveUpgradeDraft() {
     importClassFilter,
     importTier5Only,
     inventory: importedInventory,
+    manualOwnedItems,
+    inventoryImportExpanded,
   });
 }
 
@@ -3273,7 +3091,7 @@ function loadUpgradeDraft() {
     : [];
   upgradeBuildState = UPGRADE_SLOTS.map((_, index) => normalizeUpgradePiece(draft?.pieces?.[index], index));
   setRequirement = draft?.setRequirement?.type ? draft.setRequirement : { type: 'none' };
-  inventoryExoticSlotFilter = ['helmet', 'arms', 'chest', 'legs'].includes(draft?.exoticSlotFilter)
+  inventoryExoticSlotFilter = EXOTIC_SLOT_ORDER.includes(draft?.exoticSlotFilter)
     ? draft.exoticSlotFilter
     : (['helmet', 'arms', 'chest', 'legs'].includes(draft?.fixedExoticSlot) ? draft.fixedExoticSlot : '');
   inventoryFixedExoticKey = typeof draft?.fixedExoticKey === 'string' ? draft.fixedExoticKey : '';
@@ -3281,6 +3099,11 @@ function loadUpgradeDraft() {
   importClassFilter = draft?.importClassFilter || '';
   importTier5Only = draft?.importTier5Only !== false;
   importedInventory = Array.isArray(draft?.inventory) ? draft.inventory : [];
+  manualOwnedItems = Array.isArray(draft?.manualOwnedItems)
+    ? draft.manualOwnedItems.filter(item => item?.manualOwned && UPGRADE_SLOTS.some(slot => slot.id === item.slot))
+    : [];
+  manualOwnedSequence = manualOwnedItems.length;
+  inventoryImportExpanded = importedInventory.length > 0 && draft?.inventoryImportExpanded !== false;
   const reassign = document.getElementById('upgradeReassignModifiers');
   if (reassign) reassign.checked = draft?.reassignModifiers !== false;
   for (const stat of STATS) {
@@ -3303,7 +3126,6 @@ function setCalculatorMode(mode, persist = true) {
   document.getElementById('btnUpgradeAnalyze').hidden = !isUpgrade;
   document.getElementById('saveBuildButton').hidden = isUpgrade;
   document.getElementById('upgradeResults').hidden = !isUpgrade || !lastUpgradeAnalysis;
-  document.getElementById('inventoryPlanResults').hidden = isUpgrade || lastInventoryPlans.length === 0;
   document.getElementById('inventoryResults').hidden = !isUpgrade || !lastInventoryResult?.results?.length;
   document.getElementById('floatJump').style.display = 'none';
   document.getElementById('messages').innerHTML = '';
@@ -4249,10 +4071,10 @@ Object.assign(window, {
   adjFragment,
   adjPlus3,
   analyzeArmorUpgrades,
+  addManualOwnedArmor,
   applyEquippedLoadout,
   applyNearestTargetSuggestion,
   balanceTargetsToBudget,
-  changeOwnedCount,
   changePageLanguage,
   clearAllBuilds,
   copyDimExportLink,
@@ -4266,10 +4088,10 @@ Object.assign(window, {
   handleUpgradeDragStart,
   handleUpgradeDrop,
   loadBuild,
+  removeManualOwnedArmor,
   refineWithPriorities,
   resetConstraints,
   resetTargetStats,
-  resortByOwned,
   saveBuild,
   selectInventorySolution,
   setCalculatorMode,
@@ -4279,6 +4101,7 @@ Object.assign(window, {
   sync5to10,
   toggleAllSolutions,
   toggleExoticMode,
+  toggleInventoryImportPanel,
   toggleOnlyPlus5Tuning,
   togglePlus3,
   updateImportOptions,
@@ -4287,9 +4110,8 @@ Object.assign(window, {
   updateUpgradeRequiredStat,
   updateExoticFramework,
   updateExoticPerkOptions,
-  updateOwnedCount,
-  updateOwnedPiece,
-  updateOwnedPiece2,
+  updateManualOwnedTertiaryOptions,
+  setManualOwnedEditorOpen,
   updateRefineActionState,
   updateUpgradeOption,
   updateUpgradePiece,

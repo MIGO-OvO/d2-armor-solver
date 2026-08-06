@@ -62,6 +62,16 @@ async function checkInventoryPlanning(browser) {
 
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    assert.equal(
+      await page.locator("#upgradeImportBody").count(),
+      1,
+      "the owned-armor import panel should expose a collapsible body",
+    );
+    assert.equal(
+      await page.locator("#upgradeImportBody").isHidden(),
+      true,
+      "the owned-armor import panel should start collapsed without an import",
+    );
     await page.evaluate(() => {
       const slots = ["helmet", "arms", "chest", "legs", "classItem"];
       const archetypes = [
@@ -129,6 +139,15 @@ async function checkInventoryPlanning(browser) {
     });
     await page.reload({ waitUntil: "networkidle" });
     assert.equal(
+      await page.locator("#upgradeImportBody").isVisible(),
+      true,
+      "a restored owned-armor import should open its controls",
+    );
+    await page.locator("#toggleInventoryImportButton").click();
+    assert.equal(await page.locator("#upgradeImportBody").isHidden(), true);
+    await page.locator("#toggleInventoryImportButton").click();
+    assert.equal(await page.locator("#upgradeImportBody").isVisible(), true);
+    assert.equal(
       await page.locator('.upgrade-import-actions button[onclick*="applyEquippedLoadout"]').count(),
       0,
       "scratch mode should not expose the equipped-loadout filler",
@@ -151,27 +170,72 @@ async function checkInventoryPlanning(browser) {
     assert.ok(fixedExoticValue, "imported Exotic should be available by name");
     await page.locator("#inventoryFixedExoticName").selectOption(fixedExoticValue);
     await page.evaluate(() => window.solve());
-    await page.locator("#inventoryPlanResults:not([hidden])").waitFor();
+    await page.locator("#ownedGearSection").waitFor({ state: "visible" });
+    assert.equal(
+      await page.locator("#piecesCard > h2").innerText(),
+      "Solution details",
+      "the loadout card should describe itself as solution details",
+    );
     assert.match(
-      await page.locator("#inventoryPlanResults").innerText(),
-      /owned|farm/i,
-      "standard solve should render inventory plan counts",
+      await page.locator("#piecesOutput .farm-requirements-title").innerText(),
+      /Still to farm/,
+      "solution details should retain the missing-armor section",
     );
     assert.ok(
-      await page.locator("#inventoryPlanResults .inventory-plan-piece.is-farm").count() > 0,
-      "a fixed Exotic slot without owned Exotics should produce a farm item",
+      await page.locator("#piecesOutput .farm-requirement-row").count() > 0,
+      "missing armor should be listed per slot",
     );
     assert.match(
-      await page.locator("#inventoryPlanResults .inventory-plan-piece.is-farm").first().innerText(),
-      /Exotic|frame/i,
-      "missing fixed Exotic should explain the frame to farm",
+      await page.locator("#piecesOutput .solution-tuning-primary").innerText(),
+      /Fixed \+5/,
+      "rolled +5 tuning should be the primary tuning information",
     );
-    await page.locator("#useExoticMode").check();
+    assert.match(
+      await page.locator("#piecesOutput .solution-tuning-secondary").innerText(),
+      /Suggested -5/,
+      "freely selected -5 tuning should be visually secondary",
+    );
     assert.equal(
-      await page.locator("#inventoryExoticSlotFilter").isDisabled(),
-      true,
-      "Exotic Class Item mode should disable regular Exotic slot selection",
+      await page.locator("#inventoryPlanResults").count(),
+      0,
+      "scratch mode should not render a second inventory-plan list",
     );
+    assert.match(
+      await page.locator("#ownedGearSection").innerText(),
+      /Owned (arms|chest|legs|classItem)/,
+      "the active solution should list matching armor from the imported inventory",
+    );
+    await page.locator("#ownedGearSection .manual-owned-editor summary").click();
+    await page.locator("#addManualOwnedButton").click();
+    assert.ok(
+      await page.locator("#ownedGearSection .manual-owned-list li").count() > 0,
+      "manually added armor should immediately update the active solution",
+    );
+    await page.locator("#inventoryExoticSlotFilter").selectOption("classItem");
+    assert.equal(
+      await page.locator("#useExoticMode").isChecked(),
+      true,
+      "choosing the class-item slot should enable Exotic Class Item mode",
+    );
+    assert.equal(
+      await page.locator("#exoticClass").inputValue(),
+      "hunter",
+      "the imported class should drive the Exotic Class Item class",
+    );
+    assert.match(
+      await page.locator("#inventoryFixedExoticName").innerText(),
+      /Relativism/,
+      "the class-item name should adapt to the selected class",
+    );
+    for (const [classId, classItemName] of [["titan", "Stoicism"], ["warlock", "Solipsism"]]) {
+      await page.locator("#importClass").selectOption(classId);
+      assert.equal(await page.locator("#exoticClass").inputValue(), classId);
+      assert.match(
+        await page.locator("#inventoryFixedExoticName").innerText(),
+        new RegExp(classItemName),
+        `the ${classId} class-item name should be selected automatically`,
+      );
+    }
     assert.deepEqual(browserErrors, []);
   } finally {
     await context.close();

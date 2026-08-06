@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ARCHETYPES, BASE_CONFIGS } from "../src/core/armor-model.mjs";
-import { rankInventoryPlans } from "../src/core/inventory-plan.mjs";
+import { ARCHETYPES, BASE_CONFIGS, createExoticConfig } from "../src/core/armor-model.mjs";
+import { rankInventoryPlans, assignmentCanReachExact } from "../src/core/inventory-plan.mjs";
+import { runSolver } from "../src/core/solver.mjs";
+import { normalizeDimItem, parseCsv } from "../src/core/dim-csv.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
 
@@ -114,7 +116,7 @@ test("set farming never assigns a regular set to the fixed Exotic slot", () => {
   assert.equal(plan.pieces.filter(piece => piece.farmSetHash === setHash).length, 4);
 });
 
-test("a named Exotic picks the closest roll among same-name inventory copies", () => {
+test("a named Exotic recommends the closest roll when no copy is usable", () => {
   const solution = makeSolution();
   const fixedExotic = {
     classId: "hunter",
@@ -122,12 +124,15 @@ test("a named Exotic picks the closest roll among same-name inventory copies", (
     hash: 9001,
     name: "Selected Exotic",
   };
+  // Both copies run a +3 Tuning mod, which cannot serve the solution's +5/-5
+  // slot; the closest roll is still recommended for farming reference.
   const closeRoll = makeItem(solution, 0, {
     id: "close-roll",
     hash: fixedExotic.hash,
     name: fixedExotic.name,
     exotic: true,
-    tuningTo: "weapons",
+    tuningMode: "plus3",
+    tuningTo: null,
   });
   const farRoll = makeItem(solution, 0, {
     id: "far-roll",
@@ -150,7 +155,7 @@ test("a named Exotic picks the closest roll among same-name inventory copies", (
   assert.equal(plan.farmCount, 1);
   assert.equal(plan.pieces[0].item, null);
   assert.equal(plan.pieces[0].closestItem.id, "close-roll");
-  assert.deepEqual(plan.pieces[0].closestMismatch.fields, ["tuningTo"]);
+  assert.deepEqual(plan.pieces[0].closestMismatch.fields, ["tuningMode"]);
 });
 
 test("Exotic Class Item solutions map the fixed config to the class item slot", () => {
@@ -170,4 +175,131 @@ test("Exotic Class Item solutions map the fixed config to the class item slot", 
   assert.equal(plan.pieces[0].slot, "classItem");
   assert.equal(plan.pieces[0].item.id, "class-exotic");
   assert.deepEqual(plan.pieces.slice(1).map(piece => piece.slot), ["helmet", "arms", "chest", "legs"]);
+});
+
+// ============================================================
+// REAL SOLUTIONS: fixed +5 roll matching is decided by feasibility
+// ============================================================
+const EXOTIC_PRIMARY = {
+  id: "assassin", name: "Spirit of the Assassin", primary: "melee",
+  secondary: "health", archetype: "Brawler",
+};
+const EXOTIC_SECONDARY = {
+  id: "cyrtarachne", name: "Spirit of the Cyrtarachne", order: ["grenade", "health"],
+};
+const EXOTIC_SETTINGS = {
+  classId: "hunter", classLabel: "Hunter", itemHash: 2809120022,
+  primaryPerkId: "assassin", secondaryPerkId: "cyrtarachne",
+  priorityOrder: [], config: createExoticConfig(EXOTIC_PRIMARY, EXOTIC_SECONDARY),
+};
+const SOLVE_TARGET = { health: 90, melee: 60, grenade: 45, super: 75, class: 60, weapons: 120 };
+
+function solveExoticSolution() {
+  return runSolver(SOLVE_TARGET, 0, 0, 0, {}, EXOTIC_SETTINGS)[0];
+}
+
+const DIM_HEADER = [
+  "Name", "Hash", "Id", "Rarity", "Tier", "Type", "Equippable", "Archetype",
+  "Tertiary Stat", "Tuning Stat", "Masterwork Tier", "Owner", "Equipped", "Power",
+  "Weapons", "Health", "Class", "Grenade", "Super", "Melee", "Total",
+  "Weapons (Base)", "Health (Base)", "Class (Base)", "Grenade (Base)",
+  "Super (Base)", "Melee (Base)", "Total (Base)",
+].join(",");
+
+// Relativism with the Assassin/Cyrtarachne frame (Brawler: melee 30 / health
+// 25 / grenade 20), tier 5, +5 melee / -5 health Tuning installed. The DIM
+// Archetype column is empty for Exotic Class Items.
+const DIM_EXOTIC_CLASS_ITEM_ROW = [
+  "Relativism", "2809120022", "relativism-1", "Exotic", "5", "猎人披风", "猎人",
+  "", "", "", "5", "Vault", "false", "500",
+  "10", "20", "10", "20", "10", "35", "105",
+  "5", "25", "5", "20", "5", "30", "90",
+].join(",");
+
+function makeExoticClassItemFromDIM() {
+  return normalizeDimItem(parseCsv([DIM_HEADER, DIM_EXOTIC_CLASS_ITEM_ROW].join("\n"))[0]);
+}
+
+function makeOwnedLegendary(solution, index, tuningTo) {
+  const config = solution.config[index];
+  // Index 0 is the Exotic Class Item slot; legendary indices 1-4 map to
+  // helmet/arms/chest/legs.
+  const slot = SLOT_ORDER[index - 1];
+  return {
+    id: `owned-leg-${index}`,
+    hash: 1000 + index,
+    name: `Owned Legendary ${index}`,
+    slot,
+    classId: "hunter",
+    tier: "5",
+    exotic: false,
+    archetypeId: ARCHETYPES.find(archetype => archetype.name === config.archetype)?.id,
+    tertiary: config.tertiary,
+    tuningMode: "shift",
+    tuningTo,
+    baseStats: config.baseStats,
+    setHash: null,
+  };
+}
+
+const STATS = ["health", "melee", "grenade", "super", "class", "weapons"];
+function rotatedRolls(solution, offset) {
+  return [1, 2, 3, 4].map(index => {
+    const wanted = solution.tuningAssignments[index].to;
+    return makeOwnedLegendary(solution, index, STATS[(STATS.indexOf(wanted) + offset) % 6]);
+  });
+}
+
+test("a DIM-imported Exotic Class Item matches its solution slot", () => {
+  const solution = solveExoticSolution();
+  const classItem = makeExoticClassItemFromDIM();
+  const legendaryPieces = [1, 2, 3, 4].map(index =>
+    makeOwnedLegendary(solution, index, solution.tuningAssignments[index].to)
+  );
+  const [plan] = rankInventoryPlans({
+    solutions: [solution],
+    items: [classItem, ...legendaryPieces],
+    classId: "hunter",
+  });
+
+  assert.equal(plan.ownedCount, 5);
+  assert.equal(plan.farmCount, 0);
+  assert.equal(plan.pieces[0].item.id, "relativism-1");
+  assert.equal(plan.feasible, true);
+});
+
+test("owned pieces with different fixed +5 rolls still match when the totals stay reachable", () => {
+  const solution = solveExoticSolution();
+  const classItem = makeExoticClassItemFromDIM();
+  // Helmet is missing: the loadout needs exactly one farmed piece (helmet).
+  const ownedArmsChestLegs = rotatedRolls(solution, 5).slice(1);
+  const [plan] = rankInventoryPlans({
+    solutions: [solution],
+    items: [classItem, ...ownedArmsChestLegs],
+    classId: "hunter",
+  });
+
+  assert.equal(plan.feasible, true);
+  assert.equal(plan.ownedCount, 4);
+  assert.equal(plan.farmCount, 1);
+  assert.equal(plan.pieces.find(piece => !piece.item).slot, "helmet");
+});
+
+test("pieces whose fixed +5 rolls break exactness are downgraded back to farm", () => {
+  const solution = solveExoticSolution();
+  const classItem = makeExoticClassItemFromDIM();
+  // All five owned, but the rotated +5 rolls make the exact totals unreachable.
+  const allOwned = [classItem, ...rotatedRolls(solution, 1)];
+  assert.equal(assignmentCanReachExact(solution, allOwned), false);
+  const [plan] = rankInventoryPlans({
+    solutions: [solution],
+    items: allOwned,
+    classId: "hunter",
+  });
+
+  // The repair downgrades the smallest number of pieces; the plan stays
+  // exactly reachable instead of claiming an impossible loadout.
+  assert.equal(plan.feasible, true);
+  assert.equal(plan.farmCount, 1);
+  assert.equal(plan.pieces.find(piece => !piece.item).slot, "arms");
 });
