@@ -1,14 +1,12 @@
-/* global __BUNGIE_OAUTH_CLIENT_ID__, __BUNGIE_OAUTH_CLIENT_SECRET__ */
+/* global __BUNGIE_API_KEY__, __BUNGIE_OAUTH_CLIENT_ID__, __BUNGIE_OAUTH_CLIENT_SECRET__ */
 // Bungie OAuth token client.
 //
 // The __BUNGIE_*__ identifiers are injected at build time by Vite define and
 // are plain browser globals; tests inject fakes via globalThis.
 //
 // Module layout: token storage / helpers first, then the OAuth flows, then the
-// FatalTokenError / NetworkError classes. T4 appends the throttled bungieFetch
-// wrapper (which uses __BUNGIE_API_KEY__ — declare it in the /* global */
-// comment above at that point), T5 appends membership resolution — both go at
-// the bottom of this file.
+// errors, then the throttled bungieFetch wrapper (T4). T5 appends membership
+// resolution at the bottom of this file.
 
 export const TOKEN_STORAGE_KEY = "d2_armor_bungie_token_v1";
 
@@ -165,5 +163,85 @@ export class NetworkError extends Error {
   }
 }
 
-// --- T4 appends: throttled bungieFetch wrapper ---
+export class ApiError extends Error {
+  constructor(data, status) {
+    super(data?.ErrorStatus || `Bungie API error (ErrorCode ${data?.ErrorCode ?? "unknown"})`);
+    this.name = "ApiError";
+    this.errorCode = data?.ErrorCode ?? null;
+    this.status = status ?? null;
+    this.data = data ?? null;
+  }
+}
+
+export class ThrottleError extends Error {
+  constructor(retrySeconds) {
+    super(`Bungie API throttled; retry after ${retrySeconds}s`);
+    this.name = "ThrottleError";
+    this.retrySeconds = retrySeconds;
+  }
+}
+
+export class ApiKeyError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ApiKeyError";
+  }
+}
+
+// --- T4: throttled bungieFetch wrapper ---
+
+const BUNGIE_API_BASE = "https://www.bungie.net/Platform";
+
+const THROTTLE_CODES = new Set([36, 51]); // ThrottleLimitExceeded*, PerEndpointRequestThrottleExceeded
+
+// Bungie throttles with HTTP 200 + ErrorCode 36/51 (ThrottleSeconds present)
+// or any body carrying a numeric ThrottleSeconds field.
+function throttleSeconds(data) {
+  if (!data || typeof data !== "object") return null;
+  if (typeof data.ThrottleSeconds === "number") return data.ThrottleSeconds;
+  if (THROTTLE_CODES.has(data.ErrorCode)) return 5; // no ThrottleSeconds: default wait
+  return null;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Throttle-only retry loop. 401/expired-token responses are NOT retried here
+// (that is the caller's responsibility, T10/T11); they surface as ApiError.
+export async function bungieFetch(path, { auth = true, retries = 3 } = {}) {
+  const url = path.startsWith("/") ? `${BUNGIE_API_BASE}${path}` : `${BUNGIE_API_BASE}/${path}`;
+  const headers = { "X-API-Key": __BUNGIE_API_KEY__ };
+  if (auth) {
+    headers.Authorization = `Bearer ${await getValidAccessToken()}`;
+  }
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, { headers, credentials: "omit" });
+    } catch (cause) {
+      throw new NetworkError(`Bungie API request failed: ${url}`, { cause });
+    }
+    if (res.status === 403) {
+      throw new ApiKeyError("Bungie API key rejected (HTTP 403)");
+    }
+    const data = await res.json().catch(() => ({}));
+    const retrySeconds = throttleSeconds(data);
+    if (retrySeconds !== null) {
+      if (attempt < retries) {
+        await sleep(retrySeconds * 1000);
+        continue;
+      }
+      throw new ThrottleError(retrySeconds);
+    }
+    if (data.ErrorCode !== undefined && data.ErrorCode !== 1) {
+      throw new ApiError(data, res.status);
+    }
+    if (!res.ok) {
+      throw new ApiError({ ErrorStatus: `HTTP ${res.status}` }, res.status);
+    }
+    return data.Response;
+  }
+}
+
 // --- T5 appends: membership resolution ---

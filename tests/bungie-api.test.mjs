@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ApiError,
+  ApiKeyError,
   buildAuthorizeUrl,
+  bungieFetch,
   clearToken,
   exchangeCodeForToken,
   FatalTokenError,
@@ -9,12 +12,14 @@ import {
   getValidAccessToken,
   NetworkError,
   saveToken,
+  ThrottleError,
   TOKEN_STORAGE_KEY,
 } from "../src/core/bungie-api.mjs";
 
 // The real values are injected at build time by Vite define; tests inject fakes.
 globalThis.__BUNGIE_OAUTH_CLIENT_ID__ = "test-client";
 globalThis.__BUNGIE_OAUTH_CLIENT_SECRET__ = "test-secret";
+globalThis.__BUNGIE_API_KEY__ = "test-api-key";
 
 const ORIG_FETCH = globalThis.fetch;
 const ORIG_LOCAL_STORAGE = globalThis.localStorage;
@@ -271,6 +276,170 @@ test("getToken returns null when localStorage is unavailable", () => {
   delete globalThis.localStorage;
   try {
     assert.equal(getToken(), null);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+// --- T4: throttled bungieFetch ---
+
+function liveToken() {
+  return {
+    accessToken: "live-access",
+    refreshToken: "r",
+    bungieMembershipId: "123",
+    expiresIn: 3600,
+    refreshExpiresIn: 7776000,
+    obtainedAt: Date.now(),
+  };
+}
+
+function businessResponse() {
+  return { Response: { profiles: [{ membershipId: "123" }] }, ErrorCode: 1, ErrorStatus: "Ok" };
+}
+
+test("bungieFetch sends X-API-Key and Bearer auth and unwraps Response", async () => {
+  installLocalStorage();
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return jsonResponse(businessResponse());
+  };
+  try {
+    saveToken(liveToken());
+    const result = await bungieFetch("/Destiny2/Profile/123");
+    assert.deepEqual(result, { profiles: [{ membershipId: "123" }] });
+    assert.equal(requests.length, 1);
+    const { url, options } = requests[0];
+    assert.equal(url, "https://www.bungie.net/Platform/Destiny2/Profile/123");
+    assert.equal(options.headers["X-API-Key"], "test-api-key");
+    assert.equal(options.headers.Authorization, "Bearer live-access");
+    assert.equal(options.credentials, "omit");
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("bungieFetch retries once after a ThrottleSeconds response", async () => {
+  installLocalStorage();
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return requests.length === 1
+      ? jsonResponse({ ErrorCode: 36, ErrorStatus: "ThrottleLimitExceeded", ThrottleSeconds: 0 })
+      : jsonResponse(businessResponse());
+  };
+  try {
+    saveToken(liveToken());
+    const result = await bungieFetch("/Destiny2/Profile/123");
+    assert.deepEqual(result, { profiles: [{ membershipId: "123" }] });
+    assert.equal(requests.length, 2);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("bungieFetch throws ThrottleError when throttling exceeds the retry budget", async () => {
+  installLocalStorage();
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return jsonResponse({ ErrorCode: 51, ErrorStatus: "PerEndpointRequestThrottleExceeded", ThrottleSeconds: 0 });
+  };
+  try {
+    saveToken(liveToken());
+    await assert.rejects(bungieFetch("/Destiny2/Profile/123", { retries: 2 }), (error) => {
+      assert.ok(error instanceof ThrottleError);
+      assert.equal(error.name, "ThrottleError");
+      assert.equal(typeof error.retrySeconds, "number");
+      return true;
+    });
+    assert.equal(requestCount, 3);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("bungieFetch throws ApiError for non-throttle error codes without retrying", async () => {
+  installLocalStorage();
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return jsonResponse({ ErrorCode: 5, ErrorStatus: "ParamInvalid" });
+  };
+  try {
+    saveToken(liveToken());
+    await assert.rejects(bungieFetch("/Destiny2/Profile/123"), (error) => {
+      assert.ok(error instanceof ApiError);
+      assert.equal(error.name, "ApiError");
+      assert.equal(error.errorCode, 5);
+      return true;
+    });
+    assert.equal(requestCount, 1);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("bungieFetch throws ApiKeyError on HTTP 403", async () => {
+  installLocalStorage();
+  globalThis.fetch = async () =>
+    jsonResponse({ ErrorCode: 5, ErrorStatus: "InvalidApiKey" }, { ok: false, status: 403 });
+  try {
+    saveToken(liveToken());
+    await assert.rejects(bungieFetch("/Destiny2/Profile/123"), (error) => {
+      assert.ok(error instanceof ApiKeyError);
+      assert.equal(error.name, "ApiKeyError");
+      return true;
+    });
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("bungieFetch wraps network failures in NetworkError", async () => {
+  installLocalStorage();
+  globalThis.fetch = async () => {
+    throw new TypeError("network down");
+  };
+  try {
+    saveToken(liveToken());
+    await assert.rejects(bungieFetch("/Destiny2/Profile/123"), (error) => {
+      assert.ok(error instanceof NetworkError);
+      return true;
+    });
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("bungieFetch returns the raw Response wrapper only for ErrorCode 1", async () => {
+  installLocalStorage();
+  globalThis.fetch = async () =>
+    jsonResponse({ Response: "payload", ErrorCode: 1, ErrorStatus: "Ok" });
+  try {
+    saveToken(liveToken());
+    assert.equal(await bungieFetch("/User/GetBungieNetUserById/1"), "payload");
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("bungieFetch with auth refreshes an expired token before the API call", async () => {
+  installLocalStorage();
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    if (url.includes("/App/OAuth/token/")) return jsonResponse(refreshResponse());
+    return jsonResponse(businessResponse());
+  };
+  try {
+    saveToken(expiredToken());
+    const result = await bungieFetch("/Destiny2/Profile/123");
+    assert.deepEqual(result, { profiles: [{ membershipId: "123" }] });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].options.body.get("grant_type"), "refresh_token");
+    assert.equal(requests[1].options.headers.Authorization, "Bearer fresh-access");
   } finally {
     restoreGlobals();
   }
