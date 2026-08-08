@@ -10,6 +10,7 @@ import {
   FatalTokenError,
   getToken,
   getValidAccessToken,
+  isTokenExpired,
   NetworkError,
   NoMembershipError,
   resolveMemberships,
@@ -283,6 +284,18 @@ test("getToken returns null when localStorage is unavailable", () => {
   }
 });
 
+test("isTokenExpired treats a missing or non-numeric expiresIn as expired", () => {
+  // No expiresIn: undefined + number is NaN and NaN <= x is false, which
+  // would otherwise keep the malformed token alive forever (F2 fix).
+  assert.equal(isTokenExpired({ accessToken: "x" }), true);
+  assert.equal(isTokenExpired({ accessToken: "x", expiresIn: "3600", obtainedAt: Date.now() }), true);
+  assert.equal(isTokenExpired(null), true);
+  const live = { accessToken: "x", expiresIn: 3600, obtainedAt: Date.now() };
+  assert.equal(isTokenExpired(live), false);
+  const stale = { accessToken: "x", expiresIn: 3600, obtainedAt: Date.now() - 3600_100 };
+  assert.equal(isTokenExpired(stale), true);
+});
+
 // --- T4: throttled bungieFetch ---
 
 function liveToken() {
@@ -337,6 +350,31 @@ test("bungieFetch retries once after a ThrottleSeconds response", async () => {
     assert.deepEqual(result, { profiles: [{ membershipId: "123" }] });
     assert.equal(requests.length, 2);
   } finally {
+    restoreGlobals();
+  }
+});
+
+test("throttle sleep is capped at 30s even for extreme ThrottleSeconds", async () => {
+  installLocalStorage();
+  const delays = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  // Fake timer: record the delay and fire immediately so the test never
+  // actually waits (a 9999s wait is not an option).
+  globalThis.setTimeout = (fn, ms) => { delays.push(ms); fn(); return 0; };
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return requestCount === 1
+      ? jsonResponse({ ErrorCode: 36, ErrorStatus: "ThrottleLimitExceeded", ThrottleSeconds: 9999 })
+      : jsonResponse(businessResponse());
+  };
+  try {
+    saveToken(liveToken());
+    await bungieFetch("/Destiny2/Profile/123");
+    assert.deepEqual(delays, [30_000], "9999s ThrottleSeconds must wait at most 30s");
+    assert.equal(requestCount, 2);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
     restoreGlobals();
   }
 });

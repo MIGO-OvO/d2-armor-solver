@@ -2394,7 +2394,11 @@ function bungieErrorMessage(error) {
       "Bungie API key is invalid or not approved. Check your app settings on the Bungie portal.",
     );
   }
-  if (error instanceof FatalTokenError) {
+  // A 401 ApiError means the token Bungie holds is dead (revoked or clock
+  // skew): the wall-clock expiry check in getValidAccessToken can't see it,
+  // so retrying is doomed. Treat it exactly like FatalTokenError: clear the
+  // token and drop the user back to the logged-out state.
+  if (error instanceof FatalTokenError || (error instanceof ApiError && error.status === 401)) {
     return l(
       "登录已过期，请重新登录。",
       "登入已過期，請重新登入。",
@@ -2429,10 +2433,11 @@ function bungieErrorMessage(error) {
   );
 }
 
-// Shared Bungie failure path: a dead token drops the user back to the
-// logged-out state; everything else just renders the classified message.
+// Shared Bungie failure path: a dead token (FatalTokenError, or an ApiError
+// with HTTP 401 — Bungie rejected the access token) drops the user back to
+// the logged-out state; everything else just renders the classified message.
 function handleBungieAuthError(error) {
-  if (error instanceof FatalTokenError) {
+  if (error instanceof FatalTokenError || (error instanceof ApiError && error.status === 401)) {
     clearToken();
     try {
       localStorage.removeItem(BUNGIE_DISPLAY_NAME_KEY);
@@ -2572,7 +2577,14 @@ async function handleBungieOAuthCallback() {
     return;
   }
   sessionStorage.removeItem("bungieOAuthState");
-  history.replaceState({}, "", window.location.pathname + window.location.search.replace(/[?&](code|state)=[^&]*/g, ""));
+  // Strip the OAuth code/state from the URL, keeping any other query
+  // parameters. Rebuilding via URLSearchParams (same `params` object read
+  // above) avoids the dangling "&" a regex-based strip leaves behind when
+  // code/state coexist with other parameters.
+  params.delete("code");
+  params.delete("state");
+  const cleanQuery = params.toString();
+  history.replaceState({}, "", window.location.pathname + (cleanQuery ? `?${cleanQuery}` : ""));
   try {
     const token = await exchangeCodeForToken(code);
     saveToken(token);

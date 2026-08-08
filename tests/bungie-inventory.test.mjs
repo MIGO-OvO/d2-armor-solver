@@ -6,6 +6,7 @@ import {
   buildArmorInventory,
   normalizeApiItem,
 } from "../src/core/bungie-inventory.mjs";
+import { getEffectiveBaseStats } from "../src/core/dim-csv.mjs";
 
 // Synthetic GetProfile fixture (tests/fixtures/synthetic-profile-fixture.json):
 // hand-built to the Bungie API shape until a real fixture lands (needs a user
@@ -144,6 +145,32 @@ test("masterwork tier 10 is kept; baseStats subtract the +5 non-framework bonus"
   assert.deepEqual(item.baseStats, {
     health: 5, melee: 5, grenade: 20, super: 25, class: 5, weapons: 30,
   });
+});
+
+test("framework null (tertiary inference failed) leaves baseStats untouched, matching the CSV path", () => {
+  // All stats read 0, so neither archetype nor tertiary can be inferred and
+  // the framework is null — despite a full masterwork tier (10). baseStats
+  // must NOT subtract the masterwork bonus: dim-csv's getEffectiveBaseStats
+  // returns baseStats unchanged for a null framework, and the API path is
+  // its inverse (F2 review decision, bungie-inventory.mjs:162-172).
+  const apiItem = {
+    bucketHash: 3448274439, // helmet
+    itemHash: 656307180,
+    itemInstanceId: "9000000000000000009",
+  };
+  const instances = {
+    "9000000000000000009": { energyCapacity: 10, stats: {} },
+  };
+  const item = normalizeApiItem(apiItem, context({ instances }));
+  const allZero = { health: 0, melee: 0, grenade: 0, super: 0, class: 0, weapons: 0 };
+  assert.equal(item.masterworkTier, 10);
+  assert.deepEqual(item.baseStats, allZero, "no masterwork subtraction without a framework");
+  assert.deepEqual(
+    getEffectiveBaseStats(item),
+    allZero,
+    "CSV-path effective stats also leave a null-framework item unchanged",
+  );
+  assert.deepEqual(item.optimizationBaseStats, allZero);
 });
 
 test("name resolves per page language: zh-chs->zh, zh-cht->zhCht, en->en, unknown->en", () => {

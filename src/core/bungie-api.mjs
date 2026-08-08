@@ -15,7 +15,11 @@ const TOKEN_ENDPOINT = "https://www.bungie.net/Platform/App/OAuth/token/";
 // --- token storage (lazy localStorage: no top-level DOM access) ---
 
 export function saveToken(token) {
-  globalThis.localStorage?.setItem(TOKEN_STORAGE_KEY, JSON.stringify(token));
+  try {
+    globalThis.localStorage?.setItem(TOKEN_STORAGE_KEY, JSON.stringify(token));
+  } catch {
+    // storage unavailable (e.g. Firefox file://): token just won't persist
+  }
 }
 
 export function getToken() {
@@ -30,7 +34,11 @@ export function getToken() {
 }
 
 export function clearToken() {
-  globalThis.localStorage?.removeItem(TOKEN_STORAGE_KEY);
+  try {
+    globalThis.localStorage?.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // storage unavailable: nothing to clear
+  }
 }
 
 export function hasToken() {
@@ -39,8 +47,11 @@ export function hasToken() {
 
 // ponytail: expiry checks only the access window; a refresh whose refresh
 // token is itself dead falls out via Bungie's invalid_grant -> FatalTokenError.
+// A token missing a numeric expiresIn (corrupt storage) is treated as expired
+// so it is never reused: `undefined + number` is NaN and NaN <= x is false.
 export function isTokenExpired(token) {
-  return !token || token.obtainedAt + token.expiresIn * 1000 <= Date.now();
+  return !token || typeof token.expiresIn !== "number"
+    || token.obtainedAt + token.expiresIn * 1000 <= Date.now();
 }
 
 // --- OAuth flows ---
@@ -229,7 +240,9 @@ export async function bungieFetch(path, { auth = true, retries = 3 } = {}) {
     const retrySeconds = throttleSeconds(data);
     if (retrySeconds !== null) {
       if (attempt < retries) {
-        await sleep(retrySeconds * 1000);
+        // ponytail: cap the wait at 30s; Bungie's ThrottleSeconds can be
+        // absurdly large and an uncapped sleep would freeze the UI.
+        await sleep(Math.min(retrySeconds, 30) * 1000);
         continue;
       }
       throw new ThrottleError(retrySeconds);

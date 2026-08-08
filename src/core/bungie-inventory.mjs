@@ -162,6 +162,13 @@ export function normalizeApiItem(apiItem, context = {}) {
   // Bungie instance stats include the masterwork bonus on the three
   // non-framework stats; subtract it to recover the rolled base stats
   // (inverse of getEffectiveBaseStats, dim-csv.mjs:146-157).
+  //
+  // Framework-null decision: when the framework can't be inferred (tertiary
+  // inference failed), keep the stats as-is — getEffectiveBaseStats returns
+  // baseStats unchanged for a null framework, so subtracting here would
+  // diverge from the CSV path. (A null framework also implies every
+  // non-framework stat reads 0, so the masterwork bonus is 0 in any reachable
+  // case and the subtraction would be a no-op anyway.)
   const baseStats = {};
   for (const stat of STATS) {
     const value = rawStats[stat] || 0;
