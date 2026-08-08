@@ -1,3 +1,4 @@
+/* global __BUNGIE_OAUTH_CLIENT_ID__ */
 import {
   ARCHETYPES,
   DEFAULT_TARGETS,
@@ -48,6 +49,21 @@ import {
   parseCsv,
   pickCurrentLoadout,
 } from "./core/dim-csv.mjs";
+import {
+  ApiError,
+  ApiKeyError,
+  FatalTokenError,
+  NetworkError,
+  NoMembershipError,
+  ThrottleError,
+  buildAuthorizeUrl,
+  clearToken,
+  exchangeCodeForToken,
+  getToken,
+  hasToken,
+  resolveMemberships,
+  saveToken,
+} from "./core/bungie-api.mjs";
 import {
   getActiveSetBonuses,
   getArmorSetByHash,
@@ -2270,6 +2286,7 @@ function renderUpgradeImportPanel() {
           <span class="btn upgrade-import-primary">${icon("folder")}${importedInventory.length > 0 ? l("重新导入", "重新匯入", "Replace inventory") : l("导入清单", "匯入清單", "Import inventory")}</span>
           <input type="file" id="dimCsvFile" accept=".csv,text/csv" onchange="handleDimCsvFile(this)">
         </label>
+        <span class="bungie-auth" id="bungieAuthArea" aria-live="polite"></span>
         <button type="button" class="btn upgrade-import-toggle" id="toggleInventoryImportButton" aria-expanded="${inventoryImportExpanded}" aria-controls="upgradeImportBody" onclick="toggleInventoryImportPanel()">${icon(inventoryImportExpanded ? 'up' : 'down')}<span>${toggleLabel}</span></button>
       </div>
     </div>
@@ -2321,6 +2338,7 @@ function renderUpgradeImportPanel() {
   updateImportSummary();
   updateInventorySolveOptions();
   renderSetEffects();
+  renderBungieAuthState();
 }
 
 function toggleInventoryImportPanel() {
@@ -2337,6 +2355,149 @@ function showImportMessage(text, tone = "error") {
   const el = document.getElementById("upgradeImportSummary");
   if (!el) return;
   el.innerHTML = `<div class="msg ${tone}">${icon(tone === "error" ? "block" : "check")}<span>${escapeHtml(text)}</span></div>`;
+}
+
+// --- Bungie OAuth sign-in (T10) ---
+
+const BUNGIE_DISPLAY_NAME_KEY = "d2_armor_bungie_display_name_v1";
+
+function getBungieDisplayName() {
+  try {
+    return localStorage.getItem(BUNGIE_DISPLAY_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function bungieErrorMessage(error) {
+  if (error instanceof NetworkError) {
+    return l(
+      "网络错误，无法连接 Bungie。",
+      "網路錯誤，無法連線 Bungie。",
+      "Network error while contacting Bungie.",
+    );
+  }
+  if (error instanceof NoMembershipError) {
+    return l(
+      "该账号没有 Destiny 守护者档案。",
+      "該帳號沒有 Destiny 守護者檔案。",
+      "No Destiny membership found for this account.",
+    );
+  }
+  if (error instanceof FatalTokenError || error instanceof ApiError || error instanceof ApiKeyError || error instanceof ThrottleError) {
+    return l(
+      "Bungie 登录已失效，请重新登录。",
+      "Bungie 登入已失效，請重新登入。",
+      "Bungie sign-in is no longer valid. Sign in again.",
+    );
+  }
+  return l(
+    "Bungie 登录失败，请重试。",
+    "Bungie 登入失敗，請重試。",
+    "Bungie sign-in failed. Try again.",
+  );
+}
+
+function renderBungieAuthState() {
+  const area = document.getElementById("bungieAuthArea");
+  if (!area) return;
+  if (!__BUNGIE_OAUTH_CLIENT_ID__) {
+    area.innerHTML = "";
+    return;
+  }
+  if (hasToken()) {
+    area.innerHTML =
+      `<span class="bungie-auth-name">${escapeHtml(getBungieDisplayName())}</span>` +
+      `<button type="button" class="btn" onclick="refreshFromBungie()">${icon("refresh")}${l("刷新库存", "重新整理庫存", "Refresh inventory")}</button>` +
+      `<button type="button" class="btn" onclick="bungieLogout()">${l("登出", "登出", "Sign out")}</button>`;
+  } else {
+    area.innerHTML = `<button type="button" class="btn" id="bungieLoginButton" onclick="bungieLogin()">${l("Bungie 登录", "Bungie 登入", "Bungie login")}</button>`;
+  }
+}
+
+function bungieLogin() {
+  const state = crypto.randomUUID();
+  try {
+    sessionStorage.setItem("bungieOAuthState", state);
+  } catch {
+    // sessionStorage unavailable: the state check on return falls through and errors
+  }
+  window.location.href = buildAuthorizeUrl(state);
+}
+
+function bungieLogout() {
+  clearToken();
+  try {
+    localStorage.removeItem(BUNGIE_DISPLAY_NAME_KEY);
+  } catch {
+    // ignore storage failures
+  }
+  renderBungieAuthState();
+}
+
+// T10 minimum: verifies the stored token still resolves a membership and
+// refreshes the account name. T11 replaces this with real inventory pulls.
+async function refreshFromBungie() {
+  if (!getToken()) {
+    showImportMessage(l(
+      "尚未登录 Bungie。",
+      "尚未登入 Bungie。",
+      "Not signed in to Bungie.",
+    ));
+    return;
+  }
+  try {
+    const memberships = await resolveMemberships();
+    const displayName = memberships.displayName || "";
+    try {
+      localStorage.setItem(BUNGIE_DISPLAY_NAME_KEY, displayName);
+    } catch {
+      // ignore storage failures
+    }
+    renderBungieAuthState();
+    showImportMessage(l(
+      `已登录为 ${displayName}。`,
+      `已登入為 ${displayName}。`,
+      `Signed in as ${displayName}.`,
+    ), "info");
+  } catch (error) {
+    renderBungieAuthState();
+    showImportMessage(bungieErrorMessage(error));
+  }
+}
+
+async function handleBungieOAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  if (code === null) {
+    renderBungieAuthState();
+    return;
+  }
+  const expectedState = sessionStorage.getItem("bungieOAuthState");
+  if (!expectedState || params.get("state") !== expectedState) {
+    showImportMessage(l(
+      "登录状态校验失败，请重试。",
+      "登入狀態驗證失敗，請重試。",
+      "OAuth state check failed. Try again.",
+    ));
+    return;
+  }
+  sessionStorage.removeItem("bungieOAuthState");
+  history.replaceState({}, "", window.location.pathname + window.location.search.replace(/[?&](code|state)=[^&]*/g, ""));
+  try {
+    const token = await exchangeCodeForToken(code);
+    saveToken(token);
+    const memberships = await resolveMemberships();
+    const displayName = memberships.displayName || "";
+    try {
+      localStorage.setItem(BUNGIE_DISPLAY_NAME_KEY, displayName);
+    } catch {
+      // ignore storage failures
+    }
+    renderBungieAuthState();
+  } catch (error) {
+    showImportMessage(bungieErrorMessage(error));
+  }
 }
 
 function handleDimCsvFile(input) {
@@ -4114,6 +4275,8 @@ Object.assign(window, {
   applyEquippedLoadout,
   applyNearestTargetSuggestion,
   balanceTargetsToBudget,
+  bungieLogin,
+  bungieLogout,
   changePageLanguage,
   clearAllBuilds,
   copyDimExportLink,
@@ -4129,6 +4292,7 @@ Object.assign(window, {
   loadBuild,
   removeManualOwnedArmor,
   refineWithPriorities,
+  refreshFromBungie,
   resetConstraints,
   resetTargetStats,
   saveBuild,
@@ -4182,3 +4346,4 @@ loadCurrentDraft();
 renderSavedBuilds();
 initializeUpgradeOptimizer();
 initializeFloatingJumpVisibility();
+handleBungieOAuthCallback();

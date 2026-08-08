@@ -1287,6 +1287,17 @@ input[type="checkbox"]:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
 }
+.bungie-auth {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bungie-auth-name {
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
 .upgrade-import-state {
   padding: 5px 9px;
   border: 1px solid var(--border-subtle);
