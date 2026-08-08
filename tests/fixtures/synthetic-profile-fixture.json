@@ -1,0 +1,268 @@
+{
+  "_meta": "Synthetic Bungie GetProfile response, hand-built to the real API shape (real fixture blocked on user API key). instanceIds are fake ('100000000000000000N'); weapon hashes are fake (900000000N). Bucket hashes are the real Bungie ones.",
+  "ErrorCode": 1,
+  "Response": {
+    "data": {
+      "profile": {
+        "data": {
+          "userInfo": {
+            "membershipType": 3,
+            "membershipId": "4611686018470000000",
+            "displayName": "Synthetic Guardian"
+          }
+        }
+      },
+      "profileInventory": {
+        "data": {
+          "items": [
+            {
+              "itemHash": 656307180,
+              "itemInstanceId": "1000000000000000002",
+              "quantity": 1,
+              "bindings": 0,
+              "location": 0,
+              "transferStatus": 1,
+              "lockable": true,
+              "state": 0,
+              "bucketHash": 3448274439
+            },
+            {
+              "itemHash": 99093622,
+              "itemInstanceId": "1000000000000000003",
+              "quantity": 1,
+              "bindings": 0,
+              "location": 0,
+              "transferStatus": 1,
+              "lockable": true,
+              "state": 0,
+              "bucketHash": 3448274439
+            },
+            {
+              "itemHash": 2405271938,
+              "itemInstanceId": "1000000000000000004",
+              "quantity": 1,
+              "bindings": 0,
+              "location": 0,
+              "transferStatus": 1,
+              "lockable": true,
+              "state": 0,
+              "bucketHash": 20886954
+            },
+            {
+              "itemHash": 123456789,
+              "itemInstanceId": "1000000000000000008",
+              "quantity": 1,
+              "bindings": 0,
+              "location": 0,
+              "transferStatus": 1,
+              "lockable": true,
+              "state": 0,
+              "bucketHash": 14239492
+            },
+            {
+              "itemHash": 9000000002,
+              "itemInstanceId": "1000000000000000006",
+              "quantity": 1,
+              "bindings": 0,
+              "location": 0,
+              "transferStatus": 1,
+              "lockable": true,
+              "state": 0,
+              "bucketHash": 2465295065
+            },
+            {
+              "itemHash": 9000000003,
+              "itemInstanceId": "1000000000000000007",
+              "quantity": 1,
+              "bindings": 0,
+              "location": 0,
+              "transferStatus": 1,
+              "lockable": true,
+              "state": 0,
+              "bucketHash": 953998645
+            }
+          ]
+        }
+      },
+      "characters": {
+        "data": {
+          "2305843009471208001": {
+            "characterId": "2305843009471208001",
+            "classType": 1,
+            "light": 2020
+          },
+          "2305843009471208002": {
+            "characterId": "2305843009471208002",
+            "classType": 2,
+            "light": 2015
+          }
+        }
+      },
+      "characterInventories": {
+        "data": {
+          "2305843009471208001": {
+            "items": [
+              {
+                "itemHash": 99093622,
+                "itemInstanceId": "1000000000000000003",
+                "quantity": 1,
+                "bindings": 0,
+                "location": 0,
+                "transferStatus": 1,
+                "lockable": true,
+                "state": 0,
+                "bucketHash": 3448274439
+              },
+              {
+                "itemHash": 9000000001,
+                "itemInstanceId": "1000000000000000005",
+                "quantity": 1,
+                "bindings": 0,
+                "location": 0,
+                "transferStatus": 1,
+                "lockable": true,
+                "state": 0,
+                "bucketHash": 1498876634
+              }
+            ]
+          },
+          "2305843009471208002": {
+            "items": []
+          }
+        }
+      },
+      "characterEquipment": {
+        "data": {
+          "2305843009471208001": {
+            "items": [
+              {
+                "itemHash": 2809120022,
+                "itemInstanceId": "1000000000000000001",
+                "quantity": 1,
+                "bindings": 0,
+                "location": 1,
+                "transferStatus": 0,
+                "lockable": true,
+                "state": 0,
+                "bucketHash": 1585787867
+              }
+            ]
+          },
+          "2305843009471208002": {
+            "items": []
+          }
+        }
+      },
+      "itemComponents": {
+        "instances": {
+          "data": {
+            "1000000000000000001": {
+              "itemLevel": 1,
+              "quality": 0,
+              "isEquipped": true,
+              "canEquip": true,
+              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
+              "primaryStat": { "statHash": 1935470627, "value": 2010 },
+              "stats": {
+                "2996146975": 5,
+                "392767087": 25,
+                "1943323491": 5,
+                "1735777505": 20,
+                "144602215": 5,
+                "4244567218": 30
+              }
+            },
+            "1000000000000000002": {
+              "itemLevel": 1,
+              "quality": 0,
+              "isEquipped": false,
+              "canEquip": true,
+              "energyCapacity": { "energyCapacity": 10, "energyUsed": 0, "energyUnused": 10 },
+              "primaryStat": { "statHash": 1935470627, "value": 2020 },
+              "stats": {
+                "2996146975": 30,
+                "392767087": 10,
+                "1943323491": 10,
+                "1735777505": 20,
+                "144602215": 25,
+                "4244567218": 10
+              }
+            },
+            "1000000000000000003": {
+              "itemLevel": 1,
+              "quality": 0,
+              "isEquipped": false,
+              "canEquip": true,
+              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
+              "primaryStat": { "statHash": 1935470627, "value": 2015 },
+              "stats": {
+                "2996146975": 30,
+                "392767087": 5,
+                "1943323491": 5,
+                "1735777505": 20,
+                "144602215": 25,
+                "4244567218": 5
+              }
+            },
+            "1000000000000000004": {
+              "itemLevel": 1,
+              "quality": 0,
+              "isEquipped": false,
+              "canEquip": true,
+              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
+              "primaryStat": { "statHash": 1935470627, "value": 2012 },
+              "stats": {
+                "2996146975": 5,
+                "392767087": 25,
+                "1943323491": 5,
+                "1735777505": 5,
+                "144602215": 20,
+                "4244567218": 30
+              }
+            },
+            "1000000000000000008": {
+              "itemLevel": 1,
+              "quality": 0,
+              "isEquipped": false,
+              "canEquip": true,
+              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
+              "primaryStat": { "statHash": 1935470627, "value": 2005 },
+              "stats": {
+                "2996146975": 5,
+                "392767087": 5,
+                "1943323491": 25,
+                "1735777505": 30,
+                "144602215": 20,
+                "4244567218": 5
+              }
+            }
+          }
+        },
+        "sockets": {
+          "data": {
+            "1000000000000000003": {
+              "sockets": [
+                { "plugHash": 4183296050, "isEnabled": true, "isVisible": true },
+                { "plugHash": 0, "isEnabled": false, "isVisible": true }
+              ]
+            },
+            "1000000000000000004": {
+              "sockets": [
+                { "plugHash": 2125798995, "isEnabled": true, "isVisible": true }
+              ]
+            }
+          }
+        },
+        "plugStates": {
+          "data": {
+            "1000000000000000003": {
+              "plugs": [
+                { "plugHash": 4183296050, "plugObjectives": [] }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
