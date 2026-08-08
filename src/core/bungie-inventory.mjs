@@ -34,8 +34,15 @@ export const ARMOR_COMPONENTS = [
 ];
 
 // Armor bucket hashes -> solver slots (the five armor buckets; anything else
-// is filtered out). Values are the long-standing Bungie bucket ids; verify
-// against a real fixture when one lands.
+// is filtered out). Verified against the real Bungie Manifest
+// (DestinyInventoryBucketDefinition, zh-chs + en aggregates,
+// manifest version 244213.26.06.29.2000-1-bnet.65583):
+//   3448274439 -> Helmet / 头盔
+//   3551918588 -> Gauntlets / 臂铠
+//   14239492   -> Chest Armor / 胸部护甲
+//   20886954   -> Leg Armor / 腿部护甲
+//   1585787867 -> Class Armor / 职业护甲
+// (category = 3 Equippable, itemCount 10, location 1 in all five.)
 export const ARMOR_BUCKET_HASH_TO_SLOT = {
   3448274439: "helmet", // Helmet
   3551918588: "arms", // Gauntlets

@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  ARMOR_BUCKET_HASH_TO_SLOT,
   ARMOR_COMPONENTS,
   buildArmorInventory,
   normalizeApiItem,
 } from "../src/core/bungie-inventory.mjs";
 import { getEffectiveBaseStats } from "../src/core/dim-csv.mjs";
+import { ARMOR_ITEMS } from "../src/core/armor-items.data.mjs";
 
 // Synthetic GetProfile fixture (tests/fixtures/synthetic-profile-fixture.json):
 // hand-built to the Bungie API shape until a real fixture lands (needs a user
@@ -243,6 +245,35 @@ test("optimizationBaseStats projects full masterwork (+5 per non-framework stat)
   assert.deepEqual(exotic.optimizationBaseStats, {
     health: 25, melee: 30, grenade: 20, super: 10, class: 10, weapons: 10,
   });
+});
+
+// --- T8: bucket hash table locked to the real Bungie Manifest ---
+
+test("ARMOR_BUCKET_HASH_TO_SLOT matches the real Manifest bucket definitions (T8)", () => {
+  // Verified 2026-08-09 against the DestinyInventoryBucketDefinition tables
+  // of manifest 244213.26.06.29.2000-1-bnet.65583 (zh-chs + en aggregates):
+  //   Helmet / 头盔, Gauntlets / 臂铠, Chest Armor / 胸部护甲,
+  //   Leg Armor / 腿部护甲, Class Armor / 职业护甲
+  // — all category 3 (Equippable), itemCount 10, location 1. Any change here
+  // means Bungie renumbered the armor buckets, which would break inventory
+  // mapping app-wide.
+  assert.deepEqual(ARMOR_BUCKET_HASH_TO_SLOT, {
+    3448274439: "helmet",
+    3551918588: "arms",
+    14239492: "chest",
+    20886954: "legs",
+    1585787867: "classItem",
+  });
+});
+
+test("exotic class item 2809120022 (Relativism) lives in the classItem bucket in catalog and fixture (T8)", () => {
+  // The real Manifest item definition reports bucketTypeHash 1585787867
+  // (Class Armor / 职业护甲) for Relativism; the local catalog entry and the
+  // synthetic fixture must agree so the exotic class item is never filtered.
+  const catalogEntry = ARMOR_ITEMS.find(item => item.hash === 2809120022);
+  assert.equal(catalogEntry?.bucketHash, 1585787867);
+  assert.equal(byInstance("1000000000000000001").bucketHash, 1585787867);
+  assert.equal(ARMOR_BUCKET_HASH_TO_SLOT[1585787867], "classItem");
 });
 
 // --- T9: buildArmorInventory over the whole GetProfile response ---
