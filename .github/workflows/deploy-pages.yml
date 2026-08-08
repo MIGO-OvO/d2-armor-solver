@@ -39,6 +39,10 @@ jobs:
         run: npm ci
 
       - name: Test and build
+        env:
+          BUNGIE_API_KEY: ${{ secrets.BUNGIE_API_KEY }}
+          BUNGIE_OAUTH_CLIENT_ID: ${{ secrets.BUNGIE_OAUTH_CLIENT_ID }}
+          BUNGIE_OAUTH_CLIENT_SECRET: ${{ secrets.BUNGIE_OAUTH_CLIENT_SECRET }}
         run: npm run check
 
       - name: Verify Pages artifact

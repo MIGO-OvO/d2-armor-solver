@@ -189,6 +189,21 @@ npm run deploy
 - 应用运行时不会把目标、清单或配装发送到项目服务器。
 - 清除当前站点的浏览器数据会同时删除草稿和已保存方案。
 
+## Bungie 登录设置
+
+Bungie 登录（OAuth）用于获取真实库存，需要部署侧预先配置。注册与配置由仓库维护者手动完成，步骤如下：
+
+1. 打开 [bungie.net/en/Application](https://www.bungie.net/en/Application) 创建 Bungie 应用：
+   - 客户端类型选择 **Confidential**。
+   - Redirect URL 注册 `https://migo-ovo.github.io/d2-armor-solver/` 与 `http://localhost:5173/`。
+   - Origin 注册同样的两个源（GitHub Pages 源与 `http://localhost:5173` 源）。浏览器发起请求时的 Origin 必须与门户注册一致（不支持通配符），否则 Bungie 会以 CORS 拒绝。
+2. 从应用页面取得三件套：**API Key**、**OAuth Client ID**、**OAuth Client Secret**。
+3. 在 GitHub 仓库 → **Settings → Secrets and variables → Actions** 添加同名 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
+4. Cloudflare 部署**不启用** Bungie 登录（该源未在门户注册）。登录仅支持 GitHub Pages 正式站与本地开发（`http://localhost:5173`）。
+5. 构建回退：未配置 secrets 时构建仍然成功，登录入口自动隐藏。
+
+> 请勿在仓库、Issue 或任何文档中提交真实 secret 值；GitHub Secrets 只在 Actions 运行期间注入构建过程。
+
 ## 质量保证
 
 发布前质量门禁覆盖：
