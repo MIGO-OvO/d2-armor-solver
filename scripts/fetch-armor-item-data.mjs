@@ -43,12 +43,18 @@ const TIER_TYPE_TO_RARITY = { 2: "common", 3: "uncommon", 4: "rare", 5: "legenda
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function getJson(url) {
+// raw=true: Manifest content files (jsonWorldComponentContentPaths) are bare
+// JSON objects — top level is already the hash->definition map — with no
+// Bungie ErrorCode/Response wrapper, so skip the API envelope check for them.
+async function getJson(url, { raw = false } = {}) {
   const res = await fetch(url, { headers: { "X-API-Key": API_KEY } });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   const json = await res.json();
-  if (json.ErrorCode !== 1) throw new Error(`${url}: ${json.ErrorStatus} ${json.Message || ''}`);
-  return json.Response;
+  if (!raw) {
+    if (json.ErrorCode !== 1) throw new Error(`${url}: ${json.ErrorStatus} ${json.Message || ''}`);
+    return json.Response;
+  }
+  return json;
 }
 
 // Per-hash fallback: one request per language (?lc= selects the language).
@@ -90,7 +96,7 @@ async function main() {
   for (const lang of LANGS) {
     const componentPath = componentPaths?.[lang]?.DestinyInventoryItemDefinition;
     if (!componentPath) throw new Error(`${lang}: Manifest 缺少 DestinyInventoryItemDefinition 组件路径`);
-    const component = await getJson(`https://www.bungie.net${componentPath}`);
+    const component = await getJson(`https://www.bungie.net${componentPath}`, { raw: true });
     await sleep(350);
     const armor = new Map();
     for (const [hash, def] of Object.entries(component)) {
