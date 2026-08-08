@@ -1,8 +1,9 @@
-// Bungie Profile API inventory mapping (T8). Maps DestinyItemComponent
+// Bungie Profile API inventory mapping (T8/T9). Maps DestinyItemComponent
 // records to exactly the same solver item shape normalizeDimItem produces
 // (src/core/dim-csv.mjs), so API-sourced armor flows through the solver
-// unchanged. T9's buildArmorInventory assembles the context from the
-// GetProfile response; this module only maps one item at a time.
+// unchanged. buildArmorInventory walks a GetProfile response, dedups the
+// three armor sources by instanceId and returns the solver-ready list.
+// Pure data mapping: no DOM, no fetch, no browser storage.
 
 import {
   ARCHETYPES,
@@ -18,6 +19,7 @@ import {
   STAT_MOD_HASHES,
   TUNING_MOD_HASH_BY_TUNING,
 } from "./armor-mods.data.mjs";
+import { ARMOR_ITEMS } from "./armor-items.data.mjs";
 
 // The 8 DestinyComponentType values the armor inventory request needs.
 export const ARMOR_COMPONENTS = [
@@ -244,4 +246,88 @@ export function normalizeApiItem(apiItem, context = {}) {
     }),
   };
   return item;
+}
+
+// ============================================================
+// T9: PROFILE RESPONSE -> SOLVER INVENTORY
+// ============================================================
+
+// ARMOR_ITEMS entries carry rarity but no tierType. Infer it so exotic (6)
+// and legendary (5) armor both map to solver tier "5" — anything else stays
+// out of the tier5Only filters (rarity strings are lowercase in the data).
+const RARITY_TO_TIER_TYPE = { exotic: 6, legendary: 5 };
+
+// Lazy singleton: index the 9000+ item catalog once on first use. An empty
+// or missing catalog degrades to null (names fall back to `item_<hash>`).
+let catalogIndex = null;
+let catalogBuilt = false;
+
+function getCatalogIndex() {
+  if (catalogBuilt) return catalogIndex;
+  catalogBuilt = true;
+  if (!Array.isArray(ARMOR_ITEMS) || ARMOR_ITEMS.length === 0) return null;
+  const index = {};
+  for (const entry of ARMOR_ITEMS) {
+    index[entry.hash] = {
+      name: entry.name,
+      rarity: entry.rarity,
+      tierType: RARITY_TO_TIER_TYPE[entry.rarity] ?? 0,
+    };
+  }
+  catalogIndex = index;
+  return catalogIndex;
+}
+
+// Walk a full GetProfile response (or its already-unwrapped .Response) and
+// merge vault + per-character inventory + equipment armor, deduped by
+// instanceId. Equipped copies win; otherwise the first occurrence is kept
+// (vault is iterated first, so a vault copy is the default owner).
+export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {}) {
+  const data = (profileResponse?.Response ?? profileResponse)?.data ?? {};
+  const userInfo = data.profile?.data?.userInfo ?? {};
+  const characters = {};
+  for (const [characterId, character] of Object.entries(data.characters?.data ?? {})) {
+    characters[characterId] = { classType: character?.classType ?? null };
+  }
+  const instances = data.itemComponents?.instances?.data ?? {};
+  const sockets = data.itemComponents?.sockets?.data ?? {};
+  const plugs = data.itemComponents?.plugStates?.data ?? {};
+  const catalog = getCatalogIndex();
+
+  const byInstance = new Map();
+  const push = (apiItem, characterClassType, owner, equipped) => {
+    const id = String(apiItem?.itemInstanceId ?? "");
+    if (!id) return;
+    if (byInstance.has(id) && !equipped) return; // keep the first non-equipped copy
+    const item = normalizeApiItem(apiItem, {
+      characterClassType,
+      instances,
+      sockets,
+      plugs,
+      catalog,
+      language,
+      equipped,
+      owner,
+    });
+    if (item) byInstance.set(id, item); // non-armor (null) is skipped
+  };
+
+  for (const apiItem of data.profileInventory?.data?.items ?? []) {
+    push(apiItem, undefined, "Vault", false);
+  }
+  for (const [characterId, character] of Object.entries(data.characterInventories?.data ?? {})) {
+    const classType = characters[characterId]?.classType ?? null;
+    for (const apiItem of character?.items ?? []) push(apiItem, classType, characterId, false);
+  }
+  for (const [characterId, character] of Object.entries(data.characterEquipment?.data ?? {})) {
+    const classType = characters[characterId]?.classType ?? null;
+    for (const apiItem of character?.items ?? []) push(apiItem, classType, characterId, true);
+  }
+
+  return {
+    items: [...byInstance.values()],
+    membershipType: userInfo.membershipType ?? null,
+    membershipId: userInfo.membershipId ?? null,
+    characters,
+  };
 }

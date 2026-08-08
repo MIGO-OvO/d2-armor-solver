@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { normalizeApiItem } from "../src/core/bungie-inventory.mjs";
+import {
+  ARMOR_COMPONENTS,
+  buildArmorInventory,
+  normalizeApiItem,
+} from "../src/core/bungie-inventory.mjs";
 
 // Synthetic GetProfile fixture (tests/fixtures/synthetic-profile-fixture.json):
 // hand-built to the Bungie API shape until a real fixture lands (needs a user
@@ -212,4 +216,81 @@ test("optimizationBaseStats projects full masterwork (+5 per non-framework stat)
   assert.deepEqual(exotic.optimizationBaseStats, {
     health: 25, melee: 30, grenade: 20, super: 10, class: 10, weapons: 10,
   });
+});
+
+// --- T9: buildArmorInventory over the whole GetProfile response ---
+
+const EXPECTED_ARMOR_COMPONENTS = [
+  "Profiles",
+  "ProfileInventories",
+  "Characters",
+  "CharacterInventories",
+  "CharacterEquipment",
+  "ItemInstances",
+  "ItemSockets",
+  "ItemPlugStates",
+];
+
+test("ARMOR_COMPONENTS is exactly the 8 Bungie component types", () => {
+  assert.equal(ARMOR_COMPONENTS.length, 8);
+  assert.deepEqual([...ARMOR_COMPONENTS].sort(), [...EXPECTED_ARMOR_COMPONENTS].sort());
+});
+
+test("buildArmorInventory merges vault, character inventory and equipment without duplicate instanceIds", () => {
+  const result = buildArmorInventory(fixture);
+  const ids = result.items.map(item => item.id);
+  assert.equal(new Set(ids).size, ids.length, "instanceIds must be unique");
+  assert.equal(ids.length, 5, "5 armor pieces across all sources (3 weapons filtered)");
+  // instance 1000000000000000003 sits in both the vault and character 1's inventory.
+  assert.equal(ids.filter(id => id === "1000000000000000003").length, 1);
+});
+
+test("buildArmorInventory marks equipped pieces and keeps their owner", () => {
+  const result = buildArmorInventory(fixture);
+  const equipped = result.items.filter(item => item.equipped);
+  assert.equal(equipped.length, 1);
+  assert.equal(equipped[0].id, "1000000000000000001");
+  assert.equal(equipped[0].owner, "2305843009471208001");
+  // A never-equipped duplicate keeps the first (vault) copy.
+  const duplicated = result.items.find(item => item.id === "1000000000000000003");
+  assert.equal(duplicated.owner, "Vault");
+  assert.equal(duplicated.equipped, false);
+});
+
+test("buildArmorInventory filters every weapon row", () => {
+  const result = buildArmorInventory(fixture);
+  assert.ok(result.items.every(item => item.slot), "every kept item must be armor");
+  for (const weaponId of ["1000000000000000005", "1000000000000000006", "1000000000000000007"]) {
+    assert.ok(!result.items.some(item => item.id === weaponId), weaponId);
+  }
+});
+
+test("buildArmorInventory handles an empty profile without throwing", () => {
+  const result = buildArmorInventory({ ErrorCode: 1, Response: { data: {} } });
+  assert.deepEqual(result.items, []);
+  assert.equal(result.membershipType, null);
+  assert.equal(result.membershipId, null);
+  assert.deepEqual(result.characters, {});
+});
+
+test("buildArmorInventory returns membership and character summaries", () => {
+  const result = buildArmorInventory(fixture);
+  assert.equal(result.membershipType, 3);
+  assert.equal(result.membershipId, "4611686018470000000");
+  assert.deepEqual(result.characters, {
+    "2305843009471208001": { classType: 1 },
+    "2305843009471208002": { classType: 2 },
+  });
+});
+
+test("catalog rarity infers tierType: exotic and legendary armor both land on tier 5", () => {
+  // Uses the REAL armor-items.data.mjs catalog (no tierType field), so the
+  // rarity -> tierType inference must turn exotic/legendary into tier "5".
+  const result = buildArmorInventory(fixture);
+  const exotic = result.items.find(item => item.hash === 2809120022);
+  const legendary = result.items.find(item => item.hash === 656307180);
+  assert.equal(exotic.tier, "5");
+  assert.equal(exotic.exotic, true);
+  assert.equal(legendary.tier, "5");
+  assert.equal(legendary.exotic, false);
 });
