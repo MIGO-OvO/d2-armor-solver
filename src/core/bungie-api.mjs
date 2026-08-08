@@ -244,4 +244,36 @@ export async function bungieFetch(path, { auth = true, retries = 3 } = {}) {
   }
 }
 
-// --- T5 appends: membership resolution ---
+export class NoMembershipError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "NoMembershipError";
+  }
+}
+
+// --- T5: membership resolution ---
+
+// Resolves the Destiny account to use for inventory calls. Bungie's
+// cross-save semantics: crossSaveOverride holds the membershipId of the
+// primary account, and every non-primary platform account points at it; a
+// value of 0 means the account is not cross-save. Falls back to the first
+// member. Not signed in -> FatalTokenError propagates from
+// getValidAccessToken.
+export async function resolveMemberships() {
+  const response = await bungieFetch("/Destiny2/GetMembershipsForCurrentUser/", { auth: true });
+  const members = response.destinyMemberships ?? [];
+  if (members.length === 0) {
+    throw new NoMembershipError("No Destiny membership found for this account");
+  }
+  const primary = members.find(
+    member => member.crossSaveOverride > 0 &&
+      // crossSaveOverride is a number while membershipId is an int64 string
+      members.some(other => String(other.membershipId) === String(member.crossSaveOverride)),
+  );
+  const chosen = primary ?? members[0];
+  return {
+    membershipType: chosen.membershipType,
+    membershipId: chosen.membershipId,
+    displayName: chosen.displayName,
+  };
+}

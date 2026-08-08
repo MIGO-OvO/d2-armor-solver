@@ -11,6 +11,8 @@ import {
   getToken,
   getValidAccessToken,
   NetworkError,
+  NoMembershipError,
+  resolveMemberships,
   saveToken,
   ThrottleError,
   TOKEN_STORAGE_KEY,
@@ -440,6 +442,80 @@ test("bungieFetch with auth refreshes an expired token before the API call", asy
     assert.equal(requests.length, 2);
     assert.equal(requests[0].options.body.get("grant_type"), "refresh_token");
     assert.equal(requests[1].options.headers.Authorization, "Bearer fresh-access");
+  } finally {
+    restoreGlobals();
+  }
+});
+
+// --- T5: membership resolution ---
+
+function membershipsResponse(members) {
+  return { Response: { destinyMemberships: members }, ErrorCode: 1, ErrorStatus: "Ok" };
+}
+
+function member(type, id, { override = 0, name = `Guardian-${id}` } = {}) {
+  return { membershipType: type, membershipId: id, crossSaveOverride: override, displayName: name };
+}
+
+test("resolveMemberships prefers the cross-save primary account", async () => {
+  installLocalStorage();
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return jsonResponse(membershipsResponse([
+      member(2, "111"),
+      member(3, "222", { override: 111 }),
+    ]));
+  };
+  try {
+    saveToken(liveToken());
+    const resolved = await resolveMemberships();
+    assert.deepEqual(resolved, { membershipType: 3, membershipId: "222", displayName: "Guardian-222" });
+    assert.equal(requests[0].url, "https://www.bungie.net/Platform/Destiny2/GetMembershipsForCurrentUser/");
+    assert.equal(requests[0].options.headers.Authorization, "Bearer live-access");
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("resolveMemberships returns the first member when nothing is cross-save", async () => {
+  installLocalStorage();
+  globalThis.fetch = async () =>
+    jsonResponse(membershipsResponse([
+      member(2, "111"),
+      member(3, "222"),
+    ]));
+  try {
+    saveToken(liveToken());
+    assert.deepEqual(await resolveMemberships(),
+      { membershipType: 2, membershipId: "111", displayName: "Guardian-111" });
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("resolveMemberships throws NoMembershipError for an empty account", async () => {
+  installLocalStorage();
+  globalThis.fetch = async () => jsonResponse(membershipsResponse([]));
+  try {
+    saveToken(liveToken());
+    await assert.rejects(resolveMemberships(), (error) => {
+      assert.ok(error instanceof NoMembershipError);
+      assert.equal(error.name, "NoMembershipError");
+      return true;
+    });
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("resolveMemberships propagates FatalTokenError when signed out", async () => {
+  installLocalStorage();
+  try {
+    await assert.rejects(resolveMemberships(), (error) => {
+      assert.ok(error instanceof FatalTokenError);
+      return true;
+    });
   } finally {
     restoreGlobals();
   }
