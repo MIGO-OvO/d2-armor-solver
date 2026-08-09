@@ -2449,26 +2449,36 @@ function handleBungieAuthError(error) {
   showImportMessage(bungieErrorMessage(error));
 }
 
-function renderBungieAuthState() {
-  const area = document.getElementById("bungieAuthArea");
-  if (!area) return;
-  if (!__BUNGIE_OAUTH_CLIENT_ID__) {
-    area.innerHTML = "";
-    return;
-  }
-  const displayName = `<span class="bungie-auth-name">${escapeHtml(getBungieDisplayName())}</span>`;
+// Shared markup builder: both the import-area entry (#bungieAuthArea) and the
+// header entry (#headerBungieAuth) render the same compact control set.
+function bungieAuthAreaHtml(loginButtonId = "", nameClass = "bungie-auth-name") {
+  if (!__BUNGIE_OAUTH_CLIENT_ID__) return "";
+  const displayName = `<span class="${nameClass}">${escapeHtml(getBungieDisplayName())}</span>`;
   const logoutButton = `<button type="button" class="btn" onclick="bungieLogout()">${l("登出", "登出", "Sign out")}</button>`;
   if (isBungieImporting) {
-    area.innerHTML = displayName +
+    return displayName +
       `<button type="button" class="btn" disabled>${icon("refresh")}${l("导入中…", "匯入中…", "Importing…")}</button>` +
       logoutButton;
-  } else if (hasToken()) {
-    area.innerHTML = displayName +
+  }
+  if (hasToken()) {
+    return displayName +
       `<button type="button" class="btn" onclick="importInventoryFromBungie()">${icon("refresh")}${l("刷新库存", "重新整理庫存", "Refresh inventory")}</button>` +
       logoutButton;
-  } else {
-    area.innerHTML = `<button type="button" class="btn" id="bungieLoginButton" onclick="bungieLogin()">${l("Bungie 登录", "Bungie 登入", "Bungie login")}</button>`;
   }
+  return `<button type="button" class="btn"${loginButtonId ? ` id="${loginButtonId}"` : ""} onclick="bungieLogin()">${l("Bungie 登录", "Bungie 登入", "Bungie login")}</button>`;
+}
+
+// Single render entry point: updating the import-area entry keeps the header
+// entry in sync (the login id stays unique to the import area).
+function renderBungieAuthState() {
+  const area = document.getElementById("bungieAuthArea");
+  if (area) area.innerHTML = bungieAuthAreaHtml("bungieLoginButton");
+  renderHeaderBungieAuthState();
+}
+
+function renderHeaderBungieAuthState() {
+  const area = document.getElementById("headerBungieAuth");
+  if (area) area.innerHTML = bungieAuthAreaHtml("", "header-bungie-auth-name");
 }
 
 function bungieLogin() {

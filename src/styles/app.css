@@ -23,6 +23,19 @@ body {
   padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
   background: var(--card); color: var(--text); font: inherit;
 }
+.header-bungie-auth {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.header-bungie-auth .header-bungie-auth-name {
+  max-width: 45vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .target-stat-group { position: relative; }
 .stat-range-hint {
   min-height: 18px; margin-top: 3px; color: var(--text-dim);
@@ -1292,7 +1305,8 @@ input[type="checkbox"]:focus-visible {
   align-items: center;
   gap: 6px;
 }
-.bungie-auth-name {
+.bungie-auth-name,
+.header-bungie-auth-name {
   color: var(--text-dim);
   font-size: .75rem;
   font-weight: 700;
