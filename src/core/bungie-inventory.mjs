@@ -7,6 +7,8 @@
 
 import {
   ARCHETYPES,
+  EXOTIC_CLASSES,
+  EXOTIC_PERK_NAMES,
   STATS,
 } from "./armor-model.mjs";
 import { getArmorSetByItemHash } from "./armor-sets.mjs";
@@ -148,6 +150,14 @@ export function normalizeApiItem(apiItem, context = {}) {
   const entry = catalog?.[hash] || null;
   const tierType = entry?.tierType ?? apiItem.tierType ?? 0;
   const rarity = entry?.rarity ?? "";
+  const classId = CLASS_BY_TYPE[characterClassType] || null;
+  // Exotic Class Items are recognized by their known item hashes as well as by
+  // rarity, so the exotic flag (and the upgrade-mode auto-lock it drives) never
+  // depends on the catalog being complete for the roll.
+  const exoticClassItem = classId
+    && EXOTIC_CLASSES[classId]?.itemHash === hash
+    ? EXOTIC_CLASSES[classId]
+    : null;
   // Names ship as { zh, zhCht, en }. Map the page language to the data key;
   // unknown languages fall back to en, missing data keys to zh then en, then
   // to `item_<hash>` (getSetName pattern, armor-sets.mjs:25-28).
@@ -183,11 +193,20 @@ export function normalizeApiItem(apiItem, context = {}) {
   }
 
   // Forward tuning/mod inference from the installed plug hashes (Metis C1).
+  // Exotic Class Item perk sockets carry the "Spirit of …" plug hashes; match
+  // them against EXOTIC_PERK_NAMES so each instance keeps its exact rolled
+  // perk pair (left/right column), the identity a lock must preserve.
   let tuningMode = null;
   let tuningFrom = null;
   let tuningTo = null;
   let armorModSize = 0;
   let armorModStat = null;
+  let primaryPerkId = null;
+  let secondaryPerkId = null;
+  const perkHashToId = new Map(Object.entries(EXOTIC_PERK_NAMES)
+    .map(([id, meta]) => [meta.hash, id]));
+  const primaryPerkIds = new Set((exoticClassItem?.primary || []).map(([id]) => id));
+  const secondaryPerkIds = new Set((exoticClassItem?.secondary || []).map(([id]) => id));
   for (const plugHash of collectPlugHashes(instanceId, sockets, plugs)) {
     if (plugHash === BALANCED_TUNING_MOD_HASH) {
       tuningMode = "plus3";
@@ -200,6 +219,11 @@ export function normalizeApiItem(apiItem, context = {}) {
       const mod = STAT_MOD_HASH_TO_MOD.get(plugHash);
       armorModSize = mod.armorModSize;
       armorModStat = mod.armorModStat;
+    } else {
+      const perkId = exoticClassItem ? perkHashToId.get(plugHash) : null;
+      if (!perkId) continue;
+      if (primaryPerkIds.has(perkId) && !primaryPerkId) primaryPerkId = perkId;
+      else if (secondaryPerkIds.has(perkId) && !secondaryPerkId) secondaryPerkId = perkId;
     }
   }
 
@@ -227,12 +251,12 @@ export function normalizeApiItem(apiItem, context = {}) {
     hash,
     name,
     slot,
-    classId: CLASS_BY_TYPE[characterClassType] || null,
+    classId,
     // tierType 5 and 6 (Legendary and Exotic) are both solver tier "5", so
     // the tier5Only filter never drops exotics (Metis C3 regression).
     tier: tierType === 5 || tierType === 6 ? "5" : String(tierType),
     rarity,
-    exotic: String(rarity).toLowerCase() === "exotic",
+    exotic: String(rarity).toLowerCase() === "exotic" || Boolean(exoticClassItem),
     archetypeId,
     tertiary,
     tuningStat: null,
@@ -249,6 +273,9 @@ export function normalizeApiItem(apiItem, context = {}) {
     tuningTo,
     armorModSize,
     armorModStat,
+    // The exact rolled perk pair, when the instance's sockets were available.
+    primaryPerkId,
+    secondaryPerkId,
     // The API path is exact: plug hashes resolve against the static tables.
     modifierInference: { status: "exact", candidateCount: 1 },
     // Optimization assumes full masterwork (dim-csv.mjs:310-312).

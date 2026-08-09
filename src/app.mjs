@@ -2818,6 +2818,14 @@ function applyLoadoutItems(items) {
   for (const item of items) {
     if (item.slot && !bySlot[item.slot]) bySlot[item.slot] = item;
   }
+  // A locked piece must survive a loadout refill. Capture which slots carried
+  // a locked piece (and its instance/roll identity) before rebuilding; the
+  // manualLocked reset below would otherwise silently drop the user's
+  // "固定此件，不参与替换" and let the optimizer replace the piece — e.g. an
+  // exotic class item swapped for another roll with different perks.
+  const previousLocked = upgradeBuildState.map((piece, index) =>
+    (piece?.locked || manualLocked[index]) ? piece : null
+  );
   const missingSlots = [];
   upgradeBuildState = UPGRADE_SLOTS.map((slotDef, index) => {
     const item = bySlot[slotDef.id];
@@ -2828,6 +2836,19 @@ function applyLoadoutItems(items) {
     return createUpgradePieceFromItem(item, index);
   });
   manualLocked = [];
+  previousLocked.forEach((prevPiece, index) => {
+    if (!prevPiece) return;
+    const nextPiece = upgradeBuildState[index];
+    if (!nextPiece) return;
+    const sameInstance = Boolean(
+      prevPiece.sourceId && nextPiece.sourceId && prevPiece.sourceId === nextPiece.sourceId
+    );
+    const sameExoticRoll = prevPiece.exotic && nextPiece.exotic
+      && prevPiece.hash && prevPiece.hash === nextPiece.hash
+      && (prevPiece.primaryPerkId || null) === (nextPiece.primaryPerkId || null)
+      && (prevPiece.secondaryPerkId || null) === (nextPiece.secondaryPerkId || null);
+    if (sameInstance || sameExoticRoll) manualLocked[index] = true;
+  });
   syncUpgradeLocks();
   saveUpgradeDraft();
   renderUpgradeBuildEditor();
@@ -3069,9 +3090,11 @@ function syncUpgradeLocks() {
   // manually stay fixed. A set requirement must NOT lock the current pieces:
   // solving filters the uploaded inventory for loadouts that satisfy the set
   // bonus while approaching the stat targets, which requires every non-fixed
-  // slot to stay swappable.
+  // slot to stay swappable. Locked stays monotonic: once a piece is fixed it
+  // is never silently unlocked by a re-render — only updateUpgradePiece(…,
+  // 'locked', false) releases it.
   (upgradeBuildState || []).forEach((piece, index) => {
-    piece.locked = Boolean(piece.exotic) || Boolean(manualLocked[index]);
+    piece.locked = Boolean(piece.locked) || Boolean(piece.exotic) || Boolean(manualLocked[index]);
   });
   const stateEl = document.getElementById("setRequirementState");
   if (!stateEl) return;
@@ -3146,7 +3169,11 @@ function renderUpgradeBuildEditor(openIndex = null) {
     const setLabel = setForPiece
       ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(setForPiece))}</span> · `
       : '';
-    const identity = `${pieceNameLabel}${setLabel}<span class="upgrade-piece-arch">${getArchetypeLabel(archetype.id)}</span><span class="upgrade-piece-detail"> · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}</span>`;
+    const perkIds = [piece.primaryPerkId, piece.secondaryPerkId].filter(Boolean);
+    const perkLabel = perkIds.length > 0
+      ? `<span class="upgrade-piece-perks">${perkIds.map(id => escapeHtml(getExoticPerkName(id, id))).join(' + ')}</span> · `
+      : '';
+    const identity = `${pieceNameLabel}${setLabel}${perkLabel}<span class="upgrade-piece-arch">${getArchetypeLabel(archetype.id)}</span><span class="upgrade-piece-detail"> · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}</span>`;
     const status = piece.exotic
       ? l('异域固定件','異域固定件','Fixed Exotic')
       : (piece.locked ? l('固定不替换','固定不替換','Fixed') : l('可替换','可替換','Replaceable'));

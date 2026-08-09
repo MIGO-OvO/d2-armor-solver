@@ -69,6 +69,11 @@ export function normalizeUpgradePiece(piece, slotIndex) {
   if (!STATS.includes(normalized.armorModStat)) normalized.armorModStat = archetype.secondary;
   normalized.exotic = Boolean(normalized.exotic);
   normalized.locked = normalized.exotic || Boolean(normalized.locked);
+  // Exotic Class Item perks are a fixed roll on the item. Keep them on the
+  // piece when known (Bungie API path); CSV-only imports leave them null and
+  // the stat frame still distinguishes rolls.
+  normalized.primaryPerkId = normalized.primaryPerkId || null;
+  normalized.secondaryPerkId = normalized.secondaryPerkId || null;
   return normalized;
 }
 
@@ -124,6 +129,8 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     itemName: item.name,
     sourceId: item.id,
     hash: item.hash,
+    primaryPerkId: item.primaryPerkId || null,
+    secondaryPerkId: item.secondaryPerkId || null,
   }, slotIndex);
 }
 
@@ -380,7 +387,10 @@ function cacheFullTargetSearch(key, result) {
 
 // A piece's identity for "do I already own this?" purposes. The +5 tuning side
 // is rolled onto the armor, so changing it means farming a new piece — it
-// belongs here alongside the archetype and tertiary stat.
+// belongs here alongside the archetype and tertiary stat. Exotic Class Item
+// perks are rolled onto the item too: two rolls with the same frame but
+// different perks are different pieces. Perk ids are null when unknown
+// (CSV-only import), so the stat frame still distinguishes rolls there.
 export function getUpgradePieceIdentity(piece) {
   const config = getUpgradeConfig(piece);
   return {
@@ -388,6 +398,8 @@ export function getUpgradePieceIdentity(piece) {
     tertiary: config.tertiary,
     tuningTo: piece.tuningMode === 'plus3' ? null : piece.tuningTo,
     tuningMode: piece.tuningMode,
+    primaryPerkId: piece.primaryPerkId || null,
+    secondaryPerkId: piece.secondaryPerkId || null,
   };
 }
 
@@ -395,7 +407,9 @@ export function sameUpgradeIdentity(left, right) {
   return left.archetype === right.archetype &&
     left.tertiary === right.tertiary &&
     left.tuningMode === right.tuningMode &&
-    left.tuningTo === right.tuningTo;
+    left.tuningTo === right.tuningTo &&
+    left.primaryPerkId === right.primaryPerkId &&
+    left.secondaryPerkId === right.secondaryPerkId;
 }
 
 export function sameUpgradeConfig(left, right) {
@@ -415,6 +429,10 @@ export function setUpgradePieceConfig(piece, slotIndex, config) {
   delete hypothetical.hash;
   delete hypothetical.masterworkTier;
   delete hypothetical.modifierInference;
+  // A farmed class item has no fixed perk roll, so the source piece's perks
+  // must not carry into the replacement candidate's identity.
+  delete hypothetical.primaryPerkId;
+  delete hypothetical.secondaryPerkId;
   return normalizeUpgradePiece({
     ...hypothetical,
     archetypeId: getArchetypeIdForConfig(config),

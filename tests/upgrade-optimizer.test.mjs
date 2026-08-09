@@ -8,9 +8,11 @@ import {
   createDefaultUpgradePiece,
   evaluateUpgradePieces,
   getUpgradeMetrics,
+  getUpgradePieceIdentity,
   getUpgradeReplacements,
   normalizeUpgradePiece,
   refineUpgradePlanPieces,
+  sameUpgradeIdentity,
 } from "../src/core/upgrade-optimizer.mjs";
 import {
   ARCHETYPES, BASE_CONFIGS, STATS,
@@ -447,4 +449,52 @@ test("plan refinement never reduces swaps by breaking a must-meet constraint", (
   assert.equal(getUpgradeReplacements(equipped, refined.pieces).length, 3,
     "a lower-swap variant that misses a required target must be rejected");
   assert.equal(refined.evaluation.metrics.requiredAllReached, true);
+});
+
+test("exotic class item identity distinguishes same-frame rolls with different perks", () => {
+  // Two exotic class item rolls share the Paragon frame (super 30 / melee 25 /
+  // grenade 20) but carry different perk pairs. The perks are rolled onto the
+  // item, so the identities must differ — the locked roll is not interchangeable
+  // with the other one even though the stat frames match.
+  const base = {
+    archetypeId: "Paragon",
+    tertiary: "grenade",
+    tuningMode: "shift",
+    tuningTo: "recovery",
+    tuningFrom: "mobility",
+    armorModSize: 10,
+    armorModStat: "recovery",
+    exotic: true,
+    locked: true,
+    baseStats: { health: 5, class: 5, grenade: 20, super: 30, melee: 25, weapons: 5 },
+    hash: 2809120022,
+  };
+  const inmostRoll = normalizeUpgradePiece({
+    ...base, itemName: "光能+曲蛛的楷模典范", primaryPerkId: "inmost", secondaryPerkId: "cyrtarachne",
+  }, 4);
+  const galanorRoll = normalizeUpgradePiece({
+    ...base, itemName: "加拉诺+曲蛛的楷模典范", primaryPerkId: "galanor", secondaryPerkId: "cyrtarachne",
+  }, 4);
+  const csvRoll = normalizeUpgradePiece({ ...base, primaryPerkId: null, secondaryPerkId: null }, 4);
+
+  assert.equal(
+    sameUpgradeIdentity(getUpgradePieceIdentity(inmostRoll), getUpgradePieceIdentity(inmostRoll)),
+    true,
+    "a roll matches itself"
+  );
+  assert.equal(
+    sameUpgradeIdentity(getUpgradePieceIdentity(inmostRoll), getUpgradePieceIdentity(galanorRoll)),
+    false,
+    "same frame, different primary perk -> different piece"
+  );
+  assert.equal(
+    sameUpgradeIdentity(getUpgradePieceIdentity(inmostRoll), getUpgradePieceIdentity(csvRoll)),
+    false,
+    "a perk-known roll is not interchangeable with a perk-unknown one"
+  );
+  assert.equal(
+    sameUpgradeIdentity(getUpgradePieceIdentity(csvRoll), getUpgradePieceIdentity(csvRoll)),
+    true,
+    "perk-unknown rolls still match on the stat frame"
+  );
 });

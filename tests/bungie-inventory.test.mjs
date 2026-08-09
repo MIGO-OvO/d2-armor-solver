@@ -121,6 +121,57 @@ test("hunter exotic class item 2809120022 resolves frame, exotic flag and tier",
   assert.equal(item.power, 2010);
 });
 
+test("exotic class item extracts its rolled perk pair from socket plugs", () => {
+  // Socket plugs carry the installed "Spirit of …" perk items; the roll is
+  // fixed on the instance and must survive into the solver piece.
+  const apiItem = {
+    bucketHash: 1585787867, // classItem
+    itemHash: 2809120022,
+    itemInstanceId: "9000000000000000101",
+    tierType: 6,
+  };
+  const instances = {
+    "9000000000000000101": {
+      energyCapacity: 10,
+      stats: {
+        "144602215": 5, "392767087": 25, "1735777505": 20,
+        "1943323491": 5, "2996146975": 5, "4244567218": 30,
+      },
+    },
+  };
+  const sockets = {
+    "9000000000000000101": {
+      sockets: [
+        { plugHash: 1476923952, isEnabled: true }, // Spirit of the Assassin (left column)
+        { plugHash: 3751917994, isEnabled: true }, // Spirit of the Cyrtarachne (right column)
+        { plugHash: 2125798995, isEnabled: false }, // disabled socket: ignored
+      ],
+    },
+  };
+  const item = normalizeApiItem(apiItem, context({ instances, sockets, plugs: {} }));
+  assert.equal(item.primaryPerkId, "assassin");
+  assert.equal(item.secondaryPerkId, "cyrtarachne");
+  assert.equal(item.archetypeId, "Brawler");
+  assert.equal(item.exotic, true);
+});
+
+test("exotic class item stays exotic when the catalog lacks its rarity", () => {
+  // Catalog missing the item (rarity falls back to ""): the known item hash
+  // must still set the exotic flag so the auto-lock is not silently dropped.
+  const apiItem = {
+    bucketHash: 1585787867,
+    itemHash: 2809120022,
+    itemInstanceId: "9000000000000000102",
+    tierType: 0,
+  };
+  const instances = { "9000000000000000102": { energyCapacity: 0, stats: {} } };
+  const item = normalizeApiItem(
+    apiItem,
+    context({ instances, sockets: {}, plugs: {}, catalog: {} }),
+  );
+  assert.equal(item.exotic, true);
+});
+
 test("+10 stat mod plug resolves armorModSize/armorModStat forward from sockets+plugStates", () => {
   const item = normalizeApiItem(byInstance("1000000000000000003"), context());
   assert.equal(item.armorModSize, 10);
