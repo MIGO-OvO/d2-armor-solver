@@ -9,6 +9,10 @@ import {
 // GetProfile shape (full envelope, itemComponents keyed by instanceId) with
 // realistic 19-digit ids. When a real tests/fixtures/profile-fixture.json
 // lands, these same properties are what the fixture must satisfy.
+// The live capture flow (scripts/capture-profile-fixture.mjs) fetches
+// memberships from /User/GetMembershipsForCurrentUser/ (User controller, not
+// Destiny2) — verified against the real API 2026-08-09; the URL itself is
+// covered by the real capture, not by these pure-function sanitize tests.
 const INSTANCE_A = "6917529027641081856";
 const INSTANCE_B = "6917529027641081861";
 const CHARACTER = "2305843009471208001";
@@ -53,6 +57,16 @@ const RAW = {
         data: {
           [CHARACTER]: {
             items: [{ itemHash: 2809120022, itemInstanceId: INSTANCE_A, quantity: 1, bucketHash: 1585787867 }],
+          },
+        },
+      },
+      // Real GetProfile also returns characterPlugSets (added when the real
+      // fixture landed: keys are characterIds and must be masked like the
+      // other character maps, not leaked as raw 19-digit ids).
+      characterPlugSets: {
+        data: {
+          [CHARACTER]: {
+            plugs: { "88": [{ plugItemHash: 1399216, canInsert: true, enabled: true }] },
           },
         },
       },
@@ -139,6 +153,9 @@ test("membershipId and character ids are masked, length preserved, originals gon
   assert.equal(data.characters.data[characterKey].characterId, characterKey);
   assert.equal(Object.keys(data.characterInventories.data)[0], characterKey);
   assert.equal(Object.keys(data.characterEquipment.data)[0], characterKey);
+  // characterPlugSets is keyed by the same masked characterId (real-fixture
+  // regression: it used to leak the raw 19-digit character id).
+  assert.equal(Object.keys(data.characterPlugSets.data)[0], characterKey);
 
   const json = JSON.stringify(sanitized);
   for (const secret of [INSTANCE_A, INSTANCE_B, CHARACTER, MEMBERSHIP]) {

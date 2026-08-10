@@ -51,9 +51,14 @@ const DIGITS_ONLY = /^\d+$/;
 const isInstanceMap = path =>
   path.length >= 3 && path.at(-1) === "data" && path.at(-3) === "itemComponents";
 
-// Maps under data.characters | characterInventories | characterEquipment .data
-// are keyed by characterId.
-const CHARACTER_MAP_KEYS = new Set(["characters", "characterInventories", "characterEquipment"]);
+// Maps under data.characters | characterInventories | characterEquipment |
+// characterPlugSets .data are keyed by characterId.
+const CHARACTER_MAP_KEYS = new Set([
+  "characters",
+  "characterInventories",
+  "characterEquipment",
+  "characterPlugSets",
+]);
 const isCharacterMap = path =>
   path.length >= 2 && path.at(-1) === "data" && CHARACTER_MAP_KEYS.has(path.at(-2));
 
@@ -195,8 +200,14 @@ function resolvePrimaryMembership(memberships) {
   return primary ?? memberships[0];
 }
 
+// The real GetProfile envelope puts components directly under Response
+// (verified 2026-08-09): no extra .data wrapper at the top level.
+function envelopeData(envelope) {
+  return envelope?.Response?.data ?? envelope?.Response ?? {};
+}
+
 function countProfileItems(envelope) {
-  const data = envelope?.Response?.data ?? {};
+  const data = envelopeData(envelope);
   let count = data.profileInventory?.data?.items?.length ?? 0;
   for (const inventory of Object.values(data.characterInventories?.data ?? {})) {
     count += inventory?.items?.length ?? 0;
@@ -208,7 +219,7 @@ function countProfileItems(envelope) {
 }
 
 function countProfileInstances(envelope) {
-  const data = envelope?.Response?.data ?? {};
+  const data = envelopeData(envelope);
   const ids = new Set();
   for (const item of data.profileInventory?.data?.items ?? []) {
     if (item?.itemInstanceId) ids.add(String(item.itemInstanceId));
@@ -230,7 +241,7 @@ async function main() {
   requireEnv();
   const token = await getAccessToken();
 
-  const memberships = (await getJson("/Destiny2/GetMembershipsForCurrentUser/", token))
+  const memberships = (await getJson("/User/GetMembershipsForCurrentUser/", token))
     .Response?.destinyMemberships ?? [];
   const membership = resolvePrimaryMembership(memberships);
   console.error(`账号：${membership.displayName}（平台 ${membership.membershipType}）`);

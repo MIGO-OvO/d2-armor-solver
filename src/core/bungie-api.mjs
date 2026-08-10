@@ -273,7 +273,7 @@ export class NoMembershipError extends Error {
 // member. Not signed in -> FatalTokenError propagates from
 // getValidAccessToken.
 export async function resolveMemberships() {
-  const response = await bungieFetch("/Destiny2/GetMembershipsForCurrentUser/", { auth: true });
+  const response = await bungieFetch("/User/GetMembershipsForCurrentUser/", { auth: true });
   const members = response.destinyMemberships ?? [];
   if (members.length === 0) {
     throw new NoMembershipError("No Destiny membership found for this account");

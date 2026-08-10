@@ -509,7 +509,9 @@ test("resolveMemberships prefers the cross-save primary account", async () => {
     saveToken(liveToken());
     const resolved = await resolveMemberships();
     assert.deepEqual(resolved, { membershipType: 3, membershipId: "222", displayName: "Guardian-222" });
-    assert.equal(requests[0].url, "https://www.bungie.net/Platform/Destiny2/GetMembershipsForCurrentUser/");
+    // Memberships live under the User controller, not Destiny2 (verified
+    // against the real API 2026-08-09; /Destiny2/ returns HTTP 404).
+    assert.equal(requests[0].url, "https://www.bungie.net/Platform/User/GetMembershipsForCurrentUser/");
     assert.equal(requests[0].options.headers.Authorization, "Bearer live-access");
   } finally {
     restoreGlobals();
