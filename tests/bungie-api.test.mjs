@@ -400,6 +400,31 @@ test("bungieFetch throws ThrottleError when throttling exceeds the retry budget"
   }
 });
 
+test("bungieFetch does not treat a success response carrying ThrottleSeconds: 0 as throttling", async () => {
+  // Real GetProfile responses (HTTP 200, ErrorCode 1, ErrorStatus "Success")
+  // carry a ThrottleSeconds: 0 metadata field that is NOT a throttle signal;
+  // only ErrorCode 36/51 responses give ThrottleSeconds real meaning.
+  installLocalStorage();
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return jsonResponse({
+      Response: { profiles: [{ membershipId: "123" }] },
+      ErrorCode: 1,
+      ErrorStatus: "Success",
+      ThrottleSeconds: 0,
+    });
+  };
+  try {
+    saveToken(liveToken());
+    const result = await bungieFetch("/Destiny2/Profile/123");
+    assert.deepEqual(result, { profiles: [{ membershipId: "123" }] });
+    assert.equal(requestCount, 1, "a success response must never be retried");
+  } finally {
+    restoreGlobals();
+  }
+});
+
 test("bungieFetch throws ApiError for non-throttle error codes without retrying", async () => {
   installLocalStorage();
   let requestCount = 0;

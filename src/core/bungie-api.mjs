@@ -205,12 +205,14 @@ const BUNGIE_API_BASE = "https://www.bungie.net/Platform";
 
 const THROTTLE_CODES = new Set([36, 51]); // ThrottleLimitExceeded*, PerEndpointRequestThrottleExceeded
 
-// Bungie throttles with HTTP 200 + ErrorCode 36/51 (ThrottleSeconds present)
-// or any body carrying a numeric ThrottleSeconds field.
+// Bungie throttles with HTTP 200 + ErrorCode 36/51, and only those responses
+// give ThrottleSeconds real meaning. Success responses (ErrorCode 1) carry a
+// ThrottleSeconds: 0 metadata field that must NOT be read as a throttle signal.
 function throttleSeconds(data) {
   if (!data || typeof data !== "object") return null;
-  if (typeof data.ThrottleSeconds === "number") return data.ThrottleSeconds;
-  if (THROTTLE_CODES.has(data.ErrorCode)) return 5; // no ThrottleSeconds: default wait
+  if (THROTTLE_CODES.has(data.ErrorCode)) {
+    return typeof data.ThrottleSeconds === "number" ? data.ThrottleSeconds : 5; // no ThrottleSeconds: default wait
+  }
   return null;
 }
 
