@@ -324,7 +324,12 @@ function getCatalogIndex() {
 // instanceId. Equipped copies win; otherwise the first occurrence is kept
 // (vault is iterated first, so a vault copy is the default owner).
 export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {}) {
-  const data = (profileResponse?.Response ?? profileResponse)?.data ?? {};
+  // Unwrap both envelope shapes seen in the wild:
+  //   synthetic: { Response: { data: { profile, profileInventory, ... } } }
+  //   real     : { Response: { profile, profileInventory, ... } }  (no .data)
+  // `data` prefers root.data (synthetic); the real response root is the data.
+  const root = profileResponse?.Response ?? profileResponse;
+  const data = root?.data ?? root;
   const userInfo = data.profile?.data?.userInfo ?? {};
   const characters = {};
   for (const [characterId, character] of Object.entries(data.characters?.data ?? {})) {

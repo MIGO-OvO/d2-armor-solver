@@ -403,3 +403,55 @@ test("catalog rarity infers tierType: exotic and legendary armor both land on ti
   assert.equal(legendary.tier, "5");
   assert.equal(legendary.exotic, false);
 });
+
+// --- T7: real desensitized GetProfile fixture (tests/fixtures/profile-fixture.json) ---
+//
+// Captured from a real GetProfile call for account 時南ovo (membershipType 3,
+// 1448 items, 1304 instanceIds desensitized). Its envelope differs from the
+// synthetic fixture: components hang directly off Response (Response.profile,
+// Response.profileInventory, ...) with no `Response.data` wrapper, so
+// buildArmorInventory must unwrap both shapes. The desensitized instanceIds
+// are sequential 1000... placeholders (19-20 digits), never real Bungie IDs
+// (2305843... / 6917529...).
+const realFixture = JSON.parse(
+  readFileSync(new URL("./fixtures/profile-fixture.json", import.meta.url), "utf8"),
+);
+
+test("real fixture: buildArmorInventory unwraps the no-data envelope and returns a real inventory", () => {
+  const result = buildArmorInventory(realFixture);
+  assert.equal(result.membershipType, 3);
+  assert.equal(result.membershipId, "9000000000000000001");
+  assert.ok(Object.keys(result.characters).length >= 1);
+  // A real 1448-item account holds far more armor than the synthetic 5.
+  assert.ok(result.items.length > 50, `expected >50 armor pieces, got ${result.items.length}`);
+  const ids = result.items.map(item => item.id);
+  assert.equal(new Set(ids).size, ids.length, "instanceIds must be unique");
+});
+
+test("real fixture: every item has the full solver shape and desensitized ids", () => {
+  const result = buildArmorInventory(realFixture);
+  const SLOTS = new Set(Object.values(ARMOR_BUCKET_HASH_TO_SLOT));
+  for (const item of result.items) {
+    assert.match(item.id, /^1000\d+$/, `instanceId must be a desensitized placeholder: ${item.id}`);
+    assert.ok(item.hash > 0 && Number.isInteger(item.hash), item.id);
+    assert.ok(item.name.length > 0, `${item.id} must have a name or item_<hash> fallback`);
+    assert.ok(SLOTS.has(item.slot), `${item.id} slot ${item.slot} must be a known armor slot`);
+    assert.ok(["0", "1", "2", "3", "4", "5"].includes(item.tier), `${item.id} tier ${item.tier}`);
+    for (const stat of ["health", "melee", "grenade", "super", "class", "weapons"]) {
+      assert.equal(typeof item.baseStats[stat], "number", `${item.id} baseStats.${stat}`);
+      assert.equal(typeof item.displayedStats[stat], "number", `${item.id} displayedStats.${stat}`);
+    }
+  }
+});
+
+test("real fixture: hunter exotic class item 2809120022 is recognized as classItem and exotic", () => {
+  const result = buildArmorInventory(realFixture);
+  const exotic = result.items.filter(item => item.hash === 2809120022);
+  assert.ok(exotic.length >= 1, "real account owns at least one Relativism");
+  for (const item of exotic) {
+    assert.equal(item.slot, "classItem");
+    assert.equal(item.exotic, true, `${item.id} must carry the exotic flag`);
+    assert.equal(item.tier, "5", "exotic tierType 6 maps to solver tier 5");
+    assert.equal(item.classId, "hunter");
+  }
+});
