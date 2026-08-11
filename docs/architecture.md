@@ -16,6 +16,7 @@ Pages, Cloudflare Static Assets, or any equivalent static host.
 | `DIM CSV` | `parseCsv`, `normalizeDimItem`, inventory filters | CSV quoting/BOM handling, real-stat reconstruction, Tuning and Armor Mod inference |
 | `InventoryPlanner` | owned/farm plans and owned-only loadouts | slot assignment, fixed Exotic matching, set requirements, farming gaps |
 | `ArmorSets` | set lookup and active bonuses | generated Bungie Manifest catalog and localized perk text |
+| portal | route selection and shared language preference | static copy, online/offline navigation, Release and Actions links |
 | browser workbench | global action Adapter used by existing HTML handlers | DOM state, translation, rendering, mode switching |
 | Worker client | Promise-based engine calls | request IDs, structured cloning, Worker errors, inline fallback |
 
@@ -27,7 +28,11 @@ UI and tests, and Locality for future rule changes.
 ## Dependency Direction
 
 ```text
-index.html
+index.html (portal)
+  -> portal.mjs -> shared language preference
+  -> app/index.html
+
+app/index.html
   -> app.mjs (browser Adapter)
        -> armor-engine-client.mjs
             -> Worker Adapter -> ArmorEngine -> solver/reachability/upgrade/inventory
@@ -98,8 +103,12 @@ dependencies on first launch, and opens the local site in the default browser.
 
 ## Deployment
 
-GitHub Pages and Cloudflare Workers Static Assets consume the same `dist/`
-output. The Pages workflow runs `npm ci` and `npm run check`, verifies the main
-page, compatibility redirect, bundled assets, and absence of source-module
-references, then uploads `dist/`. Wrangler treats the output as a prebuilt
-static site with automatic canonical HTML paths and explicit 404 handling.
+GitHub Pages and Cloudflare Workers Static Assets consume the same multi-page
+`dist/` output: `index.html` is the portal and `app/index.html` is the solver.
+The Pages workflow runs `npm ci` and `npm run check` on `main`, verifies both
+entries, the compatibility redirect, bundled assets, and absence of
+source-module references, then uploads `dist/`. Every pushed branch also
+produces a solver-only offline artifact; published Releases receive the same
+offline archive as a downloadable asset. Wrangler treats the output as a
+prebuilt static site with automatic canonical HTML paths and explicit 404
+handling.

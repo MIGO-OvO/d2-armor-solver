@@ -291,7 +291,10 @@ export function normalizeDimItem(record) {
     classId,
     tier: String(record.Tier || "").trim() || "0",
     rarity: record.Rarity || "",
-    exotic: String(record.Rarity || "").toLowerCase() === "exotic",
+    // Exotic Class Items are recognized by their known item hashes in addition
+    // to the Rarity column, so a localized DIM export (e.g. "异域"/"異域")
+    // never loses the exotic flag — and with it the auto-lock on the piece.
+    exotic: String(record.Rarity || "").toLowerCase() === "exotic" || Boolean(exoticClassItem),
     archetypeId,
     tertiary,
     tuningStat,

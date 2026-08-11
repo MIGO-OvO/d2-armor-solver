@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import process from "node:process";
+import { execSync } from "node:child_process";
 
 import { chromium } from "playwright-core";
 import { preview } from "vite";
@@ -36,18 +38,105 @@ const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const server = await preview({
-  configFile: path.join(projectRoot, "vite.config.mjs"),
-  logLevel: "silent",
-  preview: {
-    host: "127.0.0.1",
-    port: 4174,
-    strictPort: false,
-  },
-});
-const address = server.httpServer.address();
-const port = typeof address === "object" && address ? address.port : 4174;
-const baseUrl = "http://127.0.0.1:" + port + "/";
+
+// Bungie GetProfile fixture, already shaped as { ErrorCode: 1, Response: ... }.
+const syntheticProfileFixture = JSON.parse(
+  readFileSync(
+    path.join(projectRoot, "tests", "fixtures", "synthetic-profile-fixture.json"),
+    "utf8",
+  ),
+);
+
+// The Bungie secrets are injected at build time from the environment; the
+// smoke test drives both states: a secret-less build (login hidden) and a
+// build with fake secrets (full login/import flow, all bungie.net mocked).
+function runBuild(env) {
+  execSync("npm run build", { cwd: projectRoot, env, stdio: "inherit" });
+}
+
+let server;
+let portalUrl;
+let baseUrl;
+
+async function startPreview() {
+  server = await preview({
+    configFile: path.join(projectRoot, "vite.config.mjs"),
+    logLevel: "silent",
+    preview: {
+      host: "127.0.0.1",
+      port: 4174,
+      strictPort: false,
+    },
+  });
+  const address = server.httpServer.address();
+  const port = typeof address === "object" && address ? address.port : 4174;
+  portalUrl = "http://127.0.0.1:" + port + "/";
+  baseUrl = portalUrl + "app/";
+}
+
+async function checkPortal(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+  });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+
+  try {
+    await page.goto(portalUrl, { waitUntil: "networkidle" });
+    assert.equal(await page.locator(".route").count(), 2);
+    assert.equal(
+      new URL(await page.locator('.route--online a[href="./app/"]').getAttribute("href"), portalUrl)
+        .pathname.endsWith("/app/"),
+      true,
+      "the online route should point to the app subpath",
+    );
+    assert.equal(
+      await page.locator(".route--offline .action").getAttribute("href"),
+      "https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline.zip",
+      "the primary offline route should download the latest Release archive",
+    );
+
+    await page.locator("#portalLanguage").selectOption("zh-cht");
+    assert.equal(await page.locator(".route--online h3").innerText(), "線上使用");
+    assert.equal(await page.locator("html").getAttribute("lang"), "zh-Hant");
+    await page.locator("#portalLanguage").selectOption("en");
+    assert.equal(await page.locator(".route--online h3").innerText(), "Use online");
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("d2_armor_page_language_v1")),
+      "en",
+      "portal and app should share the language preference",
+    );
+    assert.match(await page.locator("#portalStatus").innerText(), /English/);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: "networkidle" });
+    const mobileLayout = await page.evaluate(() => ({
+      viewportWidth: document.documentElement.clientWidth,
+      contentWidth: document.documentElement.scrollWidth,
+      offlineTop: Math.round(
+        document.querySelector(".route--offline").getBoundingClientRect().top,
+      ),
+      viewportHeight: window.innerHeight,
+    }));
+    assert.ok(
+      mobileLayout.contentWidth <= mobileLayout.viewportWidth + 1,
+      "portal should not overflow at 390px: " + JSON.stringify(mobileLayout),
+    );
+    assert.ok(
+      mobileLayout.offlineTop < mobileLayout.viewportHeight,
+      "both online and offline routes should be discoverable in the 390px first view: " +
+        JSON.stringify(mobileLayout),
+    );
+    assert.deepEqual(browserErrors, []);
+    console.log("browser smoke OK (portal routes, shared language, 390px layout)");
+  } finally {
+    await context.close();
+  }
+}
 
 async function checkInventoryPlanning(browser) {
   const context = await browser.newContext({
@@ -507,15 +596,323 @@ async function checkSetRequirementSnapshot(browser) {
   }
 }
 
+// Bungie login chrome must be absent when the build carries no secrets.
+async function checkBungieLoginHidden(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+  });
+  const page = await context.newPage();
+  const bungieRequests = [];
+  page.on("request", request => {
+    if (request.url().includes("www.bungie.net")) {
+      bungieRequests.push(request.url());
+    }
+  });
+
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    assert.equal(
+      await page.locator("#bungieAuthArea").innerText(),
+      "",
+      "a build without Bungie secrets must leave the auth area empty",
+    );
+    assert.equal(
+      await page.locator("#bungieLoginButton").count(),
+      0,
+      "a build without Bungie secrets must not expose the login button",
+    );
+    assert.deepEqual(
+      bungieRequests,
+      [],
+      "no bungie.net request may escape a secret-less build",
+    );
+  } finally {
+    await context.close();
+  }
+}
+
+// Full Bungie OAuth shell (T10/T11): login URL shape, mocked token exchange,
+// memberships resolution, profile import, error classification, logout. Every
+// bungie.net request is intercepted; anything outside the known mock set
+// increments `unhandled` and fails the run.
+async function checkBungieAuthFlow(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+  });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+
+  const routeStats = { handled: 0, unhandled: 0 };
+  const observedBungieRequests = [];
+  const handledBungieRequests = [];
+  const authorizeRequests = [];
+  let profileMode = "ok"; // "ok" | "throttle" | "403" | "network"
+
+  page.on("request", request => {
+    if (request.url().includes("www.bungie.net")) {
+      observedBungieRequests.push(request.url());
+    }
+  });
+
+  const membershipsBody = JSON.stringify({
+    Response: {
+      destinyMemberships: [{
+        membershipType: 3,
+        membershipId: "222",
+        crossSaveOverride: 0,
+        displayName: "MockGuardian",
+      }],
+    },
+    ErrorCode: 1,
+  });
+  const tokenBody = JSON.stringify({
+    access_token: "mock-access",
+    refresh_token: "mock-refresh",
+    membership_id: "123",
+    expires_in: 3600,
+    refresh_expires_in: 7776000,
+  });
+
+  await page.route("**://www.bungie.net/**", async route => {
+    const url = new URL(route.request().url());
+    handledBungieRequests.push(route.request().url());
+    routeStats.handled += 1;
+    if (url.pathname === "/en/oauth/authorize") {
+      // The login button navigates here: capture the request and bounce back
+      // to the app without a real Bungie round-trip.
+      authorizeRequests.push(route.request().url());
+      return route.fulfill({ status: 302, headers: { location: baseUrl } });
+    }
+    if (url.pathname === "/Platform/App/OAuth/token/") {
+      if (profileMode === "network") return route.abort();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: tokenBody,
+      });
+    }
+    if (url.pathname.endsWith("/User/GetMembershipsForCurrentUser/")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: membershipsBody,
+      });
+    }
+    if (/\/Destiny2\/\d+\/Profile\//.test(url.pathname)) {
+      if (profileMode === "throttle") {
+        // Tiny ThrottleSeconds keeps bungieFetch's retry sleeps negligible.
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ErrorCode: 36, ThrottleSeconds: 0.01 }),
+        });
+      }
+      if (profileMode === "403") {
+        return route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({ ErrorCode: 161, ErrorStatus: "ApiKeyMissingOrInvalid" }),
+        });
+      }
+      if (profileMode === "network") return route.abort();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(syntheticProfileFixture),
+      });
+    }
+    routeStats.unhandled += 1;
+    return route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ ErrorCode: 404, ErrorStatus: "Mocked unknown bungie.net route" }),
+    });
+  });
+
+  try {
+    // --- (b) login button renders (three languages) and builds the authorize URL ---
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator("#bungieLoginButton").waitFor();
+    assert.equal(
+      await page.locator("#bungieLoginButton").innerText(),
+      "Bungie 登录",
+      "zh-chs should label the Bungie login button",
+    );
+    await page.locator("#pageLanguage").selectOption("en");
+    await page.waitForFunction(() => /Bungie login/.test(
+      document.getElementById("bungieLoginButton")?.textContent || "",
+    ));
+    await page.locator("#pageLanguage").selectOption("zh-cht");
+    await page.waitForFunction(() => /Bungie 登入/.test(
+      document.getElementById("bungieLoginButton")?.textContent || "",
+    ));
+    await page.locator("#pageLanguage").selectOption("zh-chs");
+    await page.waitForFunction(() => /Bungie 登录/.test(
+      document.getElementById("bungieLoginButton")?.textContent || "",
+    ));
+
+    await page.locator("#bungieLoginButton").click();
+    await page.waitForLoadState("networkidle");
+    assert.equal(
+      authorizeRequests.length,
+      1,
+      "the authorize navigation must be captured exactly once",
+    );
+    const authorize = new URL(authorizeRequests[0]);
+    assert.equal(authorize.origin, "https://www.bungie.net");
+    assert.equal(authorize.pathname, "/en/oauth/authorize");
+    assert.equal(authorize.searchParams.get("response_type"), "code");
+    assert.equal(authorize.searchParams.get("client_id"), "mock-client-id-123");
+    assert.ok(authorize.searchParams.get("state"), "authorize URL must carry a state");
+    assert.equal(
+      authorize.searchParams.has("scope"),
+      false,
+      "Bungie rejects a scope parameter; none may be sent",
+    );
+    assert.equal(
+      authorize.searchParams.has("redirect_uri"),
+      false,
+      "redirect_uri is not registered in the Bungie app; none may be sent",
+    );
+    const state = await page.evaluate(() => sessionStorage.getItem("bungieOAuthState"));
+    assert.equal(
+      authorize.searchParams.get("state"),
+      state,
+      "the callback state must be persisted before navigating away",
+    );
+
+    // --- (c) mocked OAuth callback: code+state -> token -> memberships ---
+    await page.goto(baseUrl + `?code=mock-auth-code&state=${encodeURIComponent(state)}`, {
+      waitUntil: "networkidle",
+    });
+    await page.locator(".bungie-auth-name").waitFor();
+    assert.equal(
+      await page.locator(".bungie-auth-name").innerText(),
+      "MockGuardian",
+      "the signed-in state should render the Bungie display name",
+    );
+    const savedToken = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("d2_armor_bungie_token_v1")));
+    assert.equal(savedToken.accessToken, "mock-access");
+    assert.equal(savedToken.refreshToken, "mock-refresh");
+    assert.equal(new URL(page.url()).search, "", "code/state must be stripped from the URL");
+    assert.equal(
+      await page.evaluate(() => sessionStorage.getItem("bungieOAuthState")),
+      null,
+      "the consumed OAuth state must be cleared",
+    );
+    assert.equal(await page.locator("#bungieLoginButton").count(), 0);
+
+    // --- (d) refresh inventory from the mocked GetProfile fixture ---
+    await page.locator('#bungieAuthArea button[onclick="importInventoryFromBungie()"]').click();
+    await page.waitForFunction(() => /已导入 [1-9]\d* 件 Bungie 护甲/.test(
+      document.getElementById("upgradeImportSummary")?.textContent || "",
+    ));
+    const importMessage = await page.locator("#upgradeImportSummary").innerText();
+    assert.match(importMessage, /已导入 \d+ 件 Bungie 护甲/);
+    assert.match(importMessage, /请选择职业/);
+    assert.match(await page.locator(".upgrade-import-state").innerText(), /已导入 \d+ 件/);
+    assert.equal(await page.locator("#upgradeImportBody").isVisible(), true);
+
+    // --- (e) error paths keep the user signed in and render classified copy ---
+    for (const [mode, expectedText] of [
+      ["throttle", "请求限流"],
+      ["403", "API key 无效"],
+      ["network", "网络错误或 CORS"],
+    ]) {
+      profileMode = mode;
+      await page.locator('#bungieAuthArea button[onclick="importInventoryFromBungie()"]').click();
+      await page.waitForFunction(text => (
+        document.getElementById("upgradeImportSummary")?.textContent || ""
+      ).includes(text), expectedText);
+      const message = await page.locator("#upgradeImportSummary").innerText();
+      assert.ok(
+        message.includes(expectedText),
+        `expected ${mode} error copy, got: ${message}`,
+      );
+      if (mode === "throttle") {
+        assert.match(message, /秒后重试/, "throttle copy should name the retry window");
+      }
+      assert.equal(
+        await page.locator(".bungie-auth-name").innerText(),
+        "MockGuardian",
+        "an import failure must not sign the user out",
+      );
+    }
+    profileMode = "ok";
+
+    // --- (f) sign out clears token, display name, and Bungie-sourced inventory ---
+    await page.locator('#bungieAuthArea button[onclick="bungieLogout()"]').click();
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("d2_armor_bungie_token_v1")),
+      null,
+      "sign out must clear the stored token",
+    );
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("d2_armor_bungie_display_name_v1")),
+      null,
+      "sign out must clear the cached display name",
+    );
+    assert.equal(await page.locator("#bungieLoginButton").count(), 1);
+    assert.match(await page.locator(".upgrade-import-state").innerText(), /未导入/);
+    assert.equal(await page.locator("#inventoryResults").isHidden(), true);
+
+    // --- escape accounting: every bungie.net request must have been routed ---
+    assert.equal(
+      routeStats.unhandled,
+      0,
+      "unmocked bungie.net requests escaped: " + JSON.stringify(routeStats),
+    );
+    assert.deepEqual(
+      observedBungieRequests.sort(),
+      handledBungieRequests.sort(),
+      "every observed bungie.net request must be routed by the mock interceptor",
+    );
+    assert.ok(
+      routeStats.handled >= 9,
+      "the mocked flow should exercise authorize/token/memberships/profile exchanges: " +
+        JSON.stringify(routeStats),
+    );
+    // The 403/aborted-network console noise is the deliberate error-path
+    // mock output (already asserted via the classified copy above).
+    const unexpectedErrors = browserErrors.filter(error =>
+      !error.includes("the server responded with a status of 403") &&
+      !error.includes("net::ERR_FAILED"),
+    );
+    assert.deepEqual(unexpectedErrors, []);
+    console.log(
+      "bungie smoke: handled=" + routeStats.handled +
+        " unhandled=" + routeStats.unhandled +
+        " authorize=" + authorizeRequests.length,
+    );
+  } finally {
+    await context.close();
+  }
+}
+
+// Phase 1: secret-less build (login hidden) plus all existing regressions.
+const envWithoutBungie = { ...process.env };
+delete envWithoutBungie.BUNGIE_OAUTH_CLIENT_ID;
+delete envWithoutBungie.BUNGIE_OAUTH_CLIENT_SECRET;
+delete envWithoutBungie.BUNGIE_API_KEY;
+runBuild(envWithoutBungie);
+await startPreview();
+
 let browser;
 try {
   browser = await chromium.launch({
     executablePath: await findChrome(),
     headless: true,
   });
+  await checkPortal(browser);
   await checkInventoryPlanning(browser);
   await checkUpgradeTargetSync(browser);
   await checkSetRequirementSnapshot(browser);
+  await checkBungieLoginHidden(browser);
   if (process.argv.includes("--target-sync-only")) {
     console.log("upgrade target sync and set requirement browser regressions OK");
   } else {
@@ -785,6 +1182,27 @@ try {
   assert.deepEqual(browserErrors, []);
   console.log("browser smoke OK (Worker solve, mode switch, target sync, 390px layout)");
   }
+} finally {
+  await browser?.close();
+  await server.close();
+}
+
+// Phase 2: rebuild with fake Bungie secrets and exercise the login/import
+// shell against fully mocked bungie.net routes.
+runBuild({
+  ...envWithoutBungie,
+  BUNGIE_OAUTH_CLIENT_ID: "mock-client-id-123",
+  BUNGIE_OAUTH_CLIENT_SECRET: "mock-client-secret",
+  BUNGIE_API_KEY: "mock-api-key",
+});
+await startPreview();
+try {
+  browser = await chromium.launch({
+    executablePath: await findChrome(),
+    headless: true,
+  });
+  await checkBungieAuthFlow(browser);
+  console.log("browser smoke OK (Bungie OAuth login/import/logout, 0 escaped bungie.net requests)");
 } finally {
   await browser?.close();
   await server.close();

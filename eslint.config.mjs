@@ -17,6 +17,7 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.worker,
+        __OFFLINE_MODE__: "readonly",
       },
     },
     rules: {

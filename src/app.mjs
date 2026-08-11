@@ -1,3 +1,4 @@
+/* global __BUNGIE_OAUTH_CLIENT_ID__ */
 import {
   ARCHETYPES,
   DEFAULT_TARGETS,
@@ -48,6 +49,26 @@ import {
   parseCsv,
   pickCurrentLoadout,
 } from "./core/dim-csv.mjs";
+import {
+  ApiError,
+  ApiKeyError,
+  FatalTokenError,
+  NetworkError,
+  NoMembershipError,
+  ThrottleError,
+  buildAuthorizeUrl,
+  bungieFetch,
+  clearToken,
+  exchangeCodeForToken,
+  getToken,
+  hasToken,
+  resolveMemberships,
+  saveToken,
+} from "./core/bungie-api.mjs";
+import {
+  ARMOR_COMPONENTS,
+  buildArmorInventory,
+} from "./core/bungie-inventory.mjs";
 import {
   getActiveSetBonuses,
   getArmorSetByHash,
@@ -2103,6 +2124,7 @@ let upgradeRequiredStats = [];
 // Owned armor can come from an imported inventory or compact manual entries.
 // Both sources feed the same plan ranking and active-solution match view.
 let importedInventory = [];
+let importSource = ""; // "csv" | "bungie" | "" — provenance of importedInventory
 let manualOwnedItems = [];
 let manualOwnedSequence = 0;
 let manualOwnedEditorOpen = false;
@@ -2270,6 +2292,7 @@ function renderUpgradeImportPanel() {
           <span class="btn upgrade-import-primary">${icon("folder")}${importedInventory.length > 0 ? l("重新导入", "重新匯入", "Replace inventory") : l("导入清单", "匯入清單", "Import inventory")}</span>
           <input type="file" id="dimCsvFile" accept=".csv,text/csv" onchange="handleDimCsvFile(this)">
         </label>
+        <span class="bungie-auth" id="bungieAuthArea" aria-live="polite"></span>
         <button type="button" class="btn upgrade-import-toggle" id="toggleInventoryImportButton" aria-expanded="${inventoryImportExpanded}" aria-controls="upgradeImportBody" onclick="toggleInventoryImportPanel()">${icon(inventoryImportExpanded ? 'up' : 'down')}<span>${toggleLabel}</span></button>
       </div>
     </div>
@@ -2321,6 +2344,7 @@ function renderUpgradeImportPanel() {
   updateImportSummary();
   updateInventorySolveOptions();
   renderSetEffects();
+  renderBungieAuthState();
 }
 
 function toggleInventoryImportPanel() {
@@ -2337,6 +2361,272 @@ function showImportMessage(text, tone = "error") {
   const el = document.getElementById("upgradeImportSummary");
   if (!el) return;
   el.innerHTML = `<div class="msg ${tone}">${icon(tone === "error" ? "block" : "check")}<span>${escapeHtml(text)}</span></div>`;
+}
+
+// --- Bungie OAuth sign-in (T10) ---
+
+const BUNGIE_DISPLAY_NAME_KEY = "d2_armor_bungie_display_name_v1";
+const BUNGIE_AUTO_REFRESH_MIN_MS = 15 * 1000;
+
+let isBungieImporting = false;
+let lastBungieImportAt = 0;
+
+function getBungieDisplayName() {
+  try {
+    return localStorage.getItem(BUNGIE_DISPLAY_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function bungieErrorMessage(error) {
+  if (error instanceof ThrottleError) {
+    return l(
+      `Bungie 请求限流，请 ${error.retrySeconds} 秒后重试。`,
+      `Bungie 請求限流，請 ${error.retrySeconds} 秒後重試。`,
+      `Bungie is throttling requests; retry in ${error.retrySeconds}s.`,
+    );
+  }
+  if (error instanceof ApiKeyError) {
+    return l(
+      "Bungie API key 无效或未获审批，请检查 Bungie 门户的应用设置。",
+      "Bungie API key 無效或未獲審批，請檢查 Bungie 入口網站的应用設定。",
+      "Bungie API key is invalid or not approved. Check your app settings on the Bungie portal.",
+    );
+  }
+  // A 401 ApiError means the token Bungie holds is dead (revoked or clock
+  // skew): the wall-clock expiry check in getValidAccessToken can't see it,
+  // so retrying is doomed. Treat it exactly like FatalTokenError: clear the
+  // token and drop the user back to the logged-out state.
+  if (error instanceof FatalTokenError || (error instanceof ApiError && error.status === 401)) {
+    return l(
+      "登录已过期，请重新登录。",
+      "登入已過期，請重新登入。",
+      "Sign-in expired. Sign in again.",
+    );
+  }
+  if (error instanceof NetworkError) {
+    return l(
+      "网络错误或 CORS 未配置：请确认当前浏览器来源已在 Bungie 门户注册。",
+      "網路錯誤或 CORS 未設定：請確認目前瀏覽器來源已在 Bungie 入口網站註冊。",
+      "Network error or CORS not configured: make sure this browser origin is registered on the Bungie portal.",
+    );
+  }
+  if (error instanceof NoMembershipError) {
+    return l(
+      "未找到 Destiny 2 账号。",
+      "找不到 Destiny 2 帳號。",
+      "No Destiny 2 membership found for this account.",
+    );
+  }
+  if (error instanceof ApiError) {
+    return l(
+      "从 Bungie 获取数据失败，请稍后重试。",
+      "從 Bungie 取得資料失敗，請稍後重試。",
+      "Failed to fetch data from Bungie. Try again later.",
+    );
+  }
+  return l(
+    "Bungie 同步失败，请重试。",
+    "Bungie 同步失敗，請重試。",
+    "Bungie sync failed. Try again.",
+  );
+}
+
+// Shared Bungie failure path: a dead token (FatalTokenError, or an ApiError
+// with HTTP 401 — Bungie rejected the access token) drops the user back to
+// the logged-out state; everything else just renders the classified message.
+function handleBungieAuthError(error) {
+  if (error instanceof FatalTokenError || (error instanceof ApiError && error.status === 401)) {
+    clearToken();
+    try {
+      localStorage.removeItem(BUNGIE_DISPLAY_NAME_KEY);
+    } catch {
+      // ignore storage failures
+    }
+  }
+  renderBungieAuthState();
+  showImportMessage(bungieErrorMessage(error));
+}
+
+// Shared markup builder: both the import-area entry (#bungieAuthArea) and the
+// header entry (#headerBungieAuth) render the same compact control set.
+function bungieAuthAreaHtml(loginButtonId = "", nameClass = "bungie-auth-name") {
+  if (!__BUNGIE_OAUTH_CLIENT_ID__) return "";
+  const displayName = `<span class="${nameClass}">${escapeHtml(getBungieDisplayName())}</span>`;
+  const logoutButton = `<button type="button" class="btn" onclick="bungieLogout()">${l("登出", "登出", "Sign out")}</button>`;
+  if (isBungieImporting) {
+    return displayName +
+      `<button type="button" class="btn" disabled>${icon("refresh")}${l("导入中…", "匯入中…", "Importing…")}</button>` +
+      logoutButton;
+  }
+  if (hasToken()) {
+    return displayName +
+      `<button type="button" class="btn" onclick="importInventoryFromBungie()">${icon("refresh")}${l("刷新库存", "重新整理庫存", "Refresh inventory")}</button>` +
+      logoutButton;
+  }
+  return `<button type="button" class="btn"${loginButtonId ? ` id="${loginButtonId}"` : ""} onclick="bungieLogin()">${l("Bungie 登录", "Bungie 登入", "Bungie login")}</button>`;
+}
+
+// Single render entry point: updating the import-area entry keeps the header
+// entry in sync (the login id stays unique to the import area).
+function renderBungieAuthState() {
+  const area = document.getElementById("bungieAuthArea");
+  if (area) area.innerHTML = bungieAuthAreaHtml("bungieLoginButton");
+  renderHeaderBungieAuthState();
+}
+
+function renderHeaderBungieAuthState() {
+  const area = document.getElementById("headerBungieAuth");
+  if (area) area.innerHTML = bungieAuthAreaHtml("", "header-bungie-auth-name");
+}
+
+function bungieLogin() {
+  const state = crypto.randomUUID();
+  try {
+    sessionStorage.setItem("bungieOAuthState", state);
+  } catch {
+    // sessionStorage unavailable: the state check on return falls through and errors
+  }
+  window.location.href = buildAuthorizeUrl(state);
+}
+
+function bungieLogout() {
+  clearToken();
+  try {
+    localStorage.removeItem(BUNGIE_DISPLAY_NAME_KEY);
+  } catch {
+    // ignore storage failures
+  }
+  if (importSource === "bungie") {
+    importedInventory = [];
+    importSource = "";
+    clearInventoryResults();
+    renderUpgradeImportPanel();
+  }
+  renderBungieAuthState();
+}
+
+// Throttle gate for the visibilitychange auto-refresh: refresh at most once
+// per 15s per visible-return. No timers involved.
+function shouldAutoRefresh(now = Date.now()) {
+  return hasToken() && now - lastBungieImportAt > BUNGIE_AUTO_REFRESH_MIN_MS;
+}
+
+async function importInventoryFromBungie() {
+  if (!getToken()) {
+    showImportMessage(l(
+      "尚未登录 Bungie。",
+      "尚未登入 Bungie。",
+      "Not signed in to Bungie.",
+    ));
+    return;
+  }
+  if (isBungieImporting) return;
+  isBungieImporting = true;
+  renderBungieAuthState();
+  try {
+    const { membershipType, membershipId } = await resolveMemberships();
+    const response = await bungieFetch(
+      `/Destiny2/${membershipType}/Profile/${membershipId}/?components=${ARMOR_COMPONENTS.join(",")}`,
+      { auth: true },
+    );
+    const { items } = buildArmorInventory(response, { language: getPageLanguage() });
+    const replaced = importedInventory.length > 0;
+    applyImportedInventory(items, "bungie");
+    lastBungieImportAt = Date.now();
+    isBungieImporting = false;
+    renderBungieAuthState();
+    const countNote = replaced
+      ? [
+        `已替换为 Bungie 库存（${items.length} 件护甲）。`,
+        `已替換為 Bungie 庫存（${items.length} 件防具）。`,
+        `Replaced with Bungie inventory (${items.length} armor pieces).`,
+      ]
+      : [
+        `已导入 ${items.length} 件 Bungie 护甲。`,
+        `已匯入 ${items.length} 件 Bungie 防具。`,
+        `Imported ${items.length} armor pieces from Bungie.`,
+      ];
+    if (calculatorMode === "solve") {
+      showImportMessage(l(
+        `${countNote[0]} 请选择职业，再设置目标、套装和异域后求解。`,
+        `${countNote[1]} 請選擇職業，再設定目標、套裝和異域後求解。`,
+        `${countNote[2]} Choose a class, set your targets, set requirement, and Exotic, then solve.`,
+      ), "info");
+    } else if (importClassFilter) {
+      applyEquippedLoadout();
+      showImportMessage(l(...countNote), "info");
+    } else {
+      showImportMessage(l(
+        `${countNote[0]} 清单包含多个职业的当前穿戴，请先选择职业，再填入当前穿戴。`,
+        `${countNote[1]} 清單包含多個職業的目前穿戴，請先選擇職業，再填入目前穿戴。`,
+        `${countNote[2]} The list contains equipped loadouts for multiple classes; choose a class before filling the loadout.`,
+      ), "info");
+    }
+  } catch (error) {
+    isBungieImporting = false;
+    handleBungieAuthError(error);
+  }
+}
+
+async function handleBungieOAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  if (code === null) {
+    renderBungieAuthState();
+    return;
+  }
+  const expectedState = sessionStorage.getItem("bungieOAuthState");
+  if (!expectedState || params.get("state") !== expectedState) {
+    showImportMessage(l(
+      "登录状态校验失败，请重试。",
+      "登入狀態驗證失敗，請重試。",
+      "OAuth state check failed. Try again.",
+    ));
+    return;
+  }
+  sessionStorage.removeItem("bungieOAuthState");
+  // Strip the OAuth code/state from the URL, keeping any other query
+  // parameters. Rebuilding via URLSearchParams (same `params` object read
+  // above) avoids the dangling "&" a regex-based strip leaves behind when
+  // code/state coexist with other parameters.
+  params.delete("code");
+  params.delete("state");
+  const cleanQuery = params.toString();
+  history.replaceState({}, "", window.location.pathname + (cleanQuery ? `?${cleanQuery}` : ""));
+  try {
+    const token = await exchangeCodeForToken(code);
+    saveToken(token);
+    const memberships = await resolveMemberships();
+    const displayName = memberships.displayName || "";
+    try {
+      localStorage.setItem(BUNGIE_DISPLAY_NAME_KEY, displayName);
+    } catch {
+      // ignore storage failures
+    }
+    renderBungieAuthState();
+  } catch (error) {
+    handleBungieAuthError(error);
+  }
+}
+
+// Shared post-import pipeline for both CSV and Bungie imports: adopt the
+// items, reset results/exotic filters, detect the class, re-render, persist.
+function applyImportedInventory(items, source) {
+  importedInventory = items;
+  importSource = source;
+  inventoryImportExpanded = true;
+  clearInventoryResults();
+  const importedClasses = new Set(items.map(item => item.classId).filter(Boolean));
+  const detectedClass = detectEquippedClass(items);
+  if (!importedClasses.has(importClassFilter)) {
+    importClassFilter = detectedClass || (importedClasses.size === 1 ? [...importedClasses][0] : "");
+  }
+  inventoryExoticSlotFilter = "";
+  inventoryFixedExoticKey = "";
+  renderUpgradeImportPanel();
+  saveUpgradeDraft();
 }
 
 function handleDimCsvFile(input) {
@@ -2356,36 +2646,22 @@ function handleDimCsvFile(input) {
         ));
         return;
       }
-      importedInventory = items;
-      inventoryImportExpanded = true;
       input.value = "";
-      clearInventoryResults();
-      const importedClasses = new Set(items.map(item => item.classId).filter(Boolean));
-      const detectedClass = detectEquippedClass(items);
-      if (!importedClasses.has(importClassFilter)) {
-        importClassFilter = detectedClass || (importedClasses.size === 1 ? [...importedClasses][0] : "");
-      }
-      inventoryExoticSlotFilter = "";
-      inventoryFixedExoticKey = "";
+      applyImportedInventory(items, "csv");
       if (calculatorMode === "solve") {
-        renderUpgradeImportPanel();
-        saveUpgradeDraft();
         showImportMessage(l(
           `已导入 ${items.length} 件护甲。请选择职业，再设置目标、套装和异域后求解。`,
           `已匯入 ${items.length} 件防具。請選擇職業，再設定目標、套裝和異域後求解。`,
           `Imported ${items.length} armor pieces. Choose a class, set your targets, set requirement, and Exotic, then solve.`,
         ), "info");
+      } else if (importClassFilter) {
+        applyEquippedLoadout();
       } else {
-        renderUpgradeImportPanel();
-        if (importClassFilter) {
-          applyEquippedLoadout();
-        } else {
-          showImportMessage(l(
-            `已导入 ${items.length} 件护甲。CSV 包含多个职业的当前穿戴，请先选择职业，再填入当前穿戴。`,
-            `已匯入 ${items.length} 件防具。CSV 包含多個職業的目前穿戴，請先選擇職業，再填入目前穿戴。`,
-            `Imported ${items.length} armor pieces. The CSV contains equipped loadouts for multiple classes; choose a class before filling the loadout.`,
-          ), "info");
-        }
+        showImportMessage(l(
+          `已导入 ${items.length} 件护甲。CSV 包含多个职业的当前穿戴，请先选择职业，再填入当前穿戴。`,
+          `已匯入 ${items.length} 件防具。CSV 包含多個職業的目前穿戴，請先選擇職業，再填入目前穿戴。`,
+          `Imported ${items.length} armor pieces. The CSV contains equipped loadouts for multiple classes; choose a class before filling the loadout.`,
+        ), "info");
       }
     } catch (error) {
       showImportMessage(l(
@@ -2542,6 +2818,14 @@ function applyLoadoutItems(items) {
   for (const item of items) {
     if (item.slot && !bySlot[item.slot]) bySlot[item.slot] = item;
   }
+  // A locked piece must survive a loadout refill. Capture which slots carried
+  // a locked piece (and its instance/roll identity) before rebuilding; the
+  // manualLocked reset below would otherwise silently drop the user's
+  // "固定此件，不参与替换" and let the optimizer replace the piece — e.g. an
+  // exotic class item swapped for another roll with different perks.
+  const previousLocked = upgradeBuildState.map((piece, index) =>
+    (piece?.locked || manualLocked[index]) ? piece : null
+  );
   const missingSlots = [];
   upgradeBuildState = UPGRADE_SLOTS.map((slotDef, index) => {
     const item = bySlot[slotDef.id];
@@ -2552,6 +2836,19 @@ function applyLoadoutItems(items) {
     return createUpgradePieceFromItem(item, index);
   });
   manualLocked = [];
+  previousLocked.forEach((prevPiece, index) => {
+    if (!prevPiece) return;
+    const nextPiece = upgradeBuildState[index];
+    if (!nextPiece) return;
+    const sameInstance = Boolean(
+      prevPiece.sourceId && nextPiece.sourceId && prevPiece.sourceId === nextPiece.sourceId
+    );
+    const sameExoticRoll = prevPiece.exotic && nextPiece.exotic
+      && prevPiece.hash && prevPiece.hash === nextPiece.hash
+      && (prevPiece.primaryPerkId || null) === (nextPiece.primaryPerkId || null)
+      && (prevPiece.secondaryPerkId || null) === (nextPiece.secondaryPerkId || null);
+    if (sameInstance || sameExoticRoll) manualLocked[index] = true;
+  });
   syncUpgradeLocks();
   saveUpgradeDraft();
   renderUpgradeBuildEditor();
@@ -2793,9 +3090,11 @@ function syncUpgradeLocks() {
   // manually stay fixed. A set requirement must NOT lock the current pieces:
   // solving filters the uploaded inventory for loadouts that satisfy the set
   // bonus while approaching the stat targets, which requires every non-fixed
-  // slot to stay swappable.
+  // slot to stay swappable. Locked stays monotonic: once a piece is fixed it
+  // is never silently unlocked by a re-render — only updateUpgradePiece(…,
+  // 'locked', false) releases it.
   (upgradeBuildState || []).forEach((piece, index) => {
-    piece.locked = Boolean(piece.exotic) || Boolean(manualLocked[index]);
+    piece.locked = Boolean(piece.locked) || Boolean(piece.exotic) || Boolean(manualLocked[index]);
   });
   const stateEl = document.getElementById("setRequirementState");
   if (!stateEl) return;
@@ -2870,7 +3169,11 @@ function renderUpgradeBuildEditor(openIndex = null) {
     const setLabel = setForPiece
       ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(setForPiece))}</span> · `
       : '';
-    const identity = `${pieceNameLabel}${setLabel}<span class="upgrade-piece-arch">${getArchetypeLabel(archetype.id)}</span><span class="upgrade-piece-detail"> · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}</span>`;
+    const perkIds = [piece.primaryPerkId, piece.secondaryPerkId].filter(Boolean);
+    const perkLabel = perkIds.length > 0
+      ? `<span class="upgrade-piece-perks">${perkIds.map(id => escapeHtml(getExoticPerkName(id, id))).join(' + ')}</span> · `
+      : '';
+    const identity = `${pieceNameLabel}${setLabel}${perkLabel}<span class="upgrade-piece-arch">${getArchetypeLabel(archetype.id)}</span><span class="upgrade-piece-detail"> · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}</span>`;
     const status = piece.exotic
       ? l('异域固定件','異域固定件','Fixed Exotic')
       : (piece.locked ? l('固定不替换','固定不替換','Fixed') : l('可替换','可替換','Replaceable'));
@@ -4114,6 +4417,8 @@ Object.assign(window, {
   applyEquippedLoadout,
   applyNearestTargetSuggestion,
   balanceTargetsToBudget,
+  bungieLogin,
+  bungieLogout,
   changePageLanguage,
   clearAllBuilds,
   copyDimExportLink,
@@ -4126,6 +4431,7 @@ Object.assign(window, {
   handleUpgradeDragEnd,
   handleUpgradeDragStart,
   handleUpgradeDrop,
+  importInventoryFromBungie,
   loadBuild,
   removeManualOwnedArmor,
   refineWithPriorities,
@@ -4134,6 +4440,7 @@ Object.assign(window, {
   saveBuild,
   selectInventorySolution,
   setCalculatorMode,
+  shouldAutoRefresh,
   solve,
   switchSolution,
   sync10to5,
@@ -4182,3 +4489,9 @@ loadCurrentDraft();
 renderSavedBuilds();
 initializeUpgradeOptimizer();
 initializeFloatingJumpVisibility();
+handleBungieOAuthCallback();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && shouldAutoRefresh()) {
+    importInventoryFromBungie();
+  }
+});

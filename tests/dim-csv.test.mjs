@@ -161,6 +161,19 @@ test("DIM import derives the Exotic Class Item frame from its fixed 30/25/20 rol
   assert.equal(item.tuningTo, "melee");
 });
 
+test("exotic class item keeps the exotic flag even with a localized Rarity value", () => {
+  // DIM exports the Rarity column as "Exotic", but a localized export could
+  // carry "异域"/"異域". The exotic class item hash must keep it exotic so the
+  // upgrade-mode auto-lock still applies.
+  const csv = [
+    "Name,Hash,Id,Rarity,Tier,Type,Equippable,Archetype,Tertiary Stat,Tuning Stat,Masterwork Tier,Owner,Equipped,Power,Weapons,Health,Class,Grenade,Super,Melee,Total,Weapons (Base),Health (Base),Class (Base),Grenade (Base),Super (Base),Melee (Base),Total (Base)",
+    'Relativism,2809120022,relativism-2,异域,5,猎人披风,猎人,"","","",5,Vault,false,500,10,20,10,20,10,35,105,5,25,5,20,5,30,90',
+  ].join("\n");
+  const item = normalizeDimItem(parseCsv(csv)[0]);
+  assert.equal(item.exotic, true);
+  assert.equal(item.archetypeId, "Brawler");
+});
+
 test("filterArmorItems applies class and Tier 5 filters", () => {
   const items = parseCsv(CSV_FIXTURE).map(normalizeDimItem);
   assert.equal(filterArmorItems(items, { tier5Only: true }).length, 3);

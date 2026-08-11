@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:offline": "node scripts/build-offline.mjs",
     "dev": "vite",
     "preview": "vite preview",
     "dev:cloudflare": "npm run build && wrangler dev",
@@ -14,6 +15,7 @@
     "test": "node --test",
     "test:upgrade": "node check-upgrade-plan.js",
     "test:browser": "npm run build && node scripts/browser-smoke.mjs",
+    "verify:offline": "node scripts/build-offline.mjs && node scripts/verify-offline.mjs",
     "check": "npm run lint && npm run test && npm run test:upgrade && npm run build",
     "deploy": "npm run build && wrangler deploy",
     "deploy:dry-run": "npm run build && wrangler deploy --dry-run"
