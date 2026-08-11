@@ -22,6 +22,11 @@ import {
   TUNING_MOD_HASH_BY_TUNING,
 } from "./armor-mods.data.mjs";
 import { ARMOR_ITEMS } from "./armor-items.data.mjs";
+import {
+  CLASS_ABILITY_PENALTY_FRAGMENTS,
+  CLASS_ABILITY_STAT_BY_CLASS,
+  FRAGMENT_STAT_CHANGES,
+} from "./fragment-data.data.mjs";
 
 // The 8 DestinyComponentType values the armor inventory request needs.
 export const ARMOR_COMPONENTS = [
@@ -392,4 +397,57 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
     membershipId: userInfo.membershipId ?? null,
     characters,
   };
+}
+
+// Subclass bucket (3284755031) holds the equipped subclass item on every
+// character; its sockets carry the currently installed Aspects and Fragments.
+// Map the installed plug hashes through FRAGMENT_STAT_CHANGES and sum the
+// stat adjustments per character (one subclass per character).
+//
+// The two class-dependent fragments (Echo of Persistence, Spark of Focus)
+// apply -10 to whichever stat governs class-ability regeneration, so the
+// character's classType resolves which stat gets the penalty.
+export function extractSubclassFragments(profileResponse) {
+  // Unwrap both envelope shapes, same as buildArmorInventory.
+  const root = profileResponse?.Response ?? profileResponse;
+  const data = root?.data ?? root;
+  const sockets = data.itemComponents?.sockets?.data ?? {};
+  const classByCharacter = {};
+  for (const [characterId, character] of Object.entries(data.characters?.data ?? {})) {
+    classByCharacter[characterId] = CLASS_BY_TYPE[character?.classType] || null;
+  }
+  const byCharacter = {};
+  for (const [characterId, character] of Object.entries(data.characterEquipment?.data ?? {})) {
+    const subclass = (character?.items ?? []).find(item => Number(item.bucketHash) === 3284755031);
+    if (!subclass) continue;
+    const instanceId = String(subclass.itemInstanceId ?? "");
+    if (!instanceId) continue;
+    const adjustments = {};
+    const classId = classByCharacter[characterId] || null;
+    const classAbilityStat = CLASS_ABILITY_STAT_BY_CLASS[classId] || null;
+    for (const socket of sockets[instanceId]?.sockets ?? []) {
+      // Disabled sockets (e.g. the third Aspect slot before unlocking) carry
+      // no installed plug; a missing plugHash means the socket is empty.
+      if (socket?.isEnabled === false || !socket.plugHash) continue;
+      const plugHash = Number(socket.plugHash);
+      if (CLASS_ABILITY_PENALTY_FRAGMENTS.has(plugHash)) {
+        if (classAbilityStat) {
+          adjustments[classAbilityStat] = (adjustments[classAbilityStat] || 0) - 10;
+        }
+        continue;
+      }
+      const changes = FRAGMENT_STAT_CHANGES[plugHash];
+      if (!changes) continue;
+      for (const [stat, delta] of Object.entries(changes)) {
+        adjustments[stat] = (adjustments[stat] || 0) + delta;
+      }
+    }
+    // Drop stats whose adjustments cancelled out (e.g. +10/-10 from two
+    // fragments): a zero entry carries no signal for the solver.
+    for (const stat of Object.keys(adjustments)) {
+      if (adjustments[stat] === 0) delete adjustments[stat];
+    }
+    if (Object.keys(adjustments).length > 0) byCharacter[characterId] = adjustments;
+  }
+  return byCharacter;
 }

@@ -5,6 +5,7 @@ import {
   ARMOR_BUCKET_HASH_TO_SLOT,
   ARMOR_COMPONENTS,
   buildArmorInventory,
+  extractSubclassFragments,
   normalizeApiItem,
 } from "../src/core/bungie-inventory.mjs";
 import { getEffectiveBaseStats } from "../src/core/dim-csv.mjs";
@@ -523,4 +524,32 @@ test("real fixture: vault armor (General bucket 138197802) is recovered via the 
     assert.equal(item.equipped, false);
   }
   assert.ok(result.items.length > 500, `account armor >500, got ${result.items.length}`);
+});
+
+// --- Subclass fragment recognition (T12) ---
+//
+// extractSubclassFragments walks each character's equipped subclass item
+// (bucket 3284755031), reads its socket plugs, and maps them through
+// FRAGMENT_STAT_CHANGES. The real fixture carries three subclasses; the
+// synthetic one carries none.
+
+test("extractSubclassFragments returns an empty map for a profile without subclasses", () => {
+  assert.deepEqual(extractSubclassFragments(fixture), {});
+  assert.deepEqual(extractSubclassFragments({ ErrorCode: 1, Response: { data: {} } }), {});
+});
+
+test("real fixture: every character's subclass resolves stat adjustments", () => {
+  const result = extractSubclassFragments(realFixture);
+  // The three fixture characters carry real equipped subclasses; their plugs
+  // resolve through FRAGMENT_STAT_CHANGES (installed Aspect/Fragment hashes).
+  // Assertions are derived from the fixture's own socket plugs:
+  //   Hunter  ...: Facet of Purpose (class -10); Facet of Dawn/Protection cancel
+  //   Warlock...: Facet of Purpose (class -10), Facet of Protection (melee +10),
+  //               Facet of Dominance (grenade -10)
+  //   Titan   ...: Whisper of Hunger (melee -20), Whisper of Conduction (super +10, health +10)
+  assert.deepEqual(result, {
+    "9000000000000000002": { class: -10 },
+    "9000000000000000003": { class: -10, melee: 10, grenade: -10 },
+    "9000000000000000004": { melee: -20, super: 10, health: 10 },
+  });
 });

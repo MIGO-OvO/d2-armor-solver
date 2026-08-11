@@ -68,6 +68,7 @@ import {
 import {
   ARMOR_COMPONENTS,
   buildArmorInventory,
+  extractSubclassFragments,
 } from "./core/bungie-inventory.mjs";
 import {
   getActiveSetBonuses,
@@ -2139,6 +2140,10 @@ let inventoryFixedExoticKey = "";
 const EXOTIC_SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
 const EXOTIC_SLOTS = new Set(EXOTIC_SLOT_ORDER);
 
+// Bungie classType (0/1/2) -> solver class id (matches CLASS_BY_TYPE in
+// bungie-inventory.mjs; used to resolve subclass fragments per class).
+const CLASS_ID_BY_CLASS_TYPE = { 0: "titan", 1: "hunter", 2: "warlock" };
+
 function getInventoryExoticKey(item) {
   const name = String(item?.name || "").trim().toLocaleLowerCase();
   if (name) return `name:${name}`;
@@ -2370,6 +2375,10 @@ const BUNGIE_AUTO_REFRESH_MIN_MS = 15 * 1000;
 
 let isBungieImporting = false;
 let lastBungieImportAt = 0;
+// Per-character subclass fragments from the last Bungie import, keyed by
+// characterId: { characterId: { stat: delta } }. Filled by importInventoryFromBungie,
+// consumed by applyEquippedLoadout to auto-set the fragment steppers.
+let bungieSubclassFragments = null;
 
 function getBungieDisplayName() {
   try {
@@ -2498,6 +2507,7 @@ function bungieLogout() {
   } catch {
     // ignore storage failures
   }
+  bungieSubclassFragments = null;
   if (importSource === "bungie") {
     importedInventory = [];
     importSource = "";
@@ -2531,7 +2541,19 @@ async function importInventoryFromBungie() {
       `/Destiny2/${membershipType}/Profile/${membershipId}/?components=${ARMOR_COMPONENTS.join(",")}`,
       { auth: true },
     );
-    const { items } = buildArmorInventory(response, { language: getPageLanguage() });
+    const { items, characters } = buildArmorInventory(response, { language: getPageLanguage() });
+    // Map the per-character subclass fragments to class ids so the equipped
+    // loadout fill can look them up by the selected class.
+    const fragmentsByCharacter = extractSubclassFragments(response);
+    bungieSubclassFragments = null;
+    const fragmentsByClass = {};
+    for (const [characterId, character] of Object.entries(characters)) {
+      const classId = CLASS_ID_BY_CLASS_TYPE[character?.classType];
+      if (!classId) continue;
+      const adjustments = fragmentsByCharacter[characterId];
+      if (adjustments) fragmentsByClass[classId] = adjustments;
+    }
+    if (Object.keys(fragmentsByClass).length > 0) bungieSubclassFragments = fragmentsByClass;
     const replaced = importedInventory.length > 0;
     applyImportedInventory(items, "bungie");
     lastBungieImportAt = Date.now();
@@ -2647,6 +2669,9 @@ function handleDimCsvFile(input) {
         return;
       }
       input.value = "";
+      // A CSV carries no subclass sockets, so any Bungie fragment map from a
+      // previous import must not leak into the CSV-backed loadout fill.
+      bungieSubclassFragments = null;
       applyImportedInventory(items, "csv");
       if (calculatorMode === "solve") {
         showImportMessage(l(
@@ -2801,6 +2826,7 @@ function updateImportSummary() {
 
 function clearImportedInventory() {
   importedInventory = [];
+  bungieSubclassFragments = null;
   inventoryImportExpanded = false;
   setRequirement = { type: "none" };
   manualLocked = [];
@@ -2885,11 +2911,65 @@ function applyEquippedLoadout() {
   }));
   if (!importClassFilter && items[0]?.classId) setImportClass(items[0].classId);
   applyLoadoutItems(items);
+  // Bungie imports carry the subclass item's installed Aspects/Fragments:
+  // fill the fragment steppers from the selected class's current subclass.
+  const fragmentsApplied = applySubclassFragmentsToUI();
+  // Auto-set the six-stat targets to the current stats (armor + fragments),
+  // so the user starts from where the equipped loadout already is instead of
+  // re-entering the whole target set by hand.
+  applyCurrentStatsToTargets();
+  saveCurrentDraft();
+  saveUpgradeDraft();
   showImportMessage(l(
-    `已按当前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件护甲。`,
-    `已依目前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件防具。`,
-    `Filled ${items.length} armor pieces from the equipped loadout (${getClassLabel(importClassFilter)}).`
+    fragmentsApplied
+      ? `已按当前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件护甲，并识别了当前星象/碎片的属性调整；六维目标已设为当前六维。`
+      : `已按当前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件护甲；六维目标已设为当前六维。`,
+    fragmentsApplied
+      ? `已依目前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件防具，並辨識了目前星象/碎片的數值調整；六維目標已設為目前六維。`
+      : `已依目前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件防具；六維目標已設為目前六維。`,
+    fragmentsApplied
+      ? `Filled ${items.length} armor pieces from the equipped loadout (${getClassLabel(importClassFilter)}), recognized the current Aspect/Fragment stat adjustments, and set the six-stat targets to the current stats.`
+      : `Filled ${items.length} armor pieces from the equipped loadout (${getClassLabel(importClassFilter)}) and set the six-stat targets to the current stats.`
   ), "info");
+}
+
+// Fill the fragment steppers (fragVal_*) with the stat adjustments of the
+// selected class's currently installed Aspects/Fragments (Bungie import only).
+// Returns true when a Bungie fragment map was applied.
+function applySubclassFragmentsToUI() {
+  if (!bungieSubclassFragments || !importClassFilter) return false;
+  const fragments = bungieSubclassFragments[importClassFilter];
+  if (!fragments) return false;
+  for (const stat of STATS) {
+    const el = document.getElementById('fragVal_' + stat);
+    if (!el) continue;
+    const value = fragments[stat] || 0;
+    el.textContent = value;
+    el.style.color = value !== 0 ? STAT_COLORS[stat] : '';
+  }
+  updateBudget();
+  updateUpgradeBudgetSummary();
+  scheduleRealtimeRanges();
+  return true;
+}
+
+// Set the six-stat targets (target_*) to the current loadout's final stats:
+// armor totals plus the (just-filled) fragment adjustments.
+function applyCurrentStatsToTargets() {
+  if (upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
+  const totals = finalizeUpgradeTotals(
+    getManualUpgradeArmorTotals(upgradeBuildState),
+    getUpgradeFragments()
+  );
+  for (const stat of STATS) {
+    const input = document.getElementById('target_' + stat);
+    if (!input) continue;
+    input.value = totals[stat];
+    input.style.borderColor = totals[stat] !== 0 ? STAT_COLORS[stat] : 'var(--border)';
+  }
+  updateBudget();
+  updateUpgradeBudgetSummary();
+  scheduleRealtimeRanges();
 }
 
 function getClassLabel(classId) {
