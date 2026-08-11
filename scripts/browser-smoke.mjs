@@ -55,6 +55,7 @@ function runBuild(env) {
 }
 
 let server;
+let portalUrl;
 let baseUrl;
 
 async function startPreview() {
@@ -69,7 +70,72 @@ async function startPreview() {
   });
   const address = server.httpServer.address();
   const port = typeof address === "object" && address ? address.port : 4174;
-  baseUrl = "http://127.0.0.1:" + port + "/";
+  portalUrl = "http://127.0.0.1:" + port + "/";
+  baseUrl = portalUrl + "app/";
+}
+
+async function checkPortal(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+  });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+
+  try {
+    await page.goto(portalUrl, { waitUntil: "networkidle" });
+    assert.equal(await page.locator(".route").count(), 2);
+    assert.equal(
+      new URL(await page.locator('.route--online a[href="./app/"]').getAttribute("href"), portalUrl)
+        .pathname.endsWith("/app/"),
+      true,
+      "the online route should point to the app subpath",
+    );
+    assert.equal(
+      await page.locator(".route--offline .action").getAttribute("href"),
+      "https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline.zip",
+      "the primary offline route should download the latest Release archive",
+    );
+
+    await page.locator("#portalLanguage").selectOption("zh-cht");
+    assert.equal(await page.locator(".route--online h3").innerText(), "線上使用");
+    assert.equal(await page.locator("html").getAttribute("lang"), "zh-Hant");
+    await page.locator("#portalLanguage").selectOption("en");
+    assert.equal(await page.locator(".route--online h3").innerText(), "Use online");
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("d2_armor_page_language_v1")),
+      "en",
+      "portal and app should share the language preference",
+    );
+    assert.match(await page.locator("#portalStatus").innerText(), /English/);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: "networkidle" });
+    const mobileLayout = await page.evaluate(() => ({
+      viewportWidth: document.documentElement.clientWidth,
+      contentWidth: document.documentElement.scrollWidth,
+      offlineTop: Math.round(
+        document.querySelector(".route--offline").getBoundingClientRect().top,
+      ),
+      viewportHeight: window.innerHeight,
+    }));
+    assert.ok(
+      mobileLayout.contentWidth <= mobileLayout.viewportWidth + 1,
+      "portal should not overflow at 390px: " + JSON.stringify(mobileLayout),
+    );
+    assert.ok(
+      mobileLayout.offlineTop < mobileLayout.viewportHeight,
+      "both online and offline routes should be discoverable in the 390px first view: " +
+        JSON.stringify(mobileLayout),
+    );
+    assert.deepEqual(browserErrors, []);
+    console.log("browser smoke OK (portal routes, shared language, 390px layout)");
+  } finally {
+    await context.close();
+  }
 }
 
 async function checkInventoryPlanning(browser) {
@@ -629,7 +695,7 @@ async function checkBungieAuthFlow(browser) {
         body: tokenBody,
       });
     }
-    if (url.pathname.endsWith("/Destiny2/GetMembershipsForCurrentUser/")) {
+    if (url.pathname.endsWith("/User/GetMembershipsForCurrentUser/")) {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -842,6 +908,7 @@ try {
     executablePath: await findChrome(),
     headless: true,
   });
+  await checkPortal(browser);
   await checkInventoryPlanning(browser);
   await checkUpgradeTargetSync(browser);
   await checkSetRequirementSnapshot(browser);

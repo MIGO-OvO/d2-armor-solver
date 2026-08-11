@@ -2,9 +2,9 @@ name: Deploy GitHub Pages
 
 on:
   push:
-    branches:
-      - main
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     timeout-minutes: 15
     environment:
       name: github-pages
@@ -49,9 +50,11 @@ jobs:
         shell: bash
         run: |
           test -s dist/index.html
+          test -s dist/app/index.html
           test -s dist/destiny2-armor-solver.html
           test -d dist/assets
-          ! grep -q './src/app.mjs' dist/index.html
+          ! grep -q './src/portal.mjs' dist/index.html
+          ! grep -q '../src/app.mjs' dist/app/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
@@ -61,3 +64,70 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+  offline-preview:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build offline distribution
+        run: npm run build:offline
+
+      - name: Package offline distribution
+        shell: bash
+        run: |
+          cd dist-offline
+          zip -r ../d2-armor-solver-offline.zip .
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: d2-armor-solver-offline
+          path: d2-armor-solver-offline.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  offline-release:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build offline distribution
+        run: npm run build:offline
+
+      - name: Package offline distribution
+        shell: bash
+        run: |
+          cd dist-offline
+          zip -r ../d2-armor-solver-offline.zip .
+
+      - name: Attach offline distribution to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: d2-armor-solver-offline.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

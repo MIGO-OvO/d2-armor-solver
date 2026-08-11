@@ -12,15 +12,33 @@
 
 面向《命运 2》Armor 3.0 的六维属性配装求解器。它既能从理论框架计算目标是否可达，也能导入 DIM 护甲清单，从玩家已经拥有的装备中寻找最佳组合、保留套装约束，并列出仍需刷取的护甲。
 
-项目是完全静态的浏览器应用：无需账号、无需后端，目标属性、DIM 清单和保存的方案都只保留在当前浏览器中。
+项目是完全静态的浏览器应用：根路径提供在线 / 离线双入口门户，求解器位于 `app/` 子路径。无需项目账号、无需后端，目标属性、DIM 清单和保存的方案都只保留在当前浏览器中。
 
 ## Live Site / 在线使用
 
-访问：**[https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)**
+门户：**[https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)**
+
+直接进入求解器：**[https://migo-ovo.github.io/d2-armor-solver/app/](https://migo-ovo.github.io/d2-armor-solver/app/)**
 
 > 浏览器数据按站点来源隔离。GitHub Pages、本地开发地址和其他部署地址之间不会自动迁移草稿或已保存方案。
 
 ![Destiny 2 Armor Solver 配装工作台](./asset/web-input.png)
+
+## 离线使用 / Offline Use
+
+完全离线的独立构建，无需 Node、npm 或服务器：
+
+1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
+
+离线包与在线版功能对等，仅一处差异：构建时**不注入 Bungie secrets**，因此 Bungie OAuth 登录入口被隐藏。DIM CSV 导入、求解和保存方案均可完全离线运行；DIM Loadout 导出链接本身只是 URL，打开时仍需联网。
+
+浏览器支持：
+
+- Chrome / Edge 完全支持。
+- Firefox 通过 `file://` 打开时 `localStorage` 不可用，草稿和已保存方案不会在刷新后保留，应用其余功能不受影响。
+
+离线构建使用主线程引擎（`__OFFLINE_MODE__` 下不会启动 Web Worker），重型库存求解时界面可能短暂无响应，属预期行为。数据 100% 留在本机，与在线版一致；由于不访问任何 CDN，隐私保障反而更强。
 
 ## v2.0.0 主要更新
 
@@ -126,11 +144,13 @@ npm run dev
 | --- | --- |
 | `npm run dev` | 启动 Vite 开发服务器 |
 | `npm run build` | 生成 `dist/` 生产构建 |
+| `npm run build:offline` | 生成只含求解器的 `dist-offline/` 离线构建 |
 | `npm run preview` | 本地预览生产构建 |
 | `npm run lint` | 运行 ESLint |
 | `npm test` | 运行确定性算法测试 |
 | `npm run test:upgrade` | 运行随机替换规划回归测试 |
 | `npm run test:browser` | 使用本机 Chrome/Edge 验证 Worker、交互和 390px 布局 |
+| `npm run verify:offline` | 构建并通过 `file://` 验证离线版 |
 | `npm run check` | 依次执行 lint、测试、替换回归和构建 |
 | `npm run deploy` | 使用 Wrangler 部署 Cloudflare 静态资源 |
 
@@ -139,13 +159,18 @@ npm run dev
 ```text
 d2-armor-solver/
 ├─ .github/workflows/        # GitHub Pages 持续部署
-├─ asset/                    # 属性图标与界面截图
+├─ app/
+│  └─ index.html             # 在线求解器页面（/app/）
+├─ asset/                    # 图标源文件与 README 配图
 ├─ docs/architecture.md      # 模块、Worker 与存储边界说明
 ├─ scripts/
 │  ├─ build.mjs              # 生产构建与静态资源处理
+│  ├─ build-offline.mjs      # 单入口、可通过 file:// 运行的离线构建
+│  ├─ verify-offline.mjs     # 离线包浏览器验证
 │  ├─ browser-smoke.mjs      # 浏览器端回归检查
 │  └─ fetch-armor-mod-data.mjs
 ├─ src/
+│  ├─ portal.mjs             # 门户三语切换
 │  ├─ app.mjs                # 浏览器工作台与界面编排
 │  ├─ core/
 │  │  ├─ armor-engine.mjs    # 求解器统一接口
@@ -155,9 +180,11 @@ d2-armor-solver/
 │  │  ├─ armor-sets.mjs      # 套装目录与激活规则
 │  │  └─ upgrade-optimizer.mjs
 │  ├─ workers/               # 非阻塞算法 Worker
-│  └─ styles/app.css         # 响应式界面样式
+│  └─ styles/
+│     ├─ portal.css          # 门户视觉与响应式样式
+│     └─ app.css             # 求解器响应式界面样式
 ├─ tests/                    # 算法、DIM、库存和结构测试
-├─ index.html                # 应用页面
+├─ index.html                # 根路径门户页面
 └─ package.json
 ```
 
@@ -165,12 +192,12 @@ d2-armor-solver/
 
 ## 部署
 
-推送到 `main` 后，[Deploy GitHub Pages](.github/workflows/deploy-pages.yml) 会：
+推送后，[Deploy GitHub Pages](.github/workflows/deploy-pages.yml) 会：
 
-1. 使用 Node.js 22 安装锁定依赖。
-2. 执行 `npm run check`。
-3. 验证生产构建不再引用源模块。
-4. 将 `dist/` 发布到 GitHub Pages。
+1. 每个分支的 push 都构建离线 zip，并作为保留 14 天的 Actions 工件上传，供抢先体验。
+2. `main` 分支使用 Node.js 22 安装锁定依赖并执行 `npm run check`。
+3. 验证 `dist/index.html` 门户、`dist/app/index.html` 求解器和兼容跳转均已正确打包。
+4. 将同一份 `dist/` 发布到 GitHub Pages；发布 Release 时，离线 zip 会自动附加到该 Release。
 
 Cloudflare 部署使用：
 
@@ -195,8 +222,9 @@ Bungie 登录（OAuth）用于获取真实库存，需要部署侧预先配置�
 
 1. 打开 [bungie.net/en/Application](https://www.bungie.net/en/Application) 创建 Bungie 应用：
    - 客户端类型选择 **Confidential**。
-   - Redirect URL 注册 `https://migo-ovo.github.io/d2-armor-solver/` 与 `http://localhost:5173/`。
-   - Origin 注册同样的两个源（GitHub Pages 源与 `http://localhost:5173` 源）。浏览器发起请求时的 Origin 必须与门户注册一致（不支持通配符），否则 Bungie 会以 CORS 拒绝。
+   - Redirect URL 注册 `https://migo-ovo.github.io/d2-armor-solver/app/` 与 `http://localhost:5173/app/`。
+   - Origin 注册 `https://migo-ovo.github.io` 与 `http://localhost:5173`。Origin 只包含协议、主机和端口，不包含 `/d2-armor-solver/app/` 路径；浏览器发起请求时的 Origin 必须与登记值一致（不支持通配符），否则 Bungie 会以 CORS 拒绝。
+   - 从旧版升级时，必须把原先指向仓库根路径的 Redirect URL 改为上述 `app/` 子路径，否则 OAuth 回调会落到门户而无法完成登录。
 2. 从应用页面取得三件套：**API Key**、**OAuth Client ID**、**OAuth Client Secret**。
 3. 在 GitHub 仓库 → **Settings → Secrets and variables → Actions** 添加同名 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
 4. Cloudflare 部署**不启用** Bungie 登录（该源未在门户注册）。登录仅支持 GitHub Pages 正式站与本地开发（`http://localhost:5173`）。

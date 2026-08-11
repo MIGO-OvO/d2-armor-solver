@@ -2,13 +2,22 @@ const workers = new Map();
 let nextRequestId = 1;
 const pendingRequests = new Map();
 
+// Injected by the offline build (build-offline.mjs) as "true"; the regular
+// web build does not define it, so typeof guards keep this false there.
+const OFFLINE_MODE = typeof __OFFLINE_MODE__ !== "undefined" && __OFFLINE_MODE__ === "true";
+
 function createWorker(operation) {
   const existing = workers.get(operation);
-  if (existing || typeof Worker === "undefined") return existing || null;
-  const worker = new Worker(
-    new URL("../workers/armor-engine.worker.mjs", import.meta.url),
-    { type: "module", name: `armor-engine-${operation}` },
-  );
+  if (existing || OFFLINE_MODE || typeof Worker === "undefined") return existing || null;
+  let worker;
+  try {
+    worker = new Worker(
+      new URL("../workers/armor-engine.worker.mjs", import.meta.url),
+      { type: "module", name: `armor-engine-${operation}` },
+    );
+  } catch {
+    return null; // file:// or restricted context: fall back to main-thread engine
+  }
   workers.set(operation, worker);
   worker.addEventListener("message", ({ data }) => {
     const pending = pendingRequests.get(data?.id);

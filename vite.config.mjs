@@ -1,4 +1,8 @@
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   base: "./",
@@ -12,5 +16,11 @@ export default defineConfig({
     target: "es2022",
     emptyOutDir: true,
     sourcemap: false,
+    rollupOptions: {
+      input: {
+        portal: path.join(projectRoot, "index.html"),
+        app: path.join(projectRoot, "app", "index.html"),
+      },
+    },
   },
 });

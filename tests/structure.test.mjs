@@ -27,11 +27,22 @@ test("algorithm modules stay independent from browser state", async () => {
   }
 });
 
-test("the source HTML loads external styles and a module entry", async () => {
-  const html = await readFile("index.html", "utf8");
-  assert.match(html, /<link rel="stylesheet" href="\.\/src\/styles\/app\.css">/);
-  assert.match(html, /<script type="module" src="\.\/src\/app\.mjs"><\/script>/);
-  assert.doesNotMatch(html, /<style(?:\s|>)/);
+test("the portal and app expose separate static entries", async () => {
+  const portal = await readFile("index.html", "utf8");
+  assert.match(portal, /<link rel="stylesheet" href="\.\/src\/styles\/portal\.css">/);
+  assert.match(portal, /<script type="module" src="\.\/src\/portal\.mjs"><\/script>/);
+  assert.match(portal, /href="\.\/app\/"/);
+  assert.match(
+    portal,
+    /releases\/latest\/download\/d2-armor-solver-offline\.zip/,
+  );
+  assert.doesNotMatch(portal, /src\/app\.mjs/);
+  assert.doesNotMatch(portal, /<style(?:\s|>)/);
+
+  const app = await readFile("app/index.html", "utf8");
+  assert.match(app, /<link rel="stylesheet" href="\.\.\/src\/styles\/app\.css">/);
+  assert.match(app, /<script type="module" src="\.\.\/src\/app\.mjs"><\/script>/);
+  assert.doesNotMatch(app, /<style(?:\s|>)/);
 });
 
 // --- Bungie OAuth secrets: never "undefined", never leaked ---

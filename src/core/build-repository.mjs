@@ -54,7 +54,18 @@ function writeJson(storage, key, value) {
   return writeText(storage, key, JSON.stringify(value));
 }
 
-export function createBuildRepository(storage = globalThis.localStorage) {
+function safeLocalStorage() {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function createBuildRepository(storage) {
+  // ponytail: null storage degrades to "no persistence" without crashing
+  // (Firefox file:// throws on the localStorage getter itself).
+  storage = storage ?? safeLocalStorage();
   return Object.freeze({
     readLanguage() {
       return readText(storage, STORAGE_KEYS.pageLanguage)

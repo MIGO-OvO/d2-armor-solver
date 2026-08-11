@@ -8,6 +8,8 @@
 
 # Local build and Cloudflare Wrangler state
 dist/
+dist-offline/
+d2-armor-solver-offline.zip
 node_modules/
 .wrangler/
 .dev.vars*

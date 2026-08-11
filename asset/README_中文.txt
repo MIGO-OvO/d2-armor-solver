@@ -13,10 +13,8 @@ Destiny 2 Armor 3.0 六维属性图标资源包
 目录说明
 --------
 PNG_51px/       51×51 透明 PNG，游戏 UI 原尺寸
-PNG_512px/      512×512 透明 PNG，便于排版（最近邻放大，不是官方高清源）
 SVG_Trace/      可编辑的单色矢量描摹版（不是 Bungie 官方 SVG）
 Source_Proxy_WebP/  为透明通道恢复保留的代理源文件
-preview.png     六图标预览
 metadata.json   Stat Hash、CDN 路径、校验值和获取方式
 Official_CDN_Links.txt  官方 CDN 直链清单
 
