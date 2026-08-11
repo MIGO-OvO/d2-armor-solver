@@ -78,6 +78,17 @@ test(".gitignore covers Bungie OAuth env files", async () => {
   assert.match(gitignore, /^\.env\.local$/m, "missing .env.local line");
 });
 
+test("offline build blanks Bungie credentials and write entry points", async () => {
+  const source = await readFile("scripts/build-offline.mjs", "utf8");
+  for (const name of bungieDefineNames) {
+    assert.match(
+      source,
+      new RegExp(`__BUNGIE_${name}__:\\s*JSON\\.stringify\\(""\\)`),
+      `offline build must blank __BUNGIE_${name}__`,
+    );
+  }
+});
+
 // --- Bungie realtime inventory (T8/T9) ---
 
 const inventoryModulePath = "src/core/bungie-inventory.mjs";
@@ -89,12 +100,13 @@ const EXPECTED_ARMOR_COMPONENTS = [
   "CharacterInventories",
   "CharacterEquipment",
   "ItemInstances",
+  "ItemStats",
   "ItemSockets",
   "ItemPlugStates",
 ];
 
 test(
-  "ARMOR_COMPONENTS is exactly the 8 Bungie component types",
+  "ARMOR_COMPONENTS includes all Bungie armor component types",
   inventoryModuleExists
     ? undefined
     : { skip: `${inventoryModulePath} not created yet (pending T8/T9)` },

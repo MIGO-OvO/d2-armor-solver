@@ -38,9 +38,9 @@ const offlineEnginePlugin = {
   },
 };
 
-// Inherit base:"./" and the __BUNGIE_* defines, then build only the app entry
-// and force a single chunk. The normal build is multi-page (portal + app),
-// while the offline archive intentionally contains only the solver.
+// Inherit base:"./", then build only the app entry and force a single chunk.
+// Bungie credentials are deliberately blanked even when the build environment
+// has them: the offline archive must not expose login or write actions.
 const baseConfig = (await import(pathToFileURL(path.join(projectRoot, "vite.config.mjs")))).default;
 await build(
   mergeConfig(baseConfig, {
@@ -57,6 +57,9 @@ await build(
       // Chrome blocks Workers and external module scripts on file://, so
       // armor-engine-client.mjs reads this and falls back to main-thread.
       __OFFLINE_MODE__: JSON.stringify("true"),
+      __BUNGIE_API_KEY__: JSON.stringify(""),
+      __BUNGIE_OAUTH_CLIENT_ID__: JSON.stringify(""),
+      __BUNGIE_OAUTH_CLIENT_SECRET__: JSON.stringify(""),
     },
   }),
 );

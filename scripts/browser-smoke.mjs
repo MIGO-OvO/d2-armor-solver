@@ -8,6 +8,12 @@ import { execSync } from "node:child_process";
 
 import { chromium } from "playwright-core";
 import { preview } from "vite";
+import {
+  BALANCED_TUNING_MOD_HASH,
+  STAT_MOD_HASHES,
+  TUNING_MOD_HASH_BY_TUNING,
+} from "../src/core/armor-mods.data.mjs";
+import { channelStorageKey } from "../src/core/build-channel.mjs";
 
 async function findChrome() {
   const candidates = [
@@ -38,6 +44,16 @@ const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const isDevelopmentBuild = process.env.BUILD_CHANNEL === "develop";
+const testChannel = isDevelopmentBuild ? "develop" : "stable";
+const TEST_STORAGE_KEYS = Object.freeze({
+  upgradeDraft: channelStorageKey("d2_armor_upgrade_draft_v1", testChannel),
+  calculatorMode: channelStorageKey("d2_armor_calculator_mode_v1", testChannel),
+  currentDraft: channelStorageKey("d2_armor_current_draft_v1", testChannel),
+  token: channelStorageKey("d2_armor_bungie_token_v1", testChannel),
+  displayName: channelStorageKey("d2_armor_bungie_display_name_v1", testChannel),
+  oauthState: channelStorageKey("bungieOAuthState", testChannel),
+});
 
 // Bungie GetProfile fixture, already shaped as { ErrorCode: 1, Response: ... }.
 const syntheticProfileFixture = JSON.parse(
@@ -46,6 +62,127 @@ const syntheticProfileFixture = JSON.parse(
     "utf8",
   ),
 );
+
+function createWritableProfileFixture() {
+  const fixture = structuredClone(syntheticProfileFixture);
+  const data = fixture.Response.data;
+  const hunterId = "2305843009471208001";
+  const subclassId = "1000000000000000999";
+  const removedHunterIds = new Set([
+    "1000000000000000001",
+    "1000000000000000002",
+    "1000000000000000004",
+  ]);
+  const armor = [
+    ["helmet", 30472172, 3448274439],
+    ["arms", 12440395, 3551918588],
+    ["chest", 24598504, 14239492],
+    ["legs", 4966745, 20886954],
+    ["classItem", 18990920, 1585787867],
+  ].map(([slot, itemHash, bucketHash], index) => ({
+    slot,
+    itemHash,
+    bucketHash,
+    itemInstanceId: `10000000000000009${index + 1}`,
+  }));
+  const currentTuningHash = TUNING_MOD_HASH_BY_TUNING["health:weapons"];
+  const allArmorPlugHashes = [
+    ...Object.values(STAT_MOD_HASHES).flatMap(Object.values),
+    ...Object.values(TUNING_MOD_HASH_BY_TUNING),
+    BALANCED_TUNING_MOD_HASH,
+  ];
+  data.itemComponents.stats = { data: {} };
+
+  data.profileInventory.data.items = data.profileInventory.data.items
+    .filter(item => !removedHunterIds.has(String(item.itemInstanceId)))
+    .concat(armor.map(item => ({
+      itemHash: item.itemHash,
+      itemInstanceId: item.itemInstanceId,
+      quantity: 1,
+      bindings: 0,
+      location: 0,
+      transferStatus: 1,
+      lockable: true,
+      state: 0,
+      bucketHash: item.bucketHash,
+    })));
+  data.characterEquipment.data[hunterId].items = [{
+    itemHash: 777000001,
+    itemInstanceId: subclassId,
+    quantity: 1,
+    bucketHash: 3284755031,
+  }];
+  for (const item of armor) {
+    data.itemComponents.instances.data[item.itemInstanceId] = {
+      itemLevel: 1,
+      quality: 0,
+      isEquipped: false,
+      canEquip: true,
+      energy: {
+        energyCapacity: 10,
+        energyUsed: 0,
+        energyUnused: 10,
+        energyType: 0,
+        energyTypeHash: 0,
+      },
+      primaryStat: { statHash: 1935470627, value: 2020 },
+    };
+    data.itemComponents.stats.data[item.itemInstanceId] = {
+      stats: {
+        392767087: 30,
+        1735777505: 25,
+        4244567218: 20,
+        144602215: 5,
+        1943323491: 5,
+        2996146975: 5,
+      },
+    };
+    data.itemComponents.sockets.data[item.itemInstanceId] = {
+      sockets: [
+        { plugHash: STAT_MOD_HASHES.health[10], isEnabled: true, isVisible: true },
+        { plugHash: currentTuningHash, isEnabled: true, isVisible: true },
+      ],
+    };
+    // Keep the exact socket snapshot different from the normalized current
+    // modifiers so the browser flow deterministically exercises socket writes.
+    data.itemComponents.plugStates.data[item.itemInstanceId] = {
+      plugs: [
+        { plugHash: STAT_MOD_HASHES.weapons[10] },
+        { plugHash: BALANCED_TUNING_MOD_HASH },
+      ],
+    };
+  }
+  data.itemComponents.sockets.data[subclassId] = {
+    sockets: [{ plugHash: 777000002, isEnabled: true, isVisible: true }],
+  };
+  data.profilePlugSets = {
+    data: {
+      plugs: {
+        armor: allArmorPlugHashes.map(plugItemHash => ({ plugItemHash, canInsert: true, enabled: true })),
+      },
+    },
+  };
+  data.characterPlugSets = { data: { [hunterId]: { plugs: {} } } };
+  data.characterLoadouts = {
+    data: {
+      [hunterId]: {
+        loadouts: [{
+          colorHash: 1,
+          iconHash: 2,
+          nameHash: 3,
+          items: [
+            ...armor.map(item => ({
+              itemInstanceId: item.itemInstanceId,
+              plugItemHashes: [STAT_MOD_HASHES.health[10], BALANCED_TUNING_MOD_HASH],
+            })),
+            { itemInstanceId: subclassId, plugItemHashes: [777000002] },
+          ],
+        }],
+      },
+    },
+  };
+  return fixture;
+}
 
 // The Bungie secrets are injected at build time from the environment; the
 // smoke test drives both states: a secret-less build (login hidden) and a
@@ -93,6 +230,14 @@ async function checkPortal(browser) {
         .pathname.endsWith("/app/"),
       true,
       "the online route should point to the app subpath",
+    );
+    assert.equal(
+      new URL(
+        await page.locator("[data-development-entry]").getAttribute("href"),
+        portalUrl,
+      ).pathname.endsWith("/dev/app/"),
+      true,
+      "the development entry should point to the preview subpath",
     );
     assert.equal(
       await page.locator(".route--offline .action").getAttribute("href"),
@@ -152,6 +297,11 @@ async function checkInventoryPlanning(browser) {
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     assert.equal(
+      await page.locator("#developmentBuildBanner").isVisible(),
+      isDevelopmentBuild,
+      "only the development build should display the channel banner",
+    );
+    assert.equal(
       await page.locator("#upgradeImportBody").count(),
       1,
       "the owned-armor import panel should expose a collapsible body",
@@ -161,7 +311,7 @@ async function checkInventoryPlanning(browser) {
       true,
       "the owned-armor import panel should start collapsed without an import",
     );
-    await page.evaluate(() => {
+    await page.evaluate(storageKeys => {
       const slots = ["helmet", "arms", "chest", "legs", "classItem"];
       const archetypes = [
         "Siegebreaker", "Bulwark", "Brawler", "Skirmisher", "Grenadier", "Demolitionist",
@@ -214,7 +364,7 @@ async function checkInventoryPlanning(browser) {
         baseStats: {},
         setHash: null,
       });
-      localStorage.setItem("d2_armor_upgrade_draft_v1", JSON.stringify({
+      localStorage.setItem(storageKeys.upgradeDraft, JSON.stringify({
         schemaVersion: 1,
         pieces: [],
         inventory,
@@ -224,8 +374,8 @@ async function checkInventoryPlanning(browser) {
         importTier5Only: true,
         reassignModifiers: true,
       }));
-      localStorage.setItem("d2_armor_calculator_mode_v1", "solve");
-    });
+      localStorage.setItem(storageKeys.calculatorMode, "solve");
+    }, TEST_STORAGE_KEYS);
     await page.reload({ waitUntil: "networkidle" });
     assert.equal(
       await page.locator("#upgradeImportBody").isVisible(),
@@ -347,7 +497,7 @@ async function checkUpgradeTargetSync(browser) {
 
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.evaluate(() => {
+    await page.evaluate(storageKeys => {
       const slots = ["helmet", "arms", "chest", "legs", "classItem"];
       const setHash = 741162535;
       const baseStats = {
@@ -393,7 +543,7 @@ async function checkUpgradeTargetSync(browser) {
         sourceId: item.id,
         hash: item.hash,
       }));
-      localStorage.setItem("d2_armor_upgrade_draft_v1", JSON.stringify({
+      localStorage.setItem(storageKeys.upgradeDraft, JSON.stringify({
         schemaVersion: 1,
         pieces,
         inventory,
@@ -404,8 +554,8 @@ async function checkUpgradeTargetSync(browser) {
         reassignModifiers: true,
         onlyPlus5Tuning: true,
       }));
-      localStorage.setItem("d2_armor_calculator_mode_v1", "upgrade");
-    });
+      localStorage.setItem(storageKeys.calculatorMode, "upgrade");
+    }, TEST_STORAGE_KEYS);
     await page.reload({ waitUntil: "networkidle" });
     await page.locator("#pageLanguage").selectOption("zh-chs");
     assert.equal(await page.locator("#upgradeOnlyPlus5").isChecked(), true);
@@ -447,23 +597,18 @@ async function checkUpgradeTargetSync(browser) {
     });
     await page.locator("#setReqMode").selectOption("set4");
     await page.evaluate(() => window.analyzeArmorUpgrades());
-    assert.match(
-      await page.locator("#upgradeResultsBody .upgrade-stat").first().innerText(),
-      /目标\s*135/,
-      "replacement advice should be recalculated with the latest stat targets",
+    assert.equal(
+      await page.locator("#upgradeResults").isHidden(),
+      true,
+      "set-constrained analysis must not show the unconstrained theoretical replacement plan",
     );
     assert.equal(
       await page.locator(".inventory-results-title").innerText(),
       "已有护甲搭配方案",
     );
-    assert.match(
-      await page.locator("#upgradeResultsBody .upgrade-requirement-result").innerText(),
-      /武器\s+\d+\/180/,
-      "replacement advice should explain the must-meet result",
-    );
     assert.ok(
-      await page.locator("#upgradeResultsBody .upgrade-stat.is-required").count() >= 1,
-      "must-meet stats should remain visually identifiable in the result",
+      await page.locator("#inventoryResults .inventory-result-stat.is-required").count() >= 1,
+      "set-constrained owned loadouts should keep must-meet stats visible",
     );
     assert.deepEqual(browserErrors, []);
   } finally {
@@ -490,7 +635,7 @@ async function checkSetRequirementSnapshot(browser) {
 
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.evaluate(() => {
+    await page.evaluate(storageKeys => {
       const requiredSet = 741162535;
       const otherSet = 499993704;
       const slots = ["helmet", "arms", "chest", "legs", "classItem"];
@@ -554,7 +699,7 @@ async function checkSetRequirementSnapshot(browser) {
         sourceId: item.id,
         hash: item.hash,
       }));
-      localStorage.setItem("d2_armor_upgrade_draft_v1", JSON.stringify({
+      localStorage.setItem(storageKeys.upgradeDraft, JSON.stringify({
         schemaVersion: 1,
         pieces,
         inventory,
@@ -564,8 +709,8 @@ async function checkSetRequirementSnapshot(browser) {
         importTier5Only: true,
         reassignModifiers: true,
       }));
-      localStorage.setItem("d2_armor_calculator_mode_v1", "upgrade");
-    });
+      localStorage.setItem(storageKeys.calculatorMode, "upgrade");
+    }, TEST_STORAGE_KEYS);
     await page.reload({ waitUntil: "networkidle" });
 
     const staleSolve = page.evaluate(() => window.analyzeArmorUpgrades());
@@ -650,6 +795,13 @@ async function checkBungieAuthFlow(browser) {
   const observedBungieRequests = [];
   const handledBungieRequests = [];
   const authorizeRequests = [];
+  const writeRequests = {
+    equipLoadout: [],
+    transfer: [],
+    equipItems: [],
+    insertPlug: [],
+  };
+  const writableProfileFixture = createWritableProfileFixture();
   let profileMode = "ok"; // "ok" | "throttle" | "403" | "network"
 
   page.on("request", request => {
@@ -702,6 +854,21 @@ async function checkBungieAuthFlow(browser) {
         body: membershipsBody,
       });
     }
+    const writeRoute = {
+      "/Platform/Destiny2/Actions/Loadouts/EquipLoadout/": "equipLoadout",
+      "/Platform/Destiny2/Actions/Items/TransferItem/": "transfer",
+      "/Platform/Destiny2/Actions/Items/EquipItems/": "equipItems",
+      "/Platform/Destiny2/Actions/Items/InsertSocketPlugFree/": "insertPlug",
+    }[url.pathname];
+    if (writeRoute) {
+      assert.equal(route.request().method(), "POST", `${writeRoute} must use POST`);
+      writeRequests[writeRoute].push(route.request().postDataJSON());
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ErrorCode: 1, Response: 0 }),
+      });
+    }
     if (/\/Destiny2\/\d+\/Profile\//.test(url.pathname)) {
       if (profileMode === "throttle") {
         // Tiny ThrottleSeconds keeps bungieFetch's retry sleeps negligible.
@@ -722,7 +889,7 @@ async function checkBungieAuthFlow(browser) {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(syntheticProfileFixture),
+        body: JSON.stringify(writableProfileFixture),
       });
     }
     routeStats.unhandled += 1;
@@ -778,7 +945,10 @@ async function checkBungieAuthFlow(browser) {
       false,
       "redirect_uri is not registered in the Bungie app; none may be sent",
     );
-    const state = await page.evaluate(() => sessionStorage.getItem("bungieOAuthState"));
+    const state = await page.evaluate(
+      key => sessionStorage.getItem(key),
+      TEST_STORAGE_KEYS.oauthState,
+    );
     assert.equal(
       authorize.searchParams.get("state"),
       state,
@@ -795,13 +965,18 @@ async function checkBungieAuthFlow(browser) {
       "MockGuardian",
       "the signed-in state should render the Bungie display name",
     );
-    const savedToken = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("d2_armor_bungie_token_v1")));
+    const savedToken = await page.evaluate(
+      key => JSON.parse(localStorage.getItem(key)),
+      TEST_STORAGE_KEYS.token,
+    );
     assert.equal(savedToken.accessToken, "mock-access");
     assert.equal(savedToken.refreshToken, "mock-refresh");
     assert.equal(new URL(page.url()).search, "", "code/state must be stripped from the URL");
     assert.equal(
-      await page.evaluate(() => sessionStorage.getItem("bungieOAuthState")),
+      await page.evaluate(
+        key => sessionStorage.getItem(key),
+        TEST_STORAGE_KEYS.oauthState,
+      ),
       null,
       "the consumed OAuth state must be cleared",
     );
@@ -818,7 +993,47 @@ async function checkBungieAuthFlow(browser) {
     assert.match(await page.locator(".upgrade-import-state").innerText(), /已导入 \d+ 件/);
     assert.equal(await page.locator("#upgradeImportBody").isVisible(), true);
 
-    // --- (e) error paths keep the user signed in and render classified copy ---
+    // --- (e) saved game loadout and custom solver result cover all write routes ---
+    assert.equal(await page.locator(".bungie-saved-loadouts").count(), 1);
+    await page.locator(".bungie-saved-loadouts > summary").click();
+    await page.locator(".bungie-saved-actions .btn-solve").click();
+    await page.waitForFunction(() => /游戏内配装已完整应用/.test(
+      document.getElementById("upgradeImportSummary")?.textContent || "",
+    ));
+    assert.deepEqual(writeRequests.equipLoadout, [{
+      loadoutIndex: 0,
+      characterId: "2305843009471208001",
+      membershipType: 3,
+    }]);
+
+    await page.locator(".bungie-saved-loadouts > summary").click();
+    await page.locator(".bungie-saved-actions .btn").click();
+    await page.locator('[id^="target_"]').evaluateAll(elements => {
+      for (const element of elements) {
+        element.value = element.id === "target_weapons" ? "200" : "0";
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await page.evaluate(() => window.analyzeArmorUpgrades());
+    await page.locator("#inventoryResults:not([hidden])").waitFor();
+    const equipButton = page.locator("#bungieEquipButton");
+    assert.equal(
+      await equipButton.isEnabled(),
+      true,
+      "a five-instance Bungie solution that passes preflight should be directly equippable: " +
+        await page.locator(".bungie-equip-hint").innerText(),
+    );
+    await equipButton.click();
+    await page.waitForFunction(() => /五件护甲|护甲与可用模组/.test(
+      document.getElementById("bungieEquipStatus")?.textContent || "",
+    ));
+    assert.equal(writeRequests.transfer.length, 5, "five vault armor pieces should transfer");
+    assert.equal(writeRequests.equipItems.length, 1, "target armor should equip in one request");
+    assert.ok(writeRequests.insertPlug.length > 0, "the custom plan should write armor sockets");
+    assert.equal(writeRequests.equipItems[0].itemIds.length, 5);
+    assert.ok(writeRequests.insertPlug.every(body => body.plug?.socketArrayType === 0));
+
+    // --- (f) error paths keep the user signed in and render classified copy ---
     for (const [mode, expectedText] of [
       ["throttle", "请求限流"],
       ["403", "API key 无效"],
@@ -845,15 +1060,15 @@ async function checkBungieAuthFlow(browser) {
     }
     profileMode = "ok";
 
-    // --- (f) sign out clears token, display name, and Bungie-sourced inventory ---
+    // --- (g) sign out clears token, display name, and Bungie-sourced inventory ---
     await page.locator('#bungieAuthArea button[onclick="bungieLogout()"]').click();
     assert.equal(
-      await page.evaluate(() => localStorage.getItem("d2_armor_bungie_token_v1")),
+      await page.evaluate(key => localStorage.getItem(key), TEST_STORAGE_KEYS.token),
       null,
       "sign out must clear the stored token",
     );
     assert.equal(
-      await page.evaluate(() => localStorage.getItem("d2_armor_bungie_display_name_v1")),
+      await page.evaluate(key => localStorage.getItem(key), TEST_STORAGE_KEYS.displayName),
       null,
       "sign out must clear the cached display name",
     );
@@ -952,10 +1167,10 @@ try {
     "none",
     "+5/-5-only preference should hide the +3 piece counter",
   );
-  await page.waitForFunction(() => (
-    JSON.parse(localStorage.getItem("d2_armor_current_draft_v1") || "null")
+  await page.waitForFunction(storageKey => (
+    JSON.parse(localStorage.getItem(storageKey) || "null")
       ?.onlyPlus5Tuning === true
-  ));
+  ), TEST_STORAGE_KEYS.currentDraft);
   await page.evaluate(() => window.solve());
   await page.locator("#results.show").waitFor();
   assert.equal(await page.locator("#comparisonGrid .comp-item").count(), 6);

@@ -1,4 +1,4 @@
-name: Deploy GitHub Pages
+name: Deploy stable and development Pages
 
 on:
   push:
@@ -17,15 +17,27 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
-    timeout-minutes: 15
+    if: >-
+      github.event_name != 'push' ||
+      github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/develop'
+    timeout-minutes: 25
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out stable branch
         uses: actions/checkout@v7
+        with:
+          ref: main
+          path: stable
+
+      - name: Check out development branch
+        uses: actions/checkout@v7
+        with:
+          ref: develop
+          path: development
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
@@ -35,31 +47,65 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            stable/package-lock.json
+            development/package-lock.json
 
-      - name: Install dependencies
+      - name: Resolve channel commits
+        shell: bash
+        run: |
+          echo "STABLE_COMMIT_SHA=$(git -C stable rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "DEVELOPMENT_COMMIT_SHA=$(git -C development rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install stable dependencies
+        working-directory: stable
         run: npm ci
 
-      - name: Test and build
+      - name: Test and build stable channel
+        working-directory: stable
         env:
+          BUILD_CHANNEL: stable
           BUNGIE_API_KEY: ${{ secrets.BUNGIE_API_KEY }}
           BUNGIE_OAUTH_CLIENT_ID: ${{ secrets.BUNGIE_OAUTH_CLIENT_ID }}
           BUNGIE_OAUTH_CLIENT_SECRET: ${{ secrets.BUNGIE_OAUTH_CLIENT_SECRET }}
-        run: npm run check
+        run: BUILD_COMMIT_SHA="$STABLE_COMMIT_SHA" npm run check
+
+      - name: Install development dependencies
+        working-directory: development
+        run: npm ci
+
+      - name: Test and build development channel
+        working-directory: development
+        env:
+          BUILD_CHANNEL: develop
+          BUNGIE_API_KEY: ${{ secrets.BUNGIE_DEV_API_KEY }}
+          BUNGIE_OAUTH_CLIENT_ID: ${{ secrets.BUNGIE_DEV_OAUTH_CLIENT_ID }}
+          BUNGIE_OAUTH_CLIENT_SECRET: ${{ secrets.BUNGIE_DEV_OAUTH_CLIENT_SECRET }}
+        run: BUILD_COMMIT_SHA="$DEVELOPMENT_COMMIT_SHA" npm run check
+
+      - name: Compose Pages channels
+        run: node development/scripts/compose-pages.mjs stable/dist development/dist pages
 
       - name: Verify Pages artifact
         shell: bash
         run: |
-          test -s dist/index.html
-          test -s dist/app/index.html
-          test -s dist/destiny2-armor-solver.html
-          test -d dist/assets
-          ! grep -q './src/portal.mjs' dist/index.html
-          ! grep -q '../src/app.mjs' dist/app/index.html
+          test -s pages/index.html
+          test -s pages/app/index.html
+          test -s pages/dev/app/index.html
+          test -s pages/destiny2-armor-solver.html
+          test -s pages/versions.json
+          test -d pages/assets
+          test -d pages/dev/assets
+          grep -q 'data-development-entry' pages/index.html
+          ! grep -q 'data-development-entry' pages/dev/index.html
+          ! grep -q './src/portal.mjs' pages/index.html
+          ! grep -q '../src/app.mjs' pages/app/index.html
+          ! grep -q '../src/app.mjs' pages/dev/app/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: dist
+          path: pages
 
       - name: Deploy to GitHub Pages
         id: deployment

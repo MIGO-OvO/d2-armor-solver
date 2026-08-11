@@ -201,6 +201,43 @@ test("masterwork tier 10 is kept; baseStats subtract the +5 non-framework bonus"
   });
 });
 
+test("reads armor stats from Bungie's separate ItemStats component", () => {
+  const itemInstanceId = "9000000000000000200";
+  const apiItem = {
+    bucketHash: 3448274439,
+    itemHash: 656307180,
+    itemInstanceId,
+    tierType: 5,
+  };
+  const item = normalizeApiItem(apiItem, context({
+    instances: {
+      [itemInstanceId]: { energyCapacity: 10 },
+    },
+    itemStats: {
+      [itemInstanceId]: {
+        stats: {
+          "144602215": 25,
+          "392767087": 10,
+          "1735777505": 20,
+          "1943323491": 10,
+          "2996146975": 30,
+          "4244567218": 10,
+        },
+      },
+    },
+    sockets: {},
+    plugs: {},
+  }));
+
+  assert.deepEqual(item.baseStats, {
+    health: 5, melee: 5, grenade: 20, super: 25, class: 5, weapons: 30,
+  });
+  assert.equal(
+    Object.values(item.displayedStats).reduce((sum, value) => sum + value, 0),
+    105,
+  );
+});
+
 test("framework null (tertiary inference failed) leaves baseStats untouched, matching the CSV path", () => {
   // All stats read 0, so neither archetype nor tertiary can be inferred and
   // the framework is null — despite a full masterwork tier (10). baseStats
@@ -381,12 +418,13 @@ const EXPECTED_ARMOR_COMPONENTS = [
   "CharacterInventories",
   "CharacterEquipment",
   "ItemInstances",
+  "ItemStats",
   "ItemSockets",
   "ItemPlugStates",
 ];
 
-test("ARMOR_COMPONENTS is exactly the 8 Bungie component types", () => {
-  assert.equal(ARMOR_COMPONENTS.length, 8);
+test("ARMOR_COMPONENTS includes every Bungie component needed for armor stats", () => {
+  assert.equal(ARMOR_COMPONENTS.length, 9);
   assert.deepEqual([...ARMOR_COMPONENTS].sort(), [...EXPECTED_ARMOR_COMPONENTS].sort());
 });
 

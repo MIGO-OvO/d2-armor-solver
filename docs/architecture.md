@@ -77,6 +77,12 @@ New draft writes include `schemaVersion: 1`. Existing unversioned drafts and
 saved-build arrays are accepted without migration, so deployments do not make
 origin-scoped browser data disappear.
 
+The `develop` Pages build rewrites mutable solver, Bungie token, display-name,
+and OAuth-state keys into the `d2_armor_dev_*` namespace. The language key is
+shared intentionally so a portal language choice follows the user into either
+channel without allowing development drafts or credentials to overwrite stable
+state.
+
 ## Styling
 
 The former inline CSS is externalized as `src/styles/app.css`. Compatibility
@@ -103,12 +109,15 @@ dependencies on first launch, and opens the local site in the default browser.
 
 ## Deployment
 
-GitHub Pages and Cloudflare Workers Static Assets consume the same multi-page
-`dist/` output: `index.html` is the portal and `app/index.html` is the solver.
-The Pages workflow runs `npm ci` and `npm run check` on `main`, verifies both
-entries, the compatibility redirect, bundled assets, and absence of
-source-module references, then uploads `dist/`. Every pushed branch also
-produces a solver-only offline artifact; published Releases receive the same
-offline archive as a downloadable asset. Wrangler treats the output as a
-prebuilt static site with automatic canonical HTML paths and explicit 404
-handling.
+The Pages workflow checks out and validates both release channels. The `main`
+build supplies the root portal and `/app/` stable solver, while the `develop`
+build is nested under `/dev/`. `scripts/compose-pages.mjs` adds the developer
+entry to the published stable portal, removes the now-redundant nested entry,
+and records both commit SHAs in `versions.json`. Each Vite build receives its
+channel and commit at build time, so the development solver can show a visible
+DEV marker and select isolated storage keys.
+
+Every pushed branch also produces a solver-only offline artifact; published
+Releases receive the same offline archive as a downloadable asset. Cloudflare
+Workers Static Assets can still consume a standalone `dist/` through Wrangler,
+with automatic canonical HTML paths and explicit 404 handling.

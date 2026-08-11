@@ -28,7 +28,7 @@ import {
   FRAGMENT_STAT_CHANGES,
 } from "./fragment-data.data.mjs";
 
-// The 8 DestinyComponentType values the armor inventory request needs.
+// The DestinyComponentType values the armor inventory request needs.
 export const ARMOR_COMPONENTS = [
   "Profiles",
   "ProfileInventories",
@@ -36,6 +36,7 @@ export const ARMOR_COMPONENTS = [
   "CharacterInventories",
   "CharacterEquipment",
   "ItemInstances",
+  "ItemStats",
   "ItemSockets",
   "ItemPlugStates",
 ];
@@ -135,6 +136,7 @@ export function normalizeApiItem(apiItem, context = {}) {
   const {
     characterClassType,
     instances = {},
+    itemStats = {},
     sockets = {},
     plugs = {},
     catalog = null,
@@ -156,8 +158,12 @@ export function normalizeApiItem(apiItem, context = {}) {
 
   const instanceId = String(apiItem.itemInstanceId ?? "");
   const instance = instances?.[instanceId] || {};
+  // Bungie's real GetProfile response keeps stats in the ItemStats component,
+  // separate from ItemInstances. Keep the legacy instance.stats fallback for
+  // older captured/synthetic fixtures, but prefer the API's actual shape.
+  const statsComponent = itemStats?.[instanceId]?.stats || instance.stats || {};
   const rawStats = {};
-  for (const [statHash, value] of Object.entries(instance.stats || {})) {
+  for (const [statHash, value] of Object.entries(statsComponent)) {
     const stat = STAT_HASH_TO_NAME[Number(statHash)];
     if (stat) rawStats[stat] = value;
   }
@@ -186,7 +192,7 @@ export function normalizeApiItem(apiItem, context = {}) {
   const tertiary = inferTertiary(rawStats, archetypeId);
   const framework = getFrameworkStats(archetypeId, tertiary);
 
-  const energy = instance.energyCapacity;
+  const energy = instance.energy ?? instance.energyCapacity;
   const masterworkTier = Number(
     energy && typeof energy === "object" ? energy.energyCapacity : energy,
   ) || 0;
@@ -281,6 +287,23 @@ export function normalizeApiItem(apiItem, context = {}) {
     displayedStats,
     owner,
     equipped: Boolean(equipped),
+    canEquip: instance.canEquip !== false,
+    cannotEquipReason: Number(instance.cannotEquipReason) || 0,
+    energy: energy && typeof energy === "object" ? {
+      capacity: Number(energy.energyCapacity) || 0,
+      used: Number(energy.energyUsed) || 0,
+      unused: Number(energy.energyUnused) || 0,
+      type: Number(energy.energyType) || 0,
+      typeHash: Number(energy.energyTypeHash) || 0,
+    } : null,
+    // Socket indexes are required by InsertSocketPlugFree. Keep the exact
+    // per-instance ordering from ItemSockets; the solver ignores this field.
+    socketPlugs: (sockets?.[instanceId]?.sockets || []).map((socket, socketIndex) => ({
+      socketIndex,
+      plugHash: Number(socket?.plugHash) || 0,
+      enabled: socket?.isEnabled !== false,
+      visible: socket?.isVisible !== false,
+    })),
     dimLocked: false,
     power: Number(instance.primaryStat?.value) || 0,
     setHash: set ? set.hash : null,
@@ -357,6 +380,7 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
     characters[characterId] = { classType: character?.classType ?? null };
   }
   const instances = data.itemComponents?.instances?.data ?? {};
+  const itemStats = data.itemComponents?.stats?.data ?? {};
   const sockets = data.itemComponents?.sockets?.data ?? {};
   const plugs = data.itemComponents?.plugStates?.data ?? {};
   const catalog = getCatalogIndex();
@@ -369,6 +393,7 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
     const item = normalizeApiItem(apiItem, {
       characterClassType,
       instances,
+      itemStats,
       sockets,
       plugs,
       catalog,

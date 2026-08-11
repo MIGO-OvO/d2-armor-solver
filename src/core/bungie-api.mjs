@@ -1,4 +1,6 @@
 /* global __BUNGIE_API_KEY__, __BUNGIE_OAUTH_CLIENT_ID__, __BUNGIE_OAUTH_CLIENT_SECRET__ */
+import { channelStorageKey } from "./build-channel.mjs";
+
 // Bungie OAuth token client.
 //
 // The __BUNGIE_*__ identifiers are injected at build time by Vite define and
@@ -8,7 +10,7 @@
 // errors, then the throttled bungieFetch wrapper (T4). T5 appends membership
 // resolution at the bottom of this file.
 
-export const TOKEN_STORAGE_KEY = "d2_armor_bungie_token_v1";
+export const TOKEN_STORAGE_KEY = channelStorageKey("d2_armor_bungie_token_v1");
 
 const TOKEN_ENDPOINT = "https://www.bungie.net/Platform/App/OAuth/token/";
 
@@ -222,23 +224,41 @@ function sleep(ms) {
 
 // Throttle-only retry loop. 401/expired-token responses are NOT retried here
 // (that is the caller's responsibility, T10/T11); they surface as ApiError.
-export async function bungieFetch(path, { auth = true, retries = 3 } = {}) {
+export async function bungieFetch(
+  path,
+  { auth = true, retries = 3, method = "GET", body = undefined } = {},
+) {
   const url = path.startsWith("/") ? `${BUNGIE_API_BASE}${path}` : `${BUNGIE_API_BASE}/${path}`;
   const headers = { "X-API-Key": __BUNGIE_API_KEY__ };
   if (auth) {
     headers.Authorization = `Bearer ${await getValidAccessToken()}`;
   }
+  const normalizedMethod = String(method || "GET").toUpperCase();
+  let requestBody = body;
+  if (body !== undefined && body !== null && typeof body !== "string" &&
+      !(body instanceof URLSearchParams)) {
+    headers["Content-Type"] = "application/json";
+    requestBody = JSON.stringify(body);
+  }
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
-      res = await fetch(url, { headers, credentials: "omit" });
+      res = await fetch(url, {
+        method: normalizedMethod,
+        headers,
+        credentials: "omit",
+        ...(requestBody === undefined ? {} : { body: requestBody }),
+      });
     } catch (cause) {
       throw new NetworkError(`Bungie API request failed: ${url}`, { cause });
     }
-    if (res.status === 403) {
+    const data = await res.json().catch(() => ({}));
+    // HTTP 403 is also used for an OAuth application whose registered scopes
+    // do not include MoveEquipDestinyItems. Preserve that classified Bungie
+    // response as ApiError; only key/origin failures become ApiKeyError.
+    if (res.status === 403 && ![1666, 2105, 2108].includes(data?.ErrorCode)) {
       throw new ApiKeyError("Bungie API key rejected (HTTP 403)");
     }
-    const data = await res.json().catch(() => ({}));
     const retrySeconds = throttleSeconds(data);
     if (retrySeconds !== null) {
       if (attempt < retries) {
@@ -257,6 +277,10 @@ export async function bungieFetch(path, { auth = true, retries = 3 } = {}) {
     }
     return data.Response;
   }
+}
+
+export function bungiePost(path, body, options = {}) {
+  return bungieFetch(path, { ...options, method: "POST", body });
 }
 
 export class NoMembershipError extends Error {

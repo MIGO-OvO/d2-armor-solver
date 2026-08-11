@@ -2,14 +2,17 @@ import {
   EXOTIC_LANGUAGE_STORAGE_KEY,
   PAGE_LANGUAGE_STORAGE_KEY,
 } from "./armor-model.mjs";
+import { channelStorageKey } from "./build-channel.mjs";
 
 export const BUILD_SCHEMA_VERSION = 1;
 
 export const STORAGE_KEYS = Object.freeze({
-  currentDraft: "d2_armor_current_draft_v1",
-  upgradeDraft: "d2_armor_upgrade_draft_v1",
-  calculatorMode: "d2_armor_calculator_mode_v1",
-  savedBuilds: "d2_armor_saved_builds",
+  currentDraft: channelStorageKey("d2_armor_current_draft_v1"),
+  upgradeDraft: channelStorageKey("d2_armor_upgrade_draft_v1"),
+  calculatorMode: channelStorageKey("d2_armor_calculator_mode_v1"),
+  savedBuilds: channelStorageKey("d2_armor_saved_builds"),
+  // Language is intentionally shared so the portal choice follows the user
+  // into either channel; mutable solver data remains channel-scoped.
   pageLanguage: PAGE_LANGUAGE_STORAGE_KEY,
   legacyLanguage: EXOTIC_LANGUAGE_STORAGE_KEY,
 });

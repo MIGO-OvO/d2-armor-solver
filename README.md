@@ -20,7 +20,9 @@
 
 直接进入求解器：**[https://migo-ovo.github.io/d2-armor-solver/app/](https://migo-ovo.github.io/d2-armor-solver/app/)**
 
-> 浏览器数据按站点来源隔离。GitHub Pages、本地开发地址和其他部署地址之间不会自动迁移草稿或已保存方案。
+开发测试版：**[https://migo-ovo.github.io/d2-armor-solver/dev/app/](https://migo-ovo.github.io/d2-armor-solver/dev/app/)**
+
+> `main` 对应稳定版，`develop` 对应开发测试版。两个在线版本共用语言偏好，但草稿、已保存方案和 Bungie 登录状态使用独立存储键，不会互相覆盖；其他部署来源之间也不会自动迁移浏览器数据。
 
 ![Destiny 2 Armor Solver 配装工作台](./asset/web-input.png)
 
@@ -81,6 +83,22 @@ v2 是一次围绕“真实库存配装”的主版本升级：
 - 为关键属性勾选“必须达标”，优先满足硬约束后再比较总缺口。
 - 输出当前状态、替换后六维、逐步替换顺序、调整分配和属性模组分配。
 - 当现有装备已经足够时，会明确给出无需刷取的保留方案。
+
+### Bungie 一键装备（在线版）
+
+- Bungie 登录并导入真实库存后，完全由已有实例组成的方案会显示“装备到游戏”。同职业有多个角色时可选择目标角色。
+- 点击前会检查五件实例、职业、异域职业物品词条、模组解锁状态、精确插槽和护甲能量；能量不足的属性模组会明确列为跳过项。
+- 自定义求解结果按 `TransferItem → EquipItems → InsertSocketPlugFree` 应用。Bungie 公共 API 不提供创建任意游戏内配装的端点；`EquipLoadout` 仅用于直接应用玩家已经在游戏内保存的配装。
+- 游戏内已保存配装会从 `CharacterLoadouts` 读入，可直接应用，也可把其中的护甲、模组与碎片属性载回优化器编辑。
+- 自定义方案会保持目标角色当前的副职业、星象和碎片。当前 UI 只保存碎片属性总和，无法无歧义反推出具体碎片，因此仅当总和与该角色当前精确配置一致时允许直装；需要完整切换副职业配置时请直接应用游戏内已保存配装。
+
+使用限制：
+
+- 角色必须在轨道、社交空间或离线；活动中 Bungie 会拒绝装备写入。
+- 写操作依赖 Bungie 应用后台启用 `MoveEquipDestinyItems`。Bungie OAuth URL 不接受 `scope` 参数，权限由应用注册固定。
+- 能量不足时对应模组会被跳过并显示数量；应用不会主动更换护甲元素，也不会承诺涉及材料消耗的操作成功。
+- 异域职业物品只能穿戴词条完全匹配的现有实例，不能改写随机词条。
+- 只处理五个护甲槽与护甲模组，不处理武器、幽灵等其他槽位。手动序列中若中途发生 API 错误，界面会明确提示可能已经完成部分转移或穿戴，避免误报为整套成功。
 
 ### 其他能力
 
@@ -177,6 +195,9 @@ d2-armor-solver/
 │  │  ├─ dim-csv.mjs         # DIM CSV 解析与模组推断
 │  │  ├─ inventory-solver.mjs # 已有护甲组合搜索
 │  │  ├─ inventory-plan.mjs  # 已有/待刷混合规划
+│  │  ├─ bungie-api.mjs      # OAuth、请求、限流与错误分类
+│  │  ├─ bungie-inventory.mjs # Bungie 库存与实例/插槽映射
+│  │  ├─ bungie-loadout.mjs  # 装备预检、写入序列与已保存配装
 │  │  ├─ armor-sets.mjs      # 套装目录与激活规则
 │  │  └─ upgrade-optimizer.mjs
 │  ├─ workers/               # 非阻塞算法 Worker
@@ -192,12 +213,14 @@ d2-armor-solver/
 
 ## 部署
 
-推送后，[Deploy GitHub Pages](.github/workflows/deploy-pages.yml) 会：
+推送后，[Deploy stable and development Pages](.github/workflows/deploy-pages.yml) 会：
 
 1. 每个分支的 push 都构建离线 zip，并作为保留 14 天的 Actions 工件上传，供抢先体验。
-2. `main` 分支使用 Node.js 22 安装锁定依赖并执行 `npm run check`。
-3. 验证 `dist/index.html` 门户、`dist/app/index.html` 求解器和兼容跳转均已正确打包。
-4. 将同一份 `dist/` 发布到 GitHub Pages；发布 Release 时，离线 zip 会自动附加到该 Release。
+2. `main` 与 `develop` 分别安装锁定依赖并执行 `npm run check`，构建时注入各自的通道名和提交号。
+3. 将 `main` 的门户与求解器放在根路径和 `/app/`，将 `develop` 的完整构建放在 `/dev/`；门户的“在线使用”始终指向稳定版，并额外提供开发测试版入口。
+4. 验证两套入口、兼容跳转、静态资源与 `versions.json` 后，将组合产物发布到同一个 GitHub Pages 站点；发布 Release 时，离线 zip 会自动附加到该 Release。
+
+分支约定：日常开发提交到 `develop`，实机验证通过后再合并到 `main`。任一通道发布失败时，GitHub Pages 会继续保留上一次成功部署，不会用不完整产物覆盖在线版本。
 
 Cloudflare 部署使用：
 
@@ -226,9 +249,10 @@ Bungie 登录（OAuth）用于获取真实库存，需要部署侧预先配置�
    - Origin 注册 `https://migo-ovo.github.io` 与 `http://localhost:5173`。Origin 只包含协议、主机和端口，不包含 `/d2-armor-solver/app/` 路径；浏览器发起请求时的 Origin 必须与登记值一致（不支持通配符），否则 Bungie 会以 CORS 拒绝。
    - 从旧版升级时，必须把原先指向仓库根路径的 Redirect URL 改为上述 `app/` 子路径，否则 OAuth 回调会落到门户而无法完成登录。
 2. 从应用页面取得三件套：**API Key**、**OAuth Client ID**、**OAuth Client Secret**。
-3. 在 GitHub 仓库 → **Settings → Secrets and variables → Actions** 添加同名 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
-4. Cloudflare 部署**不启用** Bungie 登录（该源未在门户注册）。登录仅支持 GitHub Pages 正式站与本地开发（`http://localhost:5173`）。
-5. 构建回退：未配置 secrets 时构建仍然成功，登录入口自动隐藏。
+3. 在应用后台启用 `MoveEquipDestinyItems` 权限；未启用时库存读取仍可成功，但转移、穿戴和写入模组会返回权限错误。修改权限后让玩家重新登录。
+4. 在 GitHub 仓库 → **Settings → Secrets and variables → Actions** 添加稳定版 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
+5. 如需在开发测试版验证 Bungie 登录，建议创建独立的 Bungie 测试应用，将 Redirect URL 设为 `https://migo-ovo.github.io/d2-armor-solver/dev/app/`，并添加 `BUNGIE_DEV_API_KEY`、`BUNGIE_DEV_OAUTH_CLIENT_ID`、`BUNGIE_DEV_OAUTH_CLIENT_SECRET`。未设置时开发版仍可测试 DIM CSV、求解与本地保存，但会隐藏 Bungie 登录入口。
+6. Cloudflare 部署默认不启用 Bungie 登录（该来源未在门户注册）。构建未配置对应 secrets 时仍然成功，登录与“装备到游戏”入口自动隐藏；离线构建会强制清空这些配置。
 
 > 请勿在仓库、Issue 或任何文档中提交真实 secret 值；GitHub Secrets 只在 Actions 运行期间注入构建过程。
 
@@ -241,6 +265,7 @@ Bungie 登录（OAuth）用于获取真实库存，需要部署侧预先配置�
 - 套装成员、`2 件 / 4 件 / 2+2` 约束和固定异域。
 - 同哈希不同实例、已有件优先级和待刷建议。
 - Worker 请求、模式切换、目标同步和 390px 响应式布局。
+- Bungie 写入请求体、部分应用错误、能量跳过、已保存配装，以及浏览器端写入路由 mock。
 
 ## Issues and Contributing / 反馈与贡献
 
