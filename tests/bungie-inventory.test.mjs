@@ -274,6 +274,50 @@ test("non-armor buckets (weapons) are filtered to null", () => {
   }
 });
 
+test("vault item in the General bucket (138197802) recovers slot and class from the catalog", () => {
+  // Vault items all report the account-wide "General" bucket (138197802)
+  // instead of their equipment-slot bucket; without the catalog fallback the
+  // slot lookup returns null and every vault armor piece is dropped.
+  const apiItem = {
+    bucketHash: 138197802, // General (vault)
+    itemHash: 2405271938, // Synthetic Legs (warlock legs)
+    itemInstanceId: "9000000000000000103",
+  };
+  const instances = { "9000000000000000103": { energyCapacity: 0, stats: {} } };
+  const catalog = {
+    2405271938: {
+      name: { zh: "合成护腿", zhCht: "合成護腿", en: "Synthetic Legs" },
+      rarity: "Legendary",
+      tierType: 5,
+      bucketHash: 20886954, // legs
+      classType: 2, // warlock
+    },
+  };
+  const item = normalizeApiItem(
+    apiItem,
+    context({
+      characterClassType: undefined,
+      instances,
+      sockets: {},
+      plugs: {},
+      catalog,
+      owner: "Vault",
+    }),
+  );
+  assert.equal(item.slot, "legs");
+  assert.equal(item.classId, "warlock");
+  assert.equal(item.owner, "Vault");
+  assert.equal(item.equipped, false);
+  // A vault item whose hash is not in the catalog stays filtered (no slot).
+  assert.equal(
+    normalizeApiItem(
+      { ...apiItem, itemHash: 9000000001, itemInstanceId: "9000000000000000104" },
+      context({ characterClassType: undefined, instances, sockets: {}, plugs: {}, catalog }),
+    ),
+    null,
+  );
+});
+
 test("displayedStats is the forward synthesis of base + masterwork + tuning + mod", () => {
   const modded = normalizeApiItem(byInstance("1000000000000000003"), context());
   assert.deepEqual(modded.displayedStats, {
@@ -454,4 +498,29 @@ test("real fixture: hunter exotic class item 2809120022 is recognized as classIt
     assert.equal(item.tier, "5", "exotic tierType 6 maps to solver tier 5");
     assert.equal(item.classId, "hunter");
   }
+});
+
+test("real fixture: vault armor (General bucket 138197802) is recovered via the catalog", () => {
+  const vaultItems = realFixture.Response.profileInventory.data.items.filter(item => item.itemInstanceId);
+  // Every instanced vault item reports the account-wide "General" bucket.
+  assert.ok(vaultItems.length > 500, `vault holds ${vaultItems.length} instanced items`);
+  assert.ok(
+    vaultItems.every(item => item.bucketHash === 138197802),
+    "all instanced vault items carry the General bucket hash",
+  );
+  const vaultArmorIds = new Set(vaultItems.map(item => String(item.itemInstanceId)));
+  const result = buildArmorInventory(realFixture);
+  const vaultArmor = result.items.filter(item => vaultArmorIds.has(item.id));
+  // ~452 of the 992 instanced vault items are armor; before the catalog
+  // fallback every one of them was dropped, leaving only ~73 character
+  // pieces instead of the account's 500+.
+  assert.ok(vaultArmor.length >= 400, `expected ~452 vault armor pieces, got ${vaultArmor.length}`);
+  const SLOTS = new Set(Object.values(ARMOR_BUCKET_HASH_TO_SLOT));
+  for (const item of vaultArmor) {
+    assert.ok(SLOTS.has(item.slot), `${item.id} must resolve a real armor slot, got ${item.slot}`);
+    assert.ok(item.classId, `${item.id} vault armor must resolve a class from the catalog`);
+    assert.equal(item.owner, "Vault");
+    assert.equal(item.equipped, false);
+  }
+  assert.ok(result.items.length > 500, `account armor >500, got ${result.items.length}`);
 });

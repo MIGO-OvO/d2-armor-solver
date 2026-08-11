@@ -68,11 +68,15 @@ node -e "const f=require('./tests/fixtures/profile-fixture.json');const d=f.Resp
 - 至少 1 个 **+10 属性模组**（plugHash 命中 `STAT_MOD_HASHES` 的 10 档）；
 - 至少 1 个 **tuning 模组**（plugHash 命中 `TUNING_MOD_HASH_BY_TUNING` 或
   `BALANCED_TUNING_MOD_HASH`）；
+- **仓库护甲（General 桶）**：仓库里的所有实例物品都以 `bucketHash 138197802`
+  （"General" 桶，itemCount 500）返回，而不是各自的护甲桶；目录
+  （`armor-items.data.mjs`）中的 `bucketHash` / `classType` 必须能恢复这些
+  物品的栏位与职业（回归测试断言 >= 400 件仓库护甲被恢复）；
 - 若干**武器**（非五护甲桶，验证 T9 过滤）；
-- **仓库 + 角色 + 穿戴重叠**：同一 `instanceId` 同时出现在
-  `profileInventory` 与 `characterInventories`/`characterEquipment`（验证 T9
-  去重与 equipped 标记）；
 - 尽量覆盖 3 个职业（`characters` 含 titan / hunter / warlock）。
+
+> 去重（同一 instanceId 出现在多个来源）由 synthetic fixture 覆盖：实例物品
+> 在真实 API 中只会位于仓库、角色背包或穿戴之一，不会同时出现于多处。
 
 ## 测试覆盖
 

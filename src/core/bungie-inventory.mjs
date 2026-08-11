@@ -45,6 +45,9 @@ export const ARMOR_COMPONENTS = [
 //   20886954   -> Leg Armor / 腿部护甲
 //   1585787867 -> Class Armor / 职业护甲
 // (category = 3 Equippable, itemCount 10, location 1 in all five.)
+// NOTE: items stored in the Vault all come back with bucketHash 138197802
+// ("General", itemCount 500) instead of their equipment-slot bucket;
+// normalizeApiItem recovers the slot from the catalog's own bucketHash.
 export const ARMOR_BUCKET_HASH_TO_SLOT = {
   3448274439: "helmet", // Helmet
   3551918588: "arms", // Gauntlets
@@ -135,10 +138,17 @@ export function normalizeApiItem(apiItem, context = {}) {
     owner = "",
   } = context;
 
-  const slot = ARMOR_BUCKET_HASH_TO_SLOT[Number(apiItem.bucketHash)] || null;
+  const hash = Number(apiItem.itemHash) || 0;
+  const entry = catalog?.[hash] || null;
+  // Vault items all report the account-wide "General" bucket (138197802,
+  // itemCount 500) instead of their equipment-slot bucket, so the armor slot
+  // has to be recovered from the item definition's own bucketHash — the
+  // catalog always records one of the five armor buckets for real armor.
+  const slot = ARMOR_BUCKET_HASH_TO_SLOT[Number(apiItem.bucketHash)]
+    || ARMOR_BUCKET_HASH_TO_SLOT[Number(entry?.bucketHash)]
+    || null;
   if (!slot) return null;
 
-  const hash = Number(apiItem.itemHash) || 0;
   const instanceId = String(apiItem.itemInstanceId ?? "");
   const instance = instances?.[instanceId] || {};
   const rawStats = {};
@@ -147,10 +157,11 @@ export function normalizeApiItem(apiItem, context = {}) {
     if (stat) rawStats[stat] = value;
   }
 
-  const entry = catalog?.[hash] || null;
   const tierType = entry?.tierType ?? apiItem.tierType ?? 0;
   const rarity = entry?.rarity ?? "";
-  const classId = CLASS_BY_TYPE[characterClassType] || null;
+  // Vault items have no owner character, so their class comes from the item
+  // definition (armor is class-locked; classType is always 0/1/2).
+  const classId = CLASS_BY_TYPE[characterClassType ?? entry?.classType] || null;
   // Exotic Class Items are recognized by their known item hashes as well as by
   // rarity, so the exotic flag (and the upgrade-mode auto-lock it drives) never
   // depends on the catalog being complete for the roll.
@@ -313,6 +324,11 @@ function getCatalogIndex() {
       name: entry.name,
       rarity: entry.rarity,
       tierType: RARITY_TO_TIER_TYPE[entry.rarity] ?? 0,
+      // bucketHash/classType recover the slot and class of vault items, whose
+      // API bucket is the account-wide "General" bucket (138197802) instead
+      // of their equipment-slot bucket.
+      bucketHash: entry.bucketHash ?? null,
+      classType: entry.classType ?? null,
     };
   }
   catalogIndex = index;
