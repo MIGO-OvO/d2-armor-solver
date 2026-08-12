@@ -1113,6 +1113,32 @@ async function checkBungieAuthFlow(browser) {
       );
     }
 
+    // --- (d2) an Exotic Class Item selection survives a Bungie re-import ---
+    // Regression: applyImportedInventory used to clear the Exotic selection on
+    // every import, so the Bungie auto-refresh silently dropped the user's
+    // fixed Exotic and solutions stopped honoring it.
+    await page.locator("#useExoticMode").check();
+    assert.equal(
+      await page.locator("#inventoryExoticSlotFilter").inputValue(),
+      "classItem",
+      "enabling Exotic Class Item mode must pin the Exotic slot filter",
+    );
+    await page.locator('#bungieAuthArea button[onclick="importInventoryFromBungie()"]').click();
+    await page.waitForFunction(() => /Bungie 库存/.test(
+      document.getElementById("upgradeImportSummary")?.textContent || "",
+    ));
+    assert.equal(
+      await page.locator("#useExoticMode").isChecked(),
+      true,
+      "a re-import must not uncheck Exotic Class Item mode",
+    );
+    assert.equal(
+      await page.locator("#inventoryExoticSlotFilter").inputValue(),
+      "classItem",
+      "a re-import must keep the Exotic Class Item slot filter",
+    );
+    await page.locator("#useExoticMode").uncheck();
+
     // --- (e) saved game loadout and custom solver result cover all write routes ---
     assert.equal(await page.locator(".bungie-saved-loadouts").count(), 1);
     await page.locator(".bungie-saved-loadouts > summary").click();

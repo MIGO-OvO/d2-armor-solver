@@ -3030,8 +3030,25 @@ function applyImportedInventory(items, source) {
   if (!importedClasses.has(importClassFilter)) {
     importClassFilter = detectedClass || (importedClasses.size === 1 ? [...importedClasses][0] : "");
   }
-  inventoryExoticSlotFilter = "";
-  inventoryFixedExoticKey = "";
+  // Keep a still-valid Exotic selection across re-imports. Clearing it here
+  // unconditionally meant the Bungie auto-refresh (tab visibility) or a manual
+  // re-import silently dropped the user's fixed Exotic, so solutions stopped
+  // honoring it. getInventoryExoticPickerData (run by the render below) still
+  // clears selections whose item is genuinely gone or class-incompatible.
+  // Exotic Class Item mode re-syncs its class and key to the (possibly
+  // auto-detected) import class so the checkbox state stays coherent.
+  if (document.getElementById('useExoticMode')?.checked
+      && inventoryExoticSlotFilter === 'classItem'
+      && importClassFilter
+      && EXOTIC_CLASSES[importClassFilter]) {
+    const classSelect = document.getElementById('exoticClass');
+    if (classSelect && classSelect.value !== importClassFilter) {
+      classSelect.value = importClassFilter;
+      updateExoticPerkOptions();
+    } else if (inventoryFixedExoticKey !== getExoticClassItemKey(importClassFilter)) {
+      inventoryFixedExoticKey = getExoticClassItemKey(importClassFilter);
+    }
+  }
   renderUpgradeImportPanel();
   saveUpgradeDraft();
 }
