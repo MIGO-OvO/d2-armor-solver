@@ -4,8 +4,13 @@
 // solver results therefore use the documented manual action sequence:
 // transfer -> equip -> InsertSocketPlugFree. Existing in-game loadouts can be
 // applied directly through EquipLoadout.
+//
+// The manual sequence is a DIM-style safe flow (handoff 4.4): prepare source
+// characters by unequipping required pieces into spare replacements, transfer
+// to the target character, bulk-equip, apply socket plugs in order, then
+// re-read the profile and verify every expected instance/plug landed.
 
-import { bungiePost } from "./bungie-api.mjs";
+import { bungieFetch, bungiePost } from "./bungie-api.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
@@ -16,6 +21,8 @@ import {
   CLASS_ABILITY_STAT_BY_CLASS,
   FRAGMENT_STAT_CHANGES,
 } from "./fragment-data.data.mjs";
+import { assignArmorMods } from "./armor-mod-assignment.mjs";
+import { buildSocketCapabilities } from "./armor-sockets.mjs";
 
 export const CHARACTER_LOADOUTS_COMPONENT = "CharacterLoadouts";
 export const LOADOUT_WRITE_COMPONENTS = [
@@ -23,9 +30,17 @@ export const LOADOUT_WRITE_COMPONENTS = [
 ];
 export const SUBCLASS_BUCKET_HASH = 3284755031;
 
+// Components needed to verify a just-applied loadout (Phase E verify).
+export const VERIFY_COMPONENTS = [
+  "Characters",
+  "CharacterEquipment",
+  "ItemInstances",
+  "ItemStats",
+  "ItemSockets",
+];
+
 const CLASS_ID_BY_TYPE = { 0: "titan", 1: "hunter", 2: "warlock" };
 const CLASS_TYPE_BY_ID = { titan: 0, hunter: 1, warlock: 2 };
-const STAT_MOD_ENERGY_COST = { 5: 1, 10: 3 };
 
 const STAT_MOD_BY_HASH = new Map();
 for (const [stat, sizes] of Object.entries(STAT_MOD_HASHES)) {
@@ -40,9 +55,15 @@ for (const [key, hash] of Object.entries(TUNING_MOD_HASH_BY_TUNING)) {
   TUNING_BY_HASH.set(Number(hash), { mode: "+5-5", to, from });
 }
 
-const KNOWN_ARMOR_PLUG_HASHES = new Set([
-  ...STAT_MOD_BY_HASH.keys(),
-  ...TUNING_BY_HASH.keys(),
+// DestinyEquipFailureReason bits that are PERMANENT for a loadout flow: no
+// amount of transferring or unequipping makes the item equippable on the
+// target character. Empirically from the real fixture, reason 16 (locked) is
+// the normal state of every vault item and reason 0/2 are transient API
+// states; class mismatch (512) is already rejected separately via classId.
+// Everything else (equipped elsewhere, in vault, in another slot, unknown)
+// is recoverable by the prepare/transfer flow and must NOT preflight-block.
+const PERMANENT_EQUIP_FAILURE_REASONS = new Set([
+  1024, // ItemIsInAnotherLevelRequirement
 ]);
 
 function unwrapProfile(profileResponse) {
@@ -141,12 +162,23 @@ export function extractBungieLoadoutState(profileResponse) {
     };
   }
 
-  const profileAvailable = new Set();
-  collectAvailablePlugHashes(data.profilePlugSets, profileAvailable);
+  // Tri-state availability (handoff 3.3): when neither the profile nor the
+  // character plug-set components were returned, availability is UNKNOWN —
+  // never an empty set, which would wrongly prove every plug locked. The
+  // executor then verifies each write by its result and the post-write read.
+  const hasProfilePlugSets = Boolean(data.profilePlugSets?.data?.plugs)
+    || Boolean(data.profilePlugSets?.plugs);
   const availablePlugHashesByCharacter = {};
   for (const characterId of Object.keys(characters)) {
-    const available = new Set(profileAvailable);
-    collectAvailablePlugHashes(data.characterPlugSets?.data?.[characterId], available);
+    const characterComponent = data.characterPlugSets?.data?.[characterId];
+    const hasCharacterPlugSets = Boolean(characterComponent?.plugs);
+    if (!hasProfilePlugSets && !hasCharacterPlugSets) {
+      availablePlugHashesByCharacter[characterId] = null;
+      continue;
+    }
+    const available = new Set();
+    collectAvailablePlugHashes(data.profilePlugSets, available);
+    collectAvailablePlugHashes(characterComponent, available);
     availablePlugHashesByCharacter[characterId] = available;
   }
 
@@ -199,15 +231,23 @@ export function mapSavedLoadoutArmor(loadout, inventory) {
   }).filter(Boolean);
 }
 
-function tuningHashFor(assignment) {
-  if (assignment?.mode === "+3") return Number(BALANCED_TUNING_MOD_HASH);
-  if (assignment?.mode !== "+5-5" || !assignment.to || !assignment.from) return 0;
-  return Number(TUNING_MOD_HASH_BY_TUNING[`${assignment.to}:${assignment.from}`]) || 0;
-}
-
-function statModHashFor(assignment) {
-  if (!assignment?.stat || !assignment?.size) return 0;
-  return Number(STAT_MOD_HASHES[assignment.stat]?.[assignment.size]) || 0;
+// Inventory items produced by older code paths carry only raw socketPlugs
+// (no role/candidate capabilities). Derive minimal capabilities from the
+// currently installed plug so the assignment still resolves roles, with
+// candidate state unknown (never rejecting on availability).
+function ensureSocketCapabilities(item) {
+  if (Array.isArray(item?.sockets) && item.sockets.length > 0) return item.sockets;
+  if (!Array.isArray(item?.socketPlugs)) return [];
+  return buildSocketCapabilities(
+    item.socketPlugs.map(socket => ({
+      socketIndex: socket?.socketIndex,
+      plugHash: socket?.plugHash || 0,
+      isEnabled: socket?.enabled,
+      isVisible: socket?.visible,
+    })),
+    null,
+    null,
+  );
 }
 
 function transferRequest(item, membershipType, characterId, transferToVault) {
@@ -221,17 +261,15 @@ function transferRequest(item, membershipType, characterId, transferToVault) {
   };
 }
 
-function findKnownSocket(item, knownHashes) {
-  return (item?.socketPlugs || []).find(socket =>
-    socket?.enabled !== false && knownHashes.has(Number(socket?.plugHash)),
-  )?.socketIndex ?? null;
-}
-
-function availableArmorPlugSet(availablePlugHashes) {
-  if (!(availablePlugHashes instanceof Set)) return null;
-  return new Set([...availablePlugHashes].filter(hash =>
-    KNOWN_ARMOR_PLUG_HASHES.has(Number(hash))));
-}
+const MISS_REASON_TO_ERROR_CODE = {
+  statSocketUnknown: "statSocketUnknown",
+  tuningSocketUnknown: "tuningSocketUnknown",
+  plugUnavailable: "plugUnavailable",
+  energy: "energy",
+  tuningMismatch: "tuningMismatch",
+  cannotClear: "cannotClearStatMod",
+  notOwnedInstance: "notOwnedInstance",
+};
 
 export class BungieLoadoutPlanError extends Error {
   constructor(errors) {
@@ -253,6 +291,7 @@ export class BungieLoadoutApplyError extends Error {
 
 export function buildCustomLoadoutPlan({
   membershipType,
+  membershipId = null,
   targetCharacterId,
   classId,
   pieces,
@@ -263,13 +302,10 @@ export function buildCustomLoadoutPlan({
 }) {
   const errors = [];
   const warnings = [];
-  const skippedMods = [];
   const itemsById = new Map((inventory || []).map(item => [String(item?.id ?? ""), item]));
   const targetIds = new Set((pieces || []).map(piece => String(piece?.sourceId ?? "")));
   const characterClassType = CLASS_TYPE_BY_ID[classId];
-  const knownAvailable = availableArmorPlugSet(availablePlugHashes);
   const resolvedItems = [];
-  const plugOperations = [];
 
   if (!membershipType || !targetCharacterId) {
     errors.push({ code: "missingTarget" });
@@ -278,6 +314,7 @@ export function buildCustomLoadoutPlan({
     errors.push({ code: "missingPieces" });
   }
 
+  let exoticCount = 0;
   for (let index = 0; index < (pieces || []).length; index++) {
     const piece = pieces[index];
     const item = itemsById.get(String(piece?.sourceId ?? ""));
@@ -288,7 +325,11 @@ export function buildCustomLoadoutPlan({
     if (item.classId && classId && item.classId !== classId) {
       errors.push({ code: "classMismatch", index, slot: piece.slot });
     }
-    if (item.canEquip === false) {
+    // Transient cannot-equip reasons (locked, vaulted, equipped elsewhere,
+    // unknown) flow into the prepare/transfer stage; only permanent ones block
+    // here (handoff 3.8). Final proof is the EquipItems result + verify.
+    if (item.canEquip === false
+        && PERMANENT_EQUIP_FAILURE_REASONS.has(Number(item.cannotEquipReason) || 0)) {
       errors.push({
         code: "itemCannotEquip",
         index,
@@ -300,64 +341,34 @@ export function buildCustomLoadoutPlan({
         (piece.secondaryPerkId || null) !== (item.secondaryPerkId || null))) {
       errors.push({ code: "exoticPerkMismatch", index, slot: piece.slot });
     }
+    if (piece.exotic) exoticCount++;
     if (!item.owner) {
       errors.push({ code: "missingOwner", index, slot: piece.slot });
     }
-    resolvedItems.push({ ...item, planIndex: index });
+    resolvedItems.push({ ...item, planIndex: index, sockets: ensureSocketCapabilities(item) });
+  }
+  if (exoticCount > 1) {
+    errors.push({ code: "multipleExotics" });
+  }
 
-    const desiredStatHash = statModHashFor(modAssignments?.[index]);
-    const desiredTuningHash = tuningHashFor(tuningAssignments?.[index]);
-    const current = decodeArmorPlugHashes((item.socketPlugs || []).map(socket => socket.plugHash));
-    const statSocketIndex = findKnownSocket(item, new Set(STAT_MOD_BY_HASH.keys())) ??
-      ((item.socketPlugs || []).some(socket => socket.socketIndex === 0 && socket.enabled) ? 0 : null);
-    const tuningSocketIndex = findKnownSocket(item, new Set(TUNING_BY_HASH.keys()));
-
-    if (desiredStatHash) {
-      if (current.armorModHash === desiredStatHash) {
-        // An unchanged installed plug needs no write and remains safe even if
-        // Bungie's reusable-plug component omits a legacy entry.
-      } else if (knownAvailable && !knownAvailable.has(desiredStatHash)) {
-        errors.push({ code: "plugUnavailable", index, slot: piece.slot, plugHash: desiredStatHash });
-      } else if (statSocketIndex === null) {
-        errors.push({ code: "statSocketUnknown", index, slot: piece.slot });
-      } else {
-        const targetCost = STAT_MOD_ENERGY_COST[Number(modAssignments[index]?.size)] || 0;
-        const currentCost = STAT_MOD_ENERGY_COST[Number(current.armorModSize)] || 0;
-        const capacity = Number(item.energy?.capacity) || 0;
-        const projectedUsed = Math.max(0, (Number(item.energy?.used) || 0) - currentCost) + targetCost;
-        if (capacity > 0 && projectedUsed > capacity) {
-          skippedMods.push({ index, slot: piece.slot, plugHash: desiredStatHash, reason: "energy" });
-        } else {
-          plugOperations.push({
-            itemId: String(item.id),
-            socketIndex: statSocketIndex,
-            plugItemHash: desiredStatHash,
-            kind: "stat",
-            slot: piece.slot,
-          });
-        }
-      }
-    } else if (current.armorModHash) {
-      errors.push({ code: "cannotClearStatMod", index, slot: piece.slot });
-    }
-
-    if (!desiredTuningHash) {
-      errors.push({ code: "invalidTuning", index, slot: piece.slot });
-    } else if (current.tuningHash === desiredTuningHash) {
-      // No write required; see the installed-plug note above.
-    } else if (knownAvailable && !knownAvailable.has(desiredTuningHash)) {
-      errors.push({ code: "plugUnavailable", index, slot: piece.slot, plugHash: desiredTuningHash });
-    } else if (tuningSocketIndex === null) {
-      errors.push({ code: "tuningSocketUnknown", index, slot: piece.slot });
-    } else {
-      plugOperations.push({
-        itemId: String(item.id),
-        socketIndex: tuningSocketIndex,
-        plugItemHash: desiredTuningHash,
-        kind: "tuning",
-        slot: piece.slot,
-      });
-    }
+  // Global assignment over the five real instances: exact socket resolution,
+  // tri-state availability, energy feasibility, fixed-tuning compatibility.
+  // Any unassignable mod BLOCKS the plan — there is no skipped-success path.
+  const assignment = assignArmorMods({
+    pieces,
+    inventory: resolvedItems,
+    tuningAssignments,
+    modAssignments,
+    availablePlugHashes,
+  });
+  for (const miss of assignment.unassignedMods) {
+    errors.push({
+      code: MISS_REASON_TO_ERROR_CODE[miss.reason] || "plugUnavailable",
+      index: miss.index,
+      slot: miss.slot || "",
+      kind: miss.kind || "stat",
+      plugHash: miss.plugHash || 0,
+    });
   }
 
   const preparationTransfers = [];
@@ -367,6 +378,14 @@ export function buildCustomLoadoutPlan({
       continue;
     }
     const replacement = (inventory || []).find(candidate =>
+      !targetIds.has(String(candidate?.id ?? "")) &&
+      candidate?.slot === item.slot && candidate?.classId === item.classId &&
+      !candidate?.equipped &&
+      // Prefer a non-exotic replacement so the source character never hits the
+      // one-exotic-equipped rule while freeing the loadout piece (handoff 4.4).
+      !candidate?.exotic &&
+      (String(candidate?.owner) === String(item.owner) || candidate?.owner === "Vault"),
+    ) || (inventory || []).find(candidate =>
       !targetIds.has(String(candidate?.id ?? "")) &&
       candidate?.slot === item.slot && candidate?.classId === item.classId &&
       !candidate?.equipped &&
@@ -399,19 +418,21 @@ export function buildCustomLoadoutPlan({
   if (characterClassType === undefined) {
     errors.push({ code: "unknownClass" });
   }
-  if (skippedMods.length > 0) {
-    warnings.push({ code: "modsSkipped", count: skippedMods.length });
-  }
 
   return {
     valid: errors.length === 0,
     errors,
     warnings,
-    skippedMods,
+    // Legacy compatibility: the old flow could skip energy-incompatible mods
+    // and still report success. That success semantics is gone — any unplaced
+    // mod is a blocking error above — so the list is always empty.
+    skippedMods: [],
     membershipType: Number(membershipType),
+    membershipId: membershipId ? String(membershipId) : null,
     targetCharacterId: String(targetCharacterId || ""),
     classId,
     classType: characterClassType,
+    assignment,
     preparationTransfers,
     sourceEquips: [...sourceEquipByCharacter].map(([characterId, itemIds]) => ({
       characterId,
@@ -419,7 +440,8 @@ export function buildCustomLoadoutPlan({
     })),
     transfers,
     equipItemIds: resolvedItems.map(item => String(item.id)),
-    plugOperations,
+    // Ordered per-socket plug writes produced by the global assignment.
+    plugOperations: assignment.plugOperations,
   };
 }
 
@@ -430,7 +452,57 @@ function equipFailures(response) {
   return results.filter(result => Number(result?.equipStatus) !== 0);
 }
 
-export async function applyCustomLoadoutPlan(plan, { onProgress = null } = {}) {
+// Re-read the profile after writing and confirm every expected instance is
+// equipped and every expected plug hash sits in its socket. One short retry is
+// allowed for Bungie's stale character data; no infinite retries (handoff 5).
+export async function verifyLoadoutApplication({
+  membershipType,
+  membershipId,
+  targetCharacterId,
+  equipItemIds,
+  plugOperations,
+}, { retries = 1, delayMs = 1500 } = {}) {
+  if (!membershipId) {
+    return { status: "failed", mismatches: [{ kind: "missingMembershipId" }], attempts: 1 };
+  }
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let lastMismatches = [];
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await bungieFetch(
+      `/Destiny2/${membershipType}/Profile/${membershipId}/?components=${VERIFY_COMPONENTS.join(",")}`,
+      { auth: true, retries: 0 },
+    );
+    const data = unwrapProfile(response);
+    const mismatches = [];
+    const equipment = data.characterEquipment?.data?.[targetCharacterId]?.items || [];
+    const equippedIds = new Set(equipment.map(item => String(item.itemInstanceId)));
+    for (const itemId of equipItemIds) {
+      if (!equippedIds.has(String(itemId))) {
+        mismatches.push({ kind: "armorInstanceMissing", itemId: String(itemId) });
+      }
+    }
+    const sockets = data.itemComponents?.sockets?.data ?? {};
+    for (const operation of plugOperations || []) {
+      const itemSockets = sockets[String(operation.itemId)]?.sockets || [];
+      const socket = itemSockets[operation.socketIndex];
+      if (Number(socket?.plugHash) !== Number(operation.plugItemHash)) {
+        mismatches.push({
+          kind: "plugMismatch",
+          itemId: String(operation.itemId),
+          socketIndex: operation.socketIndex,
+          expected: Number(operation.plugItemHash),
+          actual: Number(socket?.plugHash) || 0,
+        });
+      }
+    }
+    lastMismatches = mismatches;
+    if (mismatches.length === 0) return { status: "verified", mismatches: [], attempts: attempt + 1 };
+    if (attempt < retries) await sleep(delayMs);
+  }
+  return { status: "failed", mismatches: lastMismatches, attempts: retries + 1 };
+}
+
+export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify = true } = {}) {
   if (!plan?.valid) throw new BungieLoadoutPlanError(plan?.errors || []);
   const completed = {
     preparationTransfers: 0,
@@ -491,7 +563,20 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null } = {}) {
       });
       completed.plugs++;
     }
-    return { completed, skippedMods: plan.skippedMods };
+
+    let verification = null;
+    if (verify) {
+      stage = "verify";
+      progress({ action: "verify" });
+      verification = await verifyLoadoutApplication({
+        membershipType: plan.membershipType,
+        membershipId: plan.membershipId,
+        targetCharacterId: plan.targetCharacterId,
+        equipItemIds: plan.equipItemIds,
+        plugOperations: plan.plugOperations,
+      });
+    }
+    return { completed, skippedMods: [], verification };
   } catch (cause) {
     throw new BungieLoadoutApplyError(stage, completed, cause);
   }

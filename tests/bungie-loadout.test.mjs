@@ -12,6 +12,7 @@ import {
   extractBungieLoadoutState,
   getFragmentAdjustments,
   mapSavedLoadoutArmor,
+  verifyLoadoutApplication,
 } from "../src/core/bungie-loadout.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
@@ -53,6 +54,33 @@ function jsonResponse(body, { ok = true, status = 200 } = {}) {
 
 test("GetProfile loadout components contain only explicit request components", () => {
   assert.deepEqual(LOADOUT_WRITE_COMPONENTS, ["CharacterLoadouts"]);
+});
+
+test("missing plug-set data is unknown (null), never a known-empty set", () => {
+  const characterId = "2305843000000000001";
+  const profile = {
+    characters: { data: { [characterId]: { classType: 1 } } },
+    characterEquipment: { data: {} },
+    // No profilePlugSets and no characterPlugSets at all.
+  };
+  const state = extractBungieLoadoutState(profile);
+  assert.equal(
+    state.availablePlugHashesByCharacter[characterId],
+    null,
+    "absent plug-set data must stay unknown so the preflight never rejects on it",
+  );
+});
+
+test("an explicitly present plug set stays a known set, even when it is empty", () => {
+  const characterId = "2305843000000000001";
+  const profile = {
+    characters: { data: { [characterId]: { classType: 1 } } },
+    characterEquipment: { data: {} },
+    profilePlugSets: { data: { plugs: {} } },
+    characterPlugSets: { data: { [characterId]: { plugs: {} } } },
+  };
+  const state = extractBungieLoadoutState(profile);
+  assert.deepEqual([...state.availablePlugHashesByCharacter[characterId]], []);
 });
 
 test("extractBungieLoadoutState maps characters, saved loadouts, subclass plugs, and unlocks", () => {
@@ -174,8 +202,8 @@ test("buildCustomLoadoutPlan creates vault transfers, one bulk equip, and exact 
   assert.deepEqual(new Set(plan.plugOperations.map(operation => operation.socketIndex)), new Set([0, 11]));
 });
 
-test("preflight skips only energy-incompatible stat mods and blocks mismatched Exotic rolls", () => {
-  const fixture = customPlanFixture({ energyCapacity: 2, energyUsed: 0 });
+test("energy-incompatible stat mods block the plan and never skip to success", () => {
+  const fixture = customPlanFixture({ energyCapacity: 2, energyUsed: 3 });
   fixture.pieces[4] = {
     ...fixture.pieces[4],
     exotic: true,
@@ -193,16 +221,20 @@ test("preflight skips only energy-incompatible stat mods and blocks mismatched E
   });
   assert.equal(plan.valid, false);
   assert.ok(plan.errors.some(error => error.code === "exoticPerkMismatch"));
-  assert.equal(plan.skippedMods.length, 5);
+  // The five energy-infeasible +10 mods are BLOCKING errors now (capacity 2,
+  // used 3 -> a 3-cost mod cannot fit), not skippedMods.
+  assert.equal(plan.errors.filter(error => error.code === "energy").length, 5);
+  assert.equal(plan.assignment.unassignedMods.length, 5);
+  assert.deepEqual(plan.skippedMods, []);
   assert.equal(plan.plugOperations.filter(operation => operation.kind === "tuning").length, 5);
 });
 
-test("preflight rejects an armor instance Bungie marks as not equippable", () => {
+test("preflight rejects only permanently unequippable armor (level restriction)", () => {
   const fixture = customPlanFixture();
   fixture.inventory[2] = {
     ...fixture.inventory[2],
     canEquip: false,
-    cannotEquipReason: 4,
+    cannotEquipReason: 1024, // ItemIsInAnotherLevelRequirement
   };
   const plan = buildCustomLoadoutPlan({
     membershipType: 3,
@@ -213,8 +245,31 @@ test("preflight rejects an armor instance Bungie marks as not equippable", () =>
   assert.equal(plan.valid, false);
   assert.deepEqual(
     plan.errors.find(error => error.code === "itemCannotEquip"),
-    { code: "itemCannotEquip", index: 2, slot: "chest", reason: 4 },
+    { code: "itemCannotEquip", index: 2, slot: "chest", reason: 1024 },
   );
+});
+
+test("transient cannot-equip reasons (locked/vaulted/equipped) do not preflight-block", () => {
+  for (const reason of [0, 4, 16]) {
+    const fixture = customPlanFixture();
+    fixture.inventory[2] = {
+      ...fixture.inventory[2],
+      canEquip: false,
+      cannotEquipReason: reason,
+    };
+    const plan = buildCustomLoadoutPlan({
+      membershipType: 3,
+      targetCharacterId: "character-1",
+      classId: "hunter",
+      ...fixture,
+    });
+    assert.equal(
+      plan.errors.some(error => error.code === "itemCannotEquip"),
+      false,
+      `reason ${reason} is transient and must flow into the prepare/transfer flow`,
+    );
+    assert.equal(plan.valid, true, `reason ${reason}: plan stays valid`, plan.errors);
+  }
 });
 
 test("preflight blocks plug changes when Bungie returns no unlocked armor plugs", () => {
@@ -244,7 +299,7 @@ test("applyCustomLoadoutPlan POSTs the manual sequence with JSON bodies", async 
       classId: "hunter",
       ...customPlanFixture(),
     });
-    const result = await applyCustomLoadoutPlan(plan);
+    const result = await applyCustomLoadoutPlan(plan, { verify: false });
     assert.equal(result.completed.transfers, 5);
     assert.equal(result.completed.targetEquip, 1);
     assert.equal(result.completed.plugs, 10);
@@ -254,6 +309,87 @@ test("applyCustomLoadoutPlan POSTs the manual sequence with JSON bodies", async 
     assert.equal(requests.filter(request => request.url.endsWith("/EquipItems/")).length, 1);
     assert.equal(requests.filter(request => request.url.endsWith("/InsertSocketPlugFree/")).length, 10);
     assert.equal(requests[0].options.headers["Content-Type"], "application/json");
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("verifyLoadoutApplication re-reads the profile and confirms instances and plugs", async () => {
+  installAuth();
+  const statHash = STAT_MOD_HASHES.health[10];
+  const tuningHash = TUNING_MOD_HASH_BY_TUNING["health:weapons"];
+  globalThis.fetch = async (url, options) => {
+    if (options?.method === "GET") {
+      return jsonResponse({ ErrorCode: 1, Response: {
+        characters: { data: {} },
+        characterEquipment: {
+          data: { "character-1": { items: ["100", "101", "102", "103", "104"].map(id => ({
+            itemInstanceId: id,
+            itemHash: 1000,
+          })) } },
+        },
+        itemComponents: {
+          sockets: {
+            data: Object.fromEntries(["100", "101", "102", "103", "104"].map(id => [
+              id, { sockets: [
+                { plugHash: statHash, isEnabled: true },
+                { plugHash: tuningHash, isEnabled: true },
+              ] },
+            ])),
+          },
+        },
+      } });
+    }
+    return jsonResponse({ Response: [], ErrorCode: 1, ErrorStatus: "Ok" });
+  };
+  try {
+    const result = await verifyLoadoutApplication({
+      membershipType: 3,
+      membershipId: "9000000000000000001",
+      targetCharacterId: "character-1",
+      equipItemIds: ["100", "101", "102", "103", "104"],
+      plugOperations: ["100", "101", "102", "103", "104"].map(id => ({
+        itemId: id, socketIndex: 0, plugItemHash: statHash,
+      })),
+    }, { retries: 0 });
+    assert.equal(result.status, "verified");
+    assert.deepEqual(result.mismatches, []);
+    assert.equal(result.attempts, 1);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("verifyLoadoutApplication reports a wrong plug instead of trusting the write", async () => {
+  installAuth();
+  const statHash = STAT_MOD_HASHES.health[10];
+  globalThis.fetch = async (url, options) => {
+    if (options?.method === "GET") {
+      return jsonResponse({ ErrorCode: 1, Response: {
+        characters: { data: {} },
+        characterEquipment: {
+          data: { "character-1": { items: ["100"].map(id => ({ itemInstanceId: id, itemHash: 1000 })) } },
+        },
+        itemComponents: {
+          sockets: { data: { "100": { sockets: [{ plugHash: 0, isEnabled: true }] } } },
+        },
+      } });
+    }
+    return jsonResponse({ Response: [], ErrorCode: 1, ErrorStatus: "Ok" });
+  };
+  try {
+    const result = await verifyLoadoutApplication({
+      membershipType: 3,
+      membershipId: "9000000000000000001",
+      targetCharacterId: "character-1",
+      equipItemIds: ["100"],
+      plugOperations: [{ itemId: "100", socketIndex: 0, plugItemHash: statHash }],
+    }, { retries: 0 });
+    assert.equal(result.status, "failed");
+    assert.equal(result.mismatches.length, 1);
+    assert.equal(result.mismatches[0].kind, "plugMismatch");
+    assert.equal(result.mismatches[0].expected, statHash);
+    assert.equal(result.mismatches[0].actual, 0);
   } finally {
     restoreGlobals();
   }
