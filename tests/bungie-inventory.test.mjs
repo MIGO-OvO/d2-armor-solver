@@ -216,12 +216,12 @@ test("reads armor stats from Bungie's separate ItemStats component", () => {
     itemStats: {
       [itemInstanceId]: {
         stats: {
-          "144602215": 25,
-          "392767087": 10,
-          "1735777505": 20,
-          "1943323491": 10,
-          "2996146975": 30,
-          "4244567218": 10,
+          "144602215": { statHash: 144602215, value: 25 },
+          "392767087": { statHash: 392767087, value: 10 },
+          "1735777505": { statHash: 1735777505, value: 20 },
+          "1943323491": { statHash: 1943323491, value: 10 },
+          "2996146975": { statHash: 2996146975, value: 30 },
+          "4244567218": { statHash: 4244567218, value: 10 },
         },
       },
     },
@@ -232,6 +232,8 @@ test("reads armor stats from Bungie's separate ItemStats component", () => {
   assert.deepEqual(item.baseStats, {
     health: 5, melee: 5, grenade: 20, super: 25, class: 5, weapons: 30,
   });
+  assert.equal(item.archetypeId, "Powerhouse");
+  assert.equal(item.tertiary, "grenade");
   assert.equal(
     Object.values(item.displayedStats).reduce((sum, value) => sum + value, 0),
     105,
@@ -472,6 +474,40 @@ test("buildArmorInventory returns membership and character summaries", () => {
   assert.deepEqual(result.characters, {
     "2305843009471208001": { classType: 1 },
     "2305843009471208002": { classType: 2 },
+  });
+});
+
+test("buildArmorInventory exposes Bungie's aggregate six stats for each character", () => {
+  const characterId = "2305843009471208999";
+  const result = buildArmorInventory({
+    Response: {
+      data: {
+        characters: {
+          data: {
+            [characterId]: {
+              classType: 1,
+              stats: {
+                "144602215": 94,
+                "392767087": 61,
+                "1735777505": 83,
+                "1943323491": 105,
+                "2996146975": 116,
+                "4244567218": 72,
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(result.characters[characterId].stats, {
+    health: 61,
+    melee: 72,
+    grenade: 83,
+    super: 94,
+    class: 105,
+    weapons: 116,
   });
 });
 

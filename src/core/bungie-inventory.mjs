@@ -83,6 +83,24 @@ const STAT_HASH_TO_NAME = {
   4244567218: "melee",
 };
 
+// DestinyItemStatsComponent values use the DestinyStat shape
+// `{ statHash, value }`, while character aggregate stats and older fixtures
+// use plain numbers. Normalize both at the API boundary so no object can leak
+// into framework inference or stat arithmetic.
+function normalizeDestinyStats(statsComponent) {
+  const normalized = {};
+  for (const [key, entry] of Object.entries(statsComponent || {})) {
+    const statHash = Number(
+      entry && typeof entry === "object" ? entry.statHash ?? key : key,
+    );
+    const stat = STAT_HASH_TO_NAME[statHash];
+    const rawValue = entry && typeof entry === "object" ? entry.value : entry;
+    const value = Number(rawValue);
+    if (stat && Number.isFinite(value)) normalized[stat] = value;
+  }
+  return normalized;
+}
+
 // Reverse indexes over the mod hash tables: a plug hash resolves forward to
 // the exact tuning/mod it grants (Metis C1 — no reverse inference needed).
 const STAT_MOD_HASH_TO_MOD = new Map();
@@ -162,11 +180,7 @@ export function normalizeApiItem(apiItem, context = {}) {
   // separate from ItemInstances. Keep the legacy instance.stats fallback for
   // older captured/synthetic fixtures, but prefer the API's actual shape.
   const statsComponent = itemStats?.[instanceId]?.stats || instance.stats || {};
-  const rawStats = {};
-  for (const [statHash, value] of Object.entries(statsComponent)) {
-    const stat = STAT_HASH_TO_NAME[Number(statHash)];
-    if (stat) rawStats[stat] = value;
-  }
+  const rawStats = normalizeDestinyStats(statsComponent);
 
   const tierType = entry?.tierType ?? apiItem.tierType ?? 0;
   const rarity = entry?.rarity ?? "";
@@ -377,7 +391,11 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
   const userInfo = data.profile?.data?.userInfo ?? {};
   const characters = {};
   for (const [characterId, character] of Object.entries(data.characters?.data ?? {})) {
-    characters[characterId] = { classType: character?.classType ?? null };
+    const stats = normalizeDestinyStats(character?.stats);
+    characters[characterId] = {
+      classType: character?.classType ?? null,
+      ...(Object.keys(stats).length > 0 ? { stats } : {}),
+    };
   }
   const instances = data.itemComponents?.instances?.data ?? {};
   const itemStats = data.itemComponents?.stats?.data ?? {};

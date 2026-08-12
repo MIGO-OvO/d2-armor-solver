@@ -47,6 +47,7 @@ import {
   getUpgradeConfig,
   getUpgradeModifierBudget,
   normalizeUpgradePiece,
+  resolveCurrentLoadoutTotals,
 } from "./core/upgrade-optimizer.mjs";
 import {
   detectEquippedClass,
@@ -2888,10 +2889,15 @@ async function importInventoryFromBungie() {
       { auth: true },
     );
     const { items, characters } = buildArmorInventory(response, { language: getPageLanguage() });
+    const loadoutState = extractBungieLoadoutState(response);
+    for (const [characterId, summary] of Object.entries(characters)) {
+      const target = loadoutState.characters?.[characterId];
+      if (target && summary.stats) target.stats = { ...summary.stats };
+    }
     bungieProfileState = {
       membershipType,
       membershipId,
-      ...extractBungieLoadoutState(response),
+      ...loadoutState,
     };
     // Map the per-character subclass fragments to class ids so the equipped
     // loadout fill can look them up by the selected class.
@@ -3273,10 +3279,9 @@ function applyEquippedLoadout() {
   // Bungie imports carry the subclass item's installed Aspects/Fragments:
   // fill the fragment steppers from the selected class's current subclass.
   const fragmentsApplied = applySubclassFragmentsToUI();
-  // Auto-set the six-stat targets to the current stats (armor + fragments),
-  // so the user starts from where the equipped loadout already is instead of
-  // re-entering the whole target set by hand.
-  applyCurrentStatsToTargets();
+  // Auto-set the six-stat targets to Bungie's aggregate character stats when
+  // available; CSV imports fall back to armor + fragment reconstruction.
+  applyCurrentStatsToTargets({ useBungieCharacterStats: importSource === "bungie" });
   saveCurrentDraft();
   saveUpgradeDraft();
   showImportMessage(l(
@@ -3304,13 +3309,19 @@ function applySubclassFragmentsToUI() {
   return true;
 }
 
-// Set the six-stat targets (target_*) to the current loadout's final stats:
-// armor totals plus the (just-filled) fragment adjustments.
-function applyCurrentStatsToTargets() {
+// Set the six-stat targets (target_*) to the current loadout's final stats.
+// Bungie's character aggregate is authoritative for the equipped loadout and
+// already includes armor, mods, tuning, subclass and fragment adjustments.
+// CSV and saved-loadout editing retain the local reconstruction fallback.
+function applyCurrentStatsToTargets({ useBungieCharacterStats = false } = {}) {
   if (upgradeBuildState.length !== UPGRADE_SLOTS.length) return;
-  const totals = finalizeUpgradeTotals(
-    getManualUpgradeArmorTotals(upgradeBuildState),
-    getUpgradeFragments()
+  const exactTotals = useBungieCharacterStats
+    ? bungieProfileState?.characters?.[bungieTargetCharacterId]?.stats
+    : null;
+  const totals = resolveCurrentLoadoutTotals(
+    upgradeBuildState,
+    getUpgradeFragments(),
+    exactTotals,
   );
   for (const stat of STATS) {
     const input = document.getElementById('target_' + stat);

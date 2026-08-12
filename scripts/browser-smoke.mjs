@@ -85,12 +85,24 @@ function createWritableProfileFixture() {
     bucketHash,
     itemInstanceId: `10000000000000009${index + 1}`,
   }));
+  const equippedArmor = armor.map((item, index) => ({
+    ...item,
+    itemInstanceId: `10000000000000008${index + 1}`,
+  }));
   const currentTuningHash = TUNING_MOD_HASH_BY_TUNING["health:weapons"];
   const allArmorPlugHashes = [
     ...Object.values(STAT_MOD_HASHES).flatMap(Object.values),
     ...Object.values(TUNING_MOD_HASH_BY_TUNING),
     BALANCED_TUNING_MOD_HASH,
   ];
+  data.characters.data[hunterId].stats = {
+    392767087: 61,
+    4244567218: 72,
+    1735777505: 83,
+    144602215: 94,
+    1943323491: 105,
+    2996146975: 116,
+  };
   data.itemComponents.stats = { data: {} };
 
   data.profileInventory.data.items = data.profileInventory.data.items
@@ -106,13 +118,21 @@ function createWritableProfileFixture() {
       state: 0,
       bucketHash: item.bucketHash,
     })));
-  data.characterEquipment.data[hunterId].items = [{
-    itemHash: 777000001,
-    itemInstanceId: subclassId,
-    quantity: 1,
-    bucketHash: 3284755031,
-  }];
-  for (const item of armor) {
+  data.characterEquipment.data[hunterId].items = [
+    {
+      itemHash: 777000001,
+      itemInstanceId: subclassId,
+      quantity: 1,
+      bucketHash: 3284755031,
+    },
+    ...equippedArmor.map(item => ({
+      itemHash: item.itemHash,
+      itemInstanceId: item.itemInstanceId,
+      quantity: 1,
+      bucketHash: item.bucketHash,
+    })),
+  ];
+  for (const item of [...armor, ...equippedArmor]) {
     data.itemComponents.instances.data[item.itemInstanceId] = {
       itemLevel: 1,
       quality: 0,
@@ -129,12 +149,12 @@ function createWritableProfileFixture() {
     };
     data.itemComponents.stats.data[item.itemInstanceId] = {
       stats: {
-        392767087: 30,
-        1735777505: 25,
-        4244567218: 20,
-        144602215: 5,
-        1943323491: 5,
-        2996146975: 5,
+        392767087: { statHash: 392767087, value: 30 },
+        1735777505: { statHash: 1735777505, value: 25 },
+        4244567218: { statHash: 4244567218, value: 20 },
+        144602215: { statHash: 144602215, value: 5 },
+        1943323491: { statHash: 1943323491, value: 5 },
+        2996146975: { statHash: 2996146975, value: 5 },
       },
     };
     data.itemComponents.sockets.data[item.itemInstanceId] = {
@@ -997,6 +1017,35 @@ async function checkBungieAuthFlow(browser) {
     assert.match(importMessage, /请选择职业/);
     assert.match(await page.locator(".upgrade-import-state").innerText(), /已导入 \d+ 件/);
     assert.equal(await page.locator("#upgradeImportBody").isVisible(), true);
+
+    const profileRequestUrl = observedBungieRequests.find(requestUrl =>
+      /\/Destiny2\/\d+\/Profile\//.test(new URL(requestUrl).pathname)
+    );
+    assert.ok(profileRequestUrl, "inventory import must issue a GetProfile request");
+    const requestedComponents = new Set(
+      (new URL(profileRequestUrl).searchParams.get("components") || "").split(","),
+    );
+    assert.equal(requestedComponents.has("CharacterLoadouts"), true);
+    assert.equal(requestedComponents.has("ProfilePlugSets"), false);
+    assert.equal(requestedComponents.has("CharacterPlugSets"), false);
+
+    await page.locator("#importClass").selectOption("hunter");
+    await page.evaluate(() => window.applyEquippedLoadout());
+    const expectedCurrentStats = {
+      health: "61",
+      melee: "72",
+      grenade: "83",
+      super: "94",
+      class: "105",
+      weapons: "116",
+    };
+    for (const [stat, value] of Object.entries(expectedCurrentStats)) {
+      assert.equal(
+        await page.locator(`#target_${stat}`).inputValue(),
+        value,
+        `Bungie equipped-loadout target ${stat} must use the aggregate character stat`,
+      );
+    }
 
     // --- (e) saved game loadout and custom solver result cover all write routes ---
     assert.equal(await page.locator(".bungie-saved-loadouts").count(), 1);

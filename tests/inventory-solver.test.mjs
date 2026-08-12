@@ -65,7 +65,7 @@ test("no requirement searches the whole inventory", () => {
     Math.min(...shorts), "best owned combo should be ranked first");
 });
 
-test("4-piece requirement produces only loadouts with four set pieces", () => {
+test("4-piece requirement allows other armor while requiring at least four set pieces", () => {
   const result = solveInventoryLoadout({
     items: buildInventory(),
     targets: TARGETS,

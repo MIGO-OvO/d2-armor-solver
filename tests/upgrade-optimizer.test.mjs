@@ -12,6 +12,7 @@ import {
   getUpgradeReplacements,
   normalizeUpgradePiece,
   refineUpgradePlanPieces,
+  resolveCurrentLoadoutTotals,
   sameUpgradeIdentity,
 } from "../src/core/upgrade-optimizer.mjs";
 import {
@@ -26,6 +27,20 @@ const TARGETS = {
   class: 100,
   weapons: 180,
 };
+
+test("current loadout targets prefer Bungie's aggregate stats without adding fragments twice", () => {
+  const exactTotals = {
+    health: 61,
+    melee: 72,
+    grenade: 83,
+    super: 94,
+    class: 105,
+    weapons: 116,
+  };
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 10]));
+
+  assert.deepEqual(resolveCurrentLoadoutTotals([], fragments, exactTotals), exactTotals);
+});
 
 test("required targets outrank a smaller total shortfall", () => {
   const smallerTotalGap = getUpgradeMetrics({

@@ -178,6 +178,16 @@ export function finalizeUpgradeTotals(armorTotals, fragments) {
   ]));
 }
 
+export function resolveCurrentLoadoutTotals(pieces, fragments, exactTotals = null) {
+  const hasCompleteExactTotals = exactTotals
+    && STATS.every(stat => Number.isFinite(Number(exactTotals[stat])));
+  if (hasCompleteExactTotals) {
+    const normalized = Object.fromEntries(STATS.map(stat => [stat, Number(exactTotals[stat])]));
+    return finalizeUpgradeTotals(normalized, {});
+  }
+  return finalizeUpgradeTotals(getManualUpgradeArmorTotals(pieces), fragments);
+}
+
 export function getUpgradeModifierBudget(pieces) {
   return {
     numPlus3: pieces.filter(piece => piece.tuningMode === 'plus3').length,

@@ -4,6 +4,7 @@ import test from "node:test";
 import { saveToken } from "../src/core/bungie-api.mjs";
 import {
   BungieLoadoutApplyError,
+  LOADOUT_WRITE_COMPONENTS,
   applyCustomLoadoutPlan,
   buildCustomLoadoutPlan,
   decodeArmorPlugHashes,
@@ -49,6 +50,10 @@ function restoreGlobals() {
 function jsonResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body };
 }
+
+test("GetProfile loadout components contain only explicit request components", () => {
+  assert.deepEqual(LOADOUT_WRITE_COMPONENTS, ["CharacterLoadouts"]);
+});
 
 test("extractBungieLoadoutState maps characters, saved loadouts, subclass plugs, and unlocks", () => {
   const characterId = "2305843000000000001";

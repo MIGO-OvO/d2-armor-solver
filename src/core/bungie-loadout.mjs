@@ -20,8 +20,6 @@ import {
 export const CHARACTER_LOADOUTS_COMPONENT = "CharacterLoadouts";
 export const LOADOUT_WRITE_COMPONENTS = [
   CHARACTER_LOADOUTS_COMPONENT,
-  "ProfilePlugSets",
-  "CharacterPlugSets",
 ];
 export const SUBCLASS_BUCKET_HASH = 3284755031;
 
