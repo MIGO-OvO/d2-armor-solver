@@ -117,6 +117,13 @@ and records both commit SHAs in `versions.json`. Each Vite build receives its
 channel and commit at build time, so the development solver can show a visible
 DEV marker and select isolated storage keys.
 
+Both online channels use the same Bungie application because they share an
+origin. Bungie returns OAuth codes to the registered stable `/app/` callback;
+the composed stable HTML relays only callbacks whose state begins with
+`develop.` to `/dev/app/`. The development app then performs the normal
+session-state comparison before exchanging the code, preserving the CSRF
+boundary while keeping stable callbacks on the stable channel.
+
 Every pushed branch also produces a solver-only offline artifact; published
 Releases receive the same offline archive as a downloadable asset. Cloudflare
 Workers Static Assets can still consume a standalone `dist/` through Wrangler,

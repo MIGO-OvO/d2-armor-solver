@@ -2521,7 +2521,7 @@ function renderHeaderBungieAuthState() {
 }
 
 function bungieLogin() {
-  const state = crypto.randomUUID();
+  const state = `${BUILD_CHANNEL}.${crypto.randomUUID()}`;
   try {
     sessionStorage.setItem(BUNGIE_OAUTH_STATE_KEY, state);
   } catch {

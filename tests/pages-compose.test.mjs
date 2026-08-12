@@ -24,7 +24,10 @@ async function createDistribution(directory, portal, marker) {
   await mkdir(path.join(directory, "app"), { recursive: true });
   await mkdir(path.join(directory, "assets"), { recursive: true });
   await writeFile(path.join(directory, "index.html"), portal);
-  await writeFile(path.join(directory, "app", "index.html"), marker);
+  await writeFile(
+    path.join(directory, "app", "index.html"),
+    `<!doctype html><html><head></head><body>${marker}</body></html>`,
+  );
   await writeFile(path.join(directory, "assets", `${marker}.txt`), marker);
 }
 
@@ -45,11 +48,17 @@ test("Pages composition keeps main at root and develop under /dev", async () => 
       developmentCommit: "development-sha",
     });
 
-    assert.equal(await readFile(path.join(output, "app", "index.html"), "utf8"), "stable");
-    assert.equal(
-      await readFile(path.join(output, "dev", "app", "index.html"), "utf8"),
-      "development",
+    const stableApp = await readFile(path.join(output, "app", "index.html"), "utf8");
+    assert.match(stableApp, /<body>stable<\/body>/);
+    assert.match(stableApp, /data-development-oauth-relay/);
+    assert.match(stableApp, /state\.startsWith\("develop\."\)/);
+    assert.match(stableApp, /new URL\("\.\.\/dev\/app\/", location\.href\)/);
+    const developmentApp = await readFile(
+      path.join(output, "dev", "app", "index.html"),
+      "utf8",
     );
+    assert.match(developmentApp, /<body>development<\/body>/);
+    assert.doesNotMatch(developmentApp, /data-development-oauth-relay/);
 
     const rootPortal = await readFile(path.join(output, "index.html"), "utf8");
     const developmentPortal = await readFile(path.join(output, "dev", "index.html"), "utf8");

@@ -251,7 +251,7 @@ Bungie 登录（OAuth）用于获取真实库存，需要部署侧预先配置�
 2. 从应用页面取得三件套：**API Key**、**OAuth Client ID**、**OAuth Client Secret**。
 3. 在应用后台启用 `MoveEquipDestinyItems` 权限；未启用时库存读取仍可成功，但转移、穿戴和写入模组会返回权限错误。修改权限后让玩家重新登录。
 4. 在 GitHub 仓库 → **Settings → Secrets and variables → Actions** 添加稳定版 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
-5. 如需在开发测试版验证 Bungie 登录，建议创建独立的 Bungie 测试应用，将 Redirect URL 设为 `https://migo-ovo.github.io/d2-armor-solver/dev/app/`，并添加 `BUNGIE_DEV_API_KEY`、`BUNGIE_DEV_OAUTH_CLIENT_ID`、`BUNGIE_DEV_OAUTH_CLIENT_SECRET`。未设置时开发版仍可测试 DIM CSV、求解与本地保存，但会隐藏 Bungie 登录入口。
+5. 开发测试版复用上述 Bungie 应用与 GitHub Secrets。Bungie 仍回调已登记的稳定路径 `/app/`；组合发布产物会识别带 `develop.` 前缀的 OAuth state，并立即把授权码与 state 原样转发到 `/dev/app/`，再由开发版完成原有 state 校验。稳定版 state 不会被转发。
 6. Cloudflare 部署默认不启用 Bungie 登录（该来源未在门户注册）。构建未配置对应 secrets 时仍然成功，登录与“装备到游戏”入口自动隐藏；离线构建会强制清空这些配置。
 
 > 请勿在仓库、Issue 或任何文档中提交真实 secret 值；GitHub Secrets 只在 Actions 运行期间注入构建过程。

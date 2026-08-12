@@ -78,9 +78,9 @@ jobs:
         working-directory: development
         env:
           BUILD_CHANNEL: develop
-          BUNGIE_API_KEY: ${{ secrets.BUNGIE_DEV_API_KEY }}
-          BUNGIE_OAUTH_CLIENT_ID: ${{ secrets.BUNGIE_DEV_OAUTH_CLIENT_ID }}
-          BUNGIE_OAUTH_CLIENT_SECRET: ${{ secrets.BUNGIE_DEV_OAUTH_CLIENT_SECRET }}
+          BUNGIE_API_KEY: ${{ secrets.BUNGIE_API_KEY }}
+          BUNGIE_OAUTH_CLIENT_ID: ${{ secrets.BUNGIE_OAUTH_CLIENT_ID }}
+          BUNGIE_OAUTH_CLIENT_SECRET: ${{ secrets.BUNGIE_OAUTH_CLIENT_SECRET }}
         run: BUILD_COMMIT_SHA="$DEVELOPMENT_COMMIT_SHA" npm run check
 
       - name: Compose Pages channels
