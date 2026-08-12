@@ -20,12 +20,13 @@ import {
 // The item hash (3400283633, a real helmet) and every stat/mod/tuning hash
 // below are REAL values (the helmet appears in tests/fixtures/profile-fixture.json
 // with a melee +10 mod, hash 4287799666, installed). Instance IDs are
-// desensitized placeholders. Bungie's ItemStats semantics follow the project's
-// tested formula: ItemStats = rolled base + masterwork bonus, with installed
-// tuning/mod effects added forward (DIM computes its own stats from investment
-// stats + plugs, so the CSV displayed columns are the ground truth here). A
-// fresh capture with ItemStats + reusable plugs should be diffed against this
-// file before any formula change (scripts/capture-profile-fixture.mjs).
+// desensitized placeholders. Bungie's ItemStats are the item's FULLY COMPUTED
+// stats (base + masterwork + installed tuning + installed stat mod), which is
+// what the game displays and what DIM's CSV displayed columns report; the
+// Bungie path recovers the rolled base by subtracting each layer (handoff 3.5,
+// confirmed against live accounts). A fresh capture with ItemStats +
+// reusable plugs should be diffed against this file before any formula change
+// (scripts/capture-profile-fixture.mjs).
 
 const ITEM_HASH = 3400283633;
 const FRAME = ARCHETYPES.find(archetype => archetype.id === "Powerhouse");
@@ -80,12 +81,20 @@ function masterworkBonus(tier) {
   return Math.min(5, Math.max(0, tier));
 }
 
-function itemStatsFor({ masterworkTier }) {
+// Bungie ItemStats are the item's fully computed stats: rolled base +
+// masterwork bonus + installed tuning + installed stat mod (the game's
+// current item values). This mirrors what the CSV displayed columns report.
+function itemStatsFor({ masterworkTier, statMod, tuning }) {
+  const changes = tuningChangesFor(tuning);
   const stats = {};
   for (const stat of Object.keys(STAT_HASH)) {
     const base = BASE_ROLL[stat];
     const bonus = FRAMEWORK.has(stat) ? 0 : masterworkBonus(masterworkTier);
-    stats[STAT_HASH[stat]] = { statHash: STAT_HASH[stat], value: base + bonus };
+    const mod = statMod && statMod.stat === stat ? statMod.size : 0;
+    stats[STAT_HASH[stat]] = {
+      statHash: STAT_HASH[stat],
+      value: base + bonus + (changes[stat] || 0) + mod,
+    };
   }
   return stats;
 }
@@ -119,9 +128,8 @@ function bungieItemFor({ masterworkTier, statMod, tuning, tuningStat }) {
     {
       characterClassType: 1,
       instances: { [instanceId]: { energy: { energyCapacity: masterworkTier, energyUsed: 0, energyUnused: 10 } } },
-      itemStats: { [instanceId]: { stats: itemStatsFor({ masterworkTier }) } },
+      itemStats: { [instanceId]: { stats: itemStatsFor({ masterworkTier, statMod, tuning }) } },
       sockets: { [instanceId]: { sockets } },
-      plugs: {},
       reusablePlugs: { [instanceId]: { plugs: reusablePlugs } },
       catalog: CATALOG,
       language: "en",

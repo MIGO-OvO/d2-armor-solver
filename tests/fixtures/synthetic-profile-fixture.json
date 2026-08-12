@@ -161,14 +161,21 @@
               "quality": 0,
               "isEquipped": true,
               "canEquip": true,
-              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
-              "primaryStat": { "statHash": 1935470627, "value": 2010 },
+              "energyCapacity": {
+                "energyCapacity": 0,
+                "energyUsed": 0,
+                "energyUnused": 0
+              },
+              "primaryStat": {
+                "statHash": 1935470627,
+                "value": 2010
+              },
               "stats": {
-                "2996146975": 5,
-                "392767087": 25,
-                "1943323491": 5,
-                "1735777505": 20,
                 "144602215": 5,
+                "392767087": 25,
+                "1735777505": 20,
+                "1943323491": 5,
+                "2996146975": 5,
                 "4244567218": 30
               }
             },
@@ -177,14 +184,21 @@
               "quality": 0,
               "isEquipped": false,
               "canEquip": true,
-              "energyCapacity": { "energyCapacity": 10, "energyUsed": 0, "energyUnused": 10 },
-              "primaryStat": { "statHash": 1935470627, "value": 2020 },
+              "energyCapacity": {
+                "energyCapacity": 10,
+                "energyUsed": 0,
+                "energyUnused": 10
+              },
+              "primaryStat": {
+                "statHash": 1935470627,
+                "value": 2020
+              },
               "stats": {
-                "2996146975": 30,
-                "392767087": 10,
-                "1943323491": 10,
-                "1735777505": 20,
                 "144602215": 25,
+                "392767087": 10,
+                "1735777505": 20,
+                "1943323491": 10,
+                "2996146975": 30,
                 "4244567218": 10
               }
             },
@@ -193,14 +207,21 @@
               "quality": 0,
               "isEquipped": false,
               "canEquip": true,
-              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
-              "primaryStat": { "statHash": 1935470627, "value": 2015 },
+              "energyCapacity": {
+                "energyCapacity": 0,
+                "energyUsed": 0,
+                "energyUnused": 0
+              },
+              "primaryStat": {
+                "statHash": 1935470627,
+                "value": 2015
+              },
               "stats": {
-                "2996146975": 30,
-                "392767087": 5,
-                "1943323491": 5,
-                "1735777505": 20,
                 "144602215": 25,
+                "392767087": 5,
+                "1735777505": 20,
+                "1943323491": 5,
+                "2996146975": 40,
                 "4244567218": 5
               }
             },
@@ -209,14 +230,21 @@
               "quality": 0,
               "isEquipped": false,
               "canEquip": true,
-              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
-              "primaryStat": { "statHash": 1935470627, "value": 2012 },
+              "energyCapacity": {
+                "energyCapacity": 0,
+                "energyUsed": 0,
+                "energyUnused": 0
+              },
+              "primaryStat": {
+                "statHash": 1935470627,
+                "value": 2012
+              },
               "stats": {
-                "2996146975": 5,
-                "392767087": 25,
-                "1943323491": 5,
-                "1735777505": 5,
                 "144602215": 20,
+                "392767087": 30,
+                "1735777505": 5,
+                "1943323491": 5,
+                "2996146975": 0,
                 "4244567218": 30
               }
             },
@@ -225,14 +253,21 @@
               "quality": 0,
               "isEquipped": false,
               "canEquip": true,
-              "energyCapacity": { "energyCapacity": 0, "energyUsed": 0, "energyUnused": 0 },
-              "primaryStat": { "statHash": 1935470627, "value": 2005 },
+              "energyCapacity": {
+                "energyCapacity": 0,
+                "energyUsed": 0,
+                "energyUnused": 0
+              },
+              "primaryStat": {
+                "statHash": 1935470627,
+                "value": 2005
+              },
               "stats": {
-                "2996146975": 5,
-                "392767087": 5,
-                "1943323491": 25,
-                "1735777505": 30,
                 "144602215": 20,
+                "392767087": 5,
+                "1735777505": 30,
+                "1943323491": 25,
+                "2996146975": 5,
                 "4244567218": 5
               }
             }
@@ -242,13 +277,25 @@
           "data": {
             "1000000000000000003": {
               "sockets": [
-                { "plugHash": 4183296050, "isEnabled": true, "isVisible": true },
-                { "plugHash": 0, "isEnabled": false, "isVisible": true }
+                {
+                  "plugHash": 4183296050,
+                  "isEnabled": true,
+                  "isVisible": true
+                },
+                {
+                  "plugHash": 0,
+                  "isEnabled": false,
+                  "isVisible": true
+                }
               ]
             },
             "1000000000000000004": {
               "sockets": [
-                { "plugHash": 2125798995, "isEnabled": true, "isVisible": true }
+                {
+                  "plugHash": 2125798995,
+                  "isEnabled": true,
+                  "isVisible": true
+                }
               ]
             }
           }
@@ -257,7 +304,10 @@
           "data": {
             "1000000000000000003": {
               "plugs": [
-                { "plugHash": 4183296050, "plugObjectives": [] }
+                {
+                  "plugHash": 4183296050,
+                  "plugObjectives": []
+                }
               ]
             }
           }

@@ -148,12 +148,16 @@ function createWritableProfileFixture() {  const fixture = structuredClone(synth
     };
     data.itemComponents.stats.data[item.itemInstanceId] = {
       stats: {
-        392767087: { statHash: 392767087, value: 30 },
-        1735777505: { statHash: 1735777505, value: 25 },
-        4244567218: { statHash: 4244567218, value: 20 },
-        144602215: { statHash: 144602215, value: 5 },
-        1943323491: { statHash: 1943323491, value: 5 },
-        2996146975: { statHash: 2996146975, value: 5 },
+        // Fully computed ItemStats (Bungie's contract): rolled base (health
+        // 30 / grenade 25 / melee 20, super/class/weapons 5) + masterwork +5
+        // to the three non-framework stats + installed health+10 mod + the
+        // health:weapons tuning (+5 health, -5 weapons).
+        392767087: { statHash: 392767087, value: 45 },  // health
+        1735777505: { statHash: 1735777505, value: 25 }, // grenade
+        4244567218: { statHash: 4244567218, value: 20 }, // melee
+        144602215: { statHash: 144602215, value: 10 },   // super
+        1943323491: { statHash: 1943323491, value: 10 }, // class
+        2996146975: { statHash: 2996146975, value: 5 },  // weapons
       },
     };
     data.itemComponents.sockets.data[item.itemInstanceId] = {

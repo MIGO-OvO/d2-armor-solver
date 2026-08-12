@@ -53,15 +53,17 @@
 
 ## ItemStats 语义核对清单（每次重新抓取后必须执行）
 
-`tests/bungie-csv-parity.test.mjs` 锁定了当前归一化公式：Bungie `ItemStats`
-= 基础属性 + 大师加成，已装 tuning/属性模组由应用正向加回（与 DIM CSV 显示列
-口径一致）。该公式需要真实数据差分确认。重新抓取后：
+`tests/bungie-csv-parity.test.mjs` 锁定当前归一化公式：Bungie `ItemStats`
+= 物品的**完全计算后属性**（基础 + 大师加成 + 已装调谐 + 已装属性模组，即游戏
+当前物品数值）。`normalizeApiItem` 逐层减去以恢复掷点基础属性，并把
+`ItemStats` 直接作为显示六维——绝不再加已装模组/调谐（否则重复加算；该问题由
+实机用户核对发现，见 handoff 3.5）。重新抓取后仍建议复核：
 
 1. 在真实 fixture 中挑一件装 +10 属性模组的护甲，把它的 `ItemStats` 六维与
-   DIM CSV 同实例的显示列（Base + Masterwork + Mod + Tuning）对照。
-2. 若 `ItemStats` 已经包含模组/调谐效果（显示列比 ItemStats 少一层模组），
-   则 `normalizeApiItem` 的统计公式需要翻转（不再加回），并同步更新
-   `tests/bungie-csv-parity.test.mjs` 的 ItemStats 构造。
+   DIM CSV 同实例的显示列对照：`ItemStats` 应等于 CSV 显示列（含模组与调谐）。
+2. 若发现 `ItemStats` 与显示列差一层模组/调谐，则 `normalizeApiItem` 的统计
+   公式需要调整，并同步更新 `tests/bungie-csv-parity.test.mjs` 的 ItemStats
+   构造与合成 fixture 的实例 stats。
 3. 用 `itemComponents.reusablePlugs` 验证 `deriveTuningStats` 对每件传奇护甲
    推出的 `tuningStat` 与该实例 DIM CSV "Tuning Stat" 列一致。
 

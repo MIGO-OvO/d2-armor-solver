@@ -209,31 +209,12 @@ export function normalizeApiItem(apiItem, context = {}) {
     || entry?.name?.zh
     || entry?.name?.en
     || `item_${hash}`;
-  const archetypeId = inferArchetypeFromStats(rawStats);
-  const tertiary = inferTertiary(rawStats, archetypeId);
-  const framework = getFrameworkStats(archetypeId, tertiary);
 
   const energy = instance.energy ?? instance.energyCapacity;
   const masterworkTier = Number(
     energy && typeof energy === "object" ? energy.energyCapacity : energy,
   ) || 0;
   const masterworkBonus = Math.min(5, Math.max(0, masterworkTier));
-
-  // Bungie instance stats include the masterwork bonus on the three
-  // non-framework stats; subtract it to recover the rolled base stats
-  // (inverse of getEffectiveBaseStats, dim-csv.mjs:146-157).
-  //
-  // Framework-null decision: when the framework can't be inferred (tertiary
-  // inference failed), keep the stats as-is — getEffectiveBaseStats returns
-  // baseStats unchanged for a null framework, so subtracting here would
-  // diverge from the CSV path. (A null framework also implies every
-  // non-framework stat reads 0, so the masterwork bonus is 0 in any reachable
-  // case and the subtraction would be a no-op anyway.)
-  const baseStats = {};
-  for (const stat of STATS) {
-    const value = rawStats[stat] || 0;
-    baseStats[stat] = framework && !framework.has(stat) ? value - masterworkBonus : value;
-  }
 
   // Forward tuning/mod inference from the installed plug hashes (Metis C1).
   // Exotic Class Item perk sockets carry the "Spirit of …" plug hashes; match
@@ -270,23 +251,52 @@ export function normalizeApiItem(apiItem, context = {}) {
     }
   }
 
-  // displayedStats = instance stats (base + masterwork) + tuning + mod, the
-  // forward equivalent of the dim-csv inference formula (dim-csv.mjs:204-209).
-  const tuningChanges = {};
+  // Directional shift changes are fully known from the installed plug; the
+  // +3 balanced changes need the framework, so they are added after inference.
+  const shiftChanges = {};
+  if (tuningMode === "shift" && tuningFrom && tuningTo) {
+    shiftChanges[tuningFrom] = -5;
+    shiftChanges[tuningTo] = 5;
+  }
+
+  // Bungie ItemStats are the item's COMPUTED stats: rolled base + masterwork
+  // bonus + installed tuning + installed stat mod (the game's current item
+  // values — confirmed against live accounts after the parity contract was
+  // introduced; handoff 3.5). Recover the rolled base by subtracting every
+  // layer, and treat ItemStats directly as the displayed/current stats.
+  // Adding the plug effects on top again would double count them.
+  //
+  // Framework-null decision: when the framework can't be inferred (tertiary
+  // inference failed), keep the stats as-is — getEffectiveBaseStats returns
+  // baseStats unchanged for a null framework, so subtracting here would
+  // diverge from the CSV path. (A null framework also implies every
+  // non-framework stat reads 0, so the masterwork bonus is 0 in any reachable
+  // case and the subtraction would be a no-op anyway.)
+  const inferenceStats = {};
+  for (const stat of STATS) {
+    inferenceStats[stat] = (rawStats[stat] || 0)
+      - (shiftChanges[stat] || 0)
+      - (armorModStat === stat ? armorModSize : 0);
+  }
+  // Framework inference must run on base + masterwork (plug layers removed);
+  // a +10 mod must never decide which stat is the tertiary.
+  const archetypeId = inferArchetypeFromStats(inferenceStats);
+  const tertiary = inferTertiary(inferenceStats, archetypeId);
+  const framework = getFrameworkStats(archetypeId, tertiary);
+
+  const plus3Changes = {};
   if (tuningMode === "plus3" && framework) {
     for (const stat of STATS) {
-      if (!framework.has(stat)) tuningChanges[stat] = 1;
+      if (!framework.has(stat)) plus3Changes[stat] = 1;
     }
-  } else if (tuningMode === "shift" && tuningFrom && tuningTo) {
-    tuningChanges[tuningFrom] = -5;
-    tuningChanges[tuningTo] = 5;
   }
-  const displayedStats = {};
+
+  const baseStats = {};
   for (const stat of STATS) {
-    displayedStats[stat] = (rawStats[stat] || 0)
-      + (tuningChanges[stat] || 0)
-      + (armorModStat === stat ? armorModSize : 0);
+    const mwBonus = framework && !framework.has(stat) ? masterworkBonus : 0;
+    baseStats[stat] = (inferenceStats[stat] || 0) - mwBonus - (plus3Changes[stat] || 0);
   }
+  const displayedStats = Object.fromEntries(STATS.map(stat => [stat, rawStats[stat] || 0]));
 
   const set = getArmorSetByItemHash(hash);
   // Per-instance socket capabilities: roles identified from candidate/current
@@ -307,7 +317,7 @@ export function normalizeApiItem(apiItem, context = {}) {
   const statSocket = findSocketByRole(socketsCapability, SOCKET_ROLE.STAT);
   const tuningInfo = deriveTuningStats(tuningSocket);
   const dataConfidence = {
-    stats: "exact", // ItemStats + masterwork, plugs added forward below
+    stats: "exact", // ItemStats fully computed: base + masterwork + installed plugs
     framework: archetypeId && tertiary ? "exact" : "unknown",
     tuning: tuningInfo.confidence,
     sockets: tuningSocket && tuningSocket.candidateState === "known" ? "exact" : "partial",
