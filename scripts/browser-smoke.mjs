@@ -63,8 +63,7 @@ const syntheticProfileFixture = JSON.parse(
   ),
 );
 
-function createWritableProfileFixture() {
-  const fixture = structuredClone(syntheticProfileFixture);
+function createWritableProfileFixture() {  const fixture = structuredClone(syntheticProfileFixture);
   const data = fixture.Response.data;
   const hunterId = "2305843009471208001";
   const subclassId = "1000000000000000999";
@@ -172,6 +171,20 @@ function createWritableProfileFixture() {
       ],
     };
   }
+  // Per-instance reusable plugs (component 310): socket 0 accepts the stat
+  // mods, socket 1 the tuning mods — the same contract a real armor piece has.
+  data.itemComponents.reusablePlugs = { data: {} };
+  for (const item of [...armor, ...equippedArmor]) {
+    data.itemComponents.reusablePlugs.data[item.itemInstanceId] = {
+      plugs: {
+        0: Object.values(STAT_MOD_HASHES).flatMap(sizes =>
+          Object.values(sizes).map(plugItemHash => ({ plugItemHash, canInsert: true, enabled: true }))),
+        1: allArmorPlugHashes
+          .filter(hash => !Object.values(STAT_MOD_HASHES).some(sizes => Object.values(sizes).includes(hash)))
+          .map(plugItemHash => ({ plugItemHash, canInsert: true, enabled: true })),
+      },
+    };
+  }
   data.itemComponents.sockets.data[subclassId] = {
     sockets: [{ plugHash: 777000002, isEnabled: true, isVisible: true }],
   };
@@ -201,6 +214,40 @@ function createWritableProfileFixture() {
       },
     },
   };
+  return fixture;
+}
+
+// The GetProfile response served for the post-write verification read-back:
+// the observed EquipItems/InsertSocketPlugFree requests are replayed as the
+// new character state, so the executor's verify sees the writes it just made.
+function postApplyProfileFixture(writeRequests, baseFixture) {
+  const fixture = structuredClone(baseFixture);
+  const data = fixture.Response.data;
+  const target = writeRequests.equipItems[0];
+  const itemIds = target.itemIds;
+  const plugsByItem = {};
+  for (const request of writeRequests.insertPlug) {
+    const itemId = String(request.itemId);
+    const socketIndex = request.plug?.socketIndex;
+    if (socketIndex === undefined) continue;
+    (plugsByItem[itemId] ||= {})[socketIndex] = request.plug.plugItemHash;
+  }
+  data.characterEquipment.data[target.characterId] = {
+    items: itemIds.map((itemId, index) => ({
+      itemHash: 1000 + index,
+      itemInstanceId: String(itemId),
+      quantity: 1,
+      bucketHash: [3448274439, 3551918588, 14239492, 20886954, 1585787867][index] ?? 3448274439,
+    })),
+  };
+  for (const itemId of itemIds) {
+    const plugs = plugsByItem[String(itemId)] || {};
+    const sockets = [];
+    for (const [socketIndex, plugHash] of Object.entries(plugs)) {
+      sockets[Number(socketIndex)] = { socketIndex: Number(socketIndex), plugHash, isEnabled: true, isVisible: true };
+    }
+    if (sockets.length > 0) data.itemComponents.sockets.data[String(itemId)] = { sockets };
+  }
   return fixture;
 }
 
@@ -906,6 +953,16 @@ async function checkBungieAuthFlow(browser) {
         });
       }
       if (profileMode === "network") return route.abort();
+      // After a custom apply, the verify re-read must reflect the writes: the
+      // plan's instances equipped with the inserted plugs (otherwise the
+      // verification read-back would always report mismatches).
+      if (writeRequests.equipItems.length > 0) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(postApplyProfileFixture(writeRequests, writableProfileFixture)),
+        });
+      }
       return route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -1028,6 +1085,11 @@ async function checkBungieAuthFlow(browser) {
     assert.equal(requestedComponents.has("CharacterLoadouts"), true);
     assert.equal(requestedComponents.has("ProfilePlugSets"), false);
     assert.equal(requestedComponents.has("CharacterPlugSets"), false);
+    assert.equal(
+      requestedComponents.has("ItemReusablePlugs"),
+      true,
+      "the armor inventory import must request per-instance reusable plugs",
+    );
 
     await page.locator("#importClass").selectOption("hunter");
     await page.evaluate(() => window.applyEquippedLoadout());

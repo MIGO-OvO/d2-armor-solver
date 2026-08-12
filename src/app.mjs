@@ -2726,10 +2726,22 @@ function bungiePlanErrorMessage(error) {
   if (code === "plugUnavailable") {
     return l("方案使用了该角色尚未解锁的模组。", "方案使用了該角色尚未解鎖的模組。", "This plan uses a mod that the character has not unlocked.");
   }
+  if (code === "energy") {
+    return l("方案中一件护甲的能量不足以安装其属性模组；请升级护甲能量后重试。", "方案中一件防具的能量不足以安裝其數值模組；請升級防具能量後重試。", "An armor piece lacks the energy to hold its stat mod. Upgrade the armor energy first.");
+  }
+  if (code === "tuningMismatch") {
+    return l("方案为护甲分配的调谐方向与该护甲的固定调谐属性不符。", "方案為防具分配的調諧方向與該防具的固定調諧屬性不符。", "The plan's tuning direction does not match the armor's fixed tuning stat.");
+  }
+  if (code === "multipleExotics") {
+    return l("方案包含多件异域护甲；最多只能穿戴一件异域。", "方案包含多件異域防具；最多只能穿戴一件異域。", "This plan includes more than one Exotic armor piece.");
+  }
+  if (code === "cannotClearStatMod") {
+    return l("无法从当前库存快照安全移除一件已装属性模组，请刷新库存后重试。", "無法從目前庫存快照安全移除一件已裝數值模組，請重新整理庫存後重試。", "An installed stat mod cannot be safely removed from the current inventory snapshot. Refresh and retry.");
+  }
   if (code === "equippedElsewhereNoReplacement") {
     return l("其他角色正穿着方案护甲，且没有同槽位备用件可先替换。", "其他角色正穿著方案防具，且沒有同欄位備用件可先替換。", "Another character is wearing a required piece and has no spare for that slot.");
   }
-  if (code === "statSocketUnknown" || code === "tuningSocketUnknown" || code === "invalidTuning" || code === "cannotClearStatMod") {
+  if (code === "statSocketUnknown" || code === "tuningSocketUnknown" || code === "invalidTuning") {
     return l("无法从当前库存快照安全定位一个护甲模组插槽，请刷新库存或改用 DIM。", "無法從目前庫存快照安全定位一個防具模組插槽，請重新整理庫存或改用 DIM。", "A required armor socket cannot be located safely. Refresh the inventory or use DIM.");
   }
   if (code === "classMismatch") {
@@ -2763,6 +2775,7 @@ function getInventorySolutionEquipState(entry) {
   }
   const plan = buildCustomLoadoutPlan({
     membershipType: bungieProfileState.membershipType,
+    membershipId: bungieProfileState.membershipId,
     targetCharacterId: bungieTargetCharacterId,
     classId: importClassFilter,
     pieces: entry?.pieces,
@@ -2846,18 +2859,31 @@ async function equipInventorySolution(index) {
       },
     });
     lastBungieImportAt = 0;
-    const skipped = result.skippedMods.length;
-    showBungieEquipMessage(skipped > 0
-      ? l(
-        `护甲与可用模组已装备；因能量不足跳过 ${skipped} 个属性模组。副职业、星象与碎片保持目标角色当前精确配置。`,
-        `防具與可用模組已裝備；因能量不足略過 ${skipped} 個數值模組。副職業、星象與碎片保持目標角色目前精確配置。`,
-        `Armor and available mods equipped; ${skipped} stat mod(s) were skipped for insufficient energy. The target character's exact subclass, Aspects, and Fragments were preserved.`,
-      )
-      : l(
-        "五件护甲与模组已装备。副职业、星象与碎片保持目标角色当前精确配置。",
-        "五件防具與模組已裝備。副職業、星象與碎片保持目標角色目前精確配置。",
-        "All five armor pieces and mods were equipped. The target character's exact subclass, Aspects, and Fragments were preserved.",
-      ), skipped > 0 ? "warn" : "info");
+    const verification = result.verification;
+    const realMismatches = verification?.mismatches?.filter(
+      match => match.kind !== "missingMembershipId",
+    ) || [];
+    if (verification?.status === "failed" && realMismatches.length > 0) {
+      const missingPlugs = realMismatches
+        .filter(match => match.kind === "plugMismatch").length;
+      showBungieEquipMessage(
+        l(
+          `护甲与模组已装备，但回读核对发现 ${realMismatches.length} 处不一致（含 ${missingPlugs} 个模组写入未生效）。请刷新库存确认，或稍后重试。`,
+          `防具與模組已裝備，但回讀核對發現 ${realMismatches.length} 處不一致（含 ${missingPlugs} 個模組寫入未生效）。請重新整理庫存確認，或稍後重試。`,
+          `Armor and mods were equipped, but the verification read-back found ${realMismatches.length} mismatch(es) (${missingPlugs} mod write(s) did not take effect). Refresh the inventory or retry.`,
+        ),
+        "warn",
+      );
+      return;
+    }
+    showBungieEquipMessage(
+      l(
+        "五件护甲与全部模组已装备，并经回读核对一致。副职业、星象与碎片保持目标角色当前精确配置。",
+        "五件防具與全部模組已裝備，並經回讀核對一致。副職業、星象與碎片保持目標角色目前精確配置。",
+        "All five armor pieces and every mod were equipped and confirmed by a verification read-back. The target character's exact subclass, Aspects, and Fragments were preserved.",
+      ),
+      "info",
+    );
   } catch (error) {
     handleBungieEquipError(error);
   } finally {
@@ -4406,9 +4432,33 @@ function renderInventoryResults(result) {
     </div>`;
 }
 
+// The six-stat totals the result list should present (handoff 3.7 / Phase D):
+//   - Bungie-sourced results: the plan's assignment recomputes totals with only
+//     the mods that can actually be installed on the real instances (actual
+//     masterwork, real energy). finalTotals counts every requested mod, so an
+//     energy-infeasible mod would otherwise inflate the shown stats.
+//   - CSV/theoretical results: the solver's finalTotals (no real instances to
+//     verify against) stay as the display source.
+// Fragments are added here the same way the solver's finalTotals include them.
+function getDisplayedFinalTotals(entry) {
+  if (importSource === "bungie" && bungieProfileState) {
+    const equipState = getInventorySolutionEquipState(entry);
+    const actual = equipState.plan?.assignment?.actualTotals;
+    if (actual) {
+      const fragments = getUpgradeFragments();
+      return Object.fromEntries(STATS.map(stat => [
+        stat,
+        Math.max(0, (actual[stat] || 0) + (fragments[stat] || 0)),
+      ]));
+    }
+  }
+  return entry.finalTotals;
+}
+
 function getInventoryResultSummary(entry) {
   const targets = lastInventoryTargets || {};
-  const metCount = STATS.filter(stat => (entry.finalTotals[stat] || 0) >= (targets[stat] || 0)).length;
+  const finalTotals = getDisplayedFinalTotals(entry);
+  const metCount = STATS.filter(stat => (finalTotals[stat] || 0) >= (targets[stat] || 0)).length;
   const requiredCount = entry.metrics.requiredCount || lastInventoryRequiredStats.length;
   const requiredReachedCount = entry.metrics.requiredReachedCount || 0;
   const statusMet = requiredCount > 0 ? entry.metrics.requiredAllReached : entry.metrics.allReached;
@@ -4459,18 +4509,11 @@ function renderInventoryBungieEquip(entry, index) {
   const equipState = getInventorySolutionEquipState(entry);
   if (equipState.hidden) return "";
   const targetOptions = getBungieTargetOptionsHtml();
-  const skippedCount = equipState.plan?.skippedMods?.length || 0;
-  const hint = equipState.reason || (skippedCount > 0
-    ? l(
-      `自检通过；受护甲能量限制，将跳过 ${skippedCount} 个属性模组。请先确保角色在轨道、社交空间或离线。`,
-      `自檢通過；受防具能量限制，將略過 ${skippedCount} 個數值模組。請先確保角色在軌道、社交空間或離線。`,
-      `Preflight passed; ${skippedCount} stat mod(s) will be skipped for insufficient armor energy. Make sure the character is in orbit, a social space, or offline.`,
-    )
-    : l(
-      "自检通过。将自动转移并穿戴五件护甲、写入模组，并保持目标角色当前的副职业、星象与碎片。请先确保角色在轨道、社交空间或离线。",
-      "自檢通過。將自動轉移並穿著五件防具、寫入模組，並保持目標角色目前的副職業、星象與碎片。請先確保角色在軌道、社交空間或離線。",
-      "Preflight passed. The app will transfer and equip all five armor pieces, insert mods, and preserve the target character's current subclass, Aspects, and Fragments. Make sure the character is in orbit, a social space, or offline.",
-    ));
+  const hint = equipState.reason || l(
+    "自检通过。将自动转移并穿戴五件护甲、写入全部模组，并在写入后回读核对；保持目标角色当前的副职业、星象与碎片。请先确保角色在轨道、社交空间或离线。",
+    "自檢通過。將自動轉移並穿著五件防具、寫入全部模組，並在寫入後回讀核對；保持目標角色目前的副職業、星象與碎片。請先確保角色在軌道、社交空間或離線。",
+    "Preflight passed. The app will transfer and equip all five armor pieces, insert every mod, then re-read and verify; it preserves the target character's current subclass, Aspects, and Fragments. Make sure the character is in orbit, a social space, or offline.",
+  );
   return `<section class="bungie-equip-panel" aria-labelledby="bungieEquipTitle">
     <div class="bungie-equip-copy">
       <span class="inventory-result-detail-label" id="bungieEquipTitle">${l("Bungie 直装", "Bungie 直裝", "Direct Bungie equip")}</span>
@@ -4493,6 +4536,18 @@ function renderInventoryBungieEquip(entry, index) {
 function renderInventoryResultDetail(entry, index) {
   const targets = lastInventoryTargets || {};
   const { metCount, requiredCount, requiredReachedCount, status, statusMet } = getInventoryResultSummary(entry);
+  const finalTotals = getDisplayedFinalTotals(entry);
+  // A plan whose requested mods cannot all be installed shows lower actual
+  // totals than the solver's projection; say so instead of claiming the
+  // projection is reachable right now.
+  const differsFromProjection = importSource === "bungie"
+    && STATS.some(stat => (finalTotals[stat] || 0) !== (entry.finalTotals[stat] || 0));
+  const projectionNote = differsFromProjection
+    ? `<p class="inventory-projection-note">${l(
+      "部分方案模组因能量或插槽限制无法立即安装，已按实际可装值显示；未安装模组不计入六维。",
+      "部分方案模組因能量或插槽限制無法立即安裝，已按實際可裝值顯示；未安裝模組不計入六維。",
+      "Some planned mods cannot be installed right now (energy/socket limits); the stats shown use only installable mods.",
+    )}</p>` : "";
   return `
     <div class="inventory-result-detail-head">
       <div>
@@ -4503,6 +4558,7 @@ function renderInventoryResultDetail(entry, index) {
           `必達 ${requiredReachedCount}/${requiredCount} · `,
           `Must meet ${requiredReachedCount}/${requiredCount} · `
         ) : ''}${l(`目标达成 ${metCount}/6`, `目標達成 ${metCount}/6`, `${metCount} of 6 targets met`)}</p>
+        ${projectionNote}
       </div>
       <div class="inventory-result-actions">
         <button type="button" class="btn inventory-export-button" onclick="exportInventorySolution(${index})">${icon("share")}${l("导出 DIM 配装链接", "匯出 DIM 配裝連結", "Export DIM loadout link")}</button>
@@ -4511,7 +4567,7 @@ function renderInventoryResultDetail(entry, index) {
     ${renderInventoryBungieEquip(entry, index)}
     <div class="inventory-result-stats" role="list">
       ${STATS.map(stat => {
-        const actual = entry.finalTotals[stat] || 0;
+        const actual = finalTotals[stat] || 0;
         const target = targets[stat] || 0;
         const met = actual >= target;
         const isRequired = lastInventoryRequiredStats.includes(stat);
@@ -4604,7 +4660,7 @@ async function copyText(text) {
   textarea.remove();
 }
 
-function renderDimExportMessage(messages, url, count, modCount, ok) {
+function renderDimExportMessage(messages, url, count, modCount, ok, warning = "") {
   const note = count < 5
     ? l(
       `（${5 - count} 件缺少 DIM 实例信息，未包含）`,
@@ -4638,6 +4694,7 @@ function renderDimExportMessage(messages, url, count, modCount, ok) {
     icon(ok ? "check" : "block")
   }<div class="dim-export-body">
     <span>${heading}</span>
+    ${warning ? `<p class="dim-export-warning">${escapeHtml(warning)}</p>` : ""}
     <div class="dim-export-actions">
       <a class="btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">${icon("share")}${l("在 DIM 中打开", "在 DIM 中開啟", "Open in DIM")}</a>
       <button type="button" class="btn" onclick="copyDimExportLink()">${icon("save")}${l("重新复制链接", "重新複製連結", "Copy link again")}</button>
@@ -4667,12 +4724,29 @@ async function exportInventorySolution(index) {
   );
   lastDimExportUrl = url;
   const messages = document.getElementById('messages');
+  // With a Bungie inventory the same plan drives the direct-equip preflight; a
+  // plan with unassignable mods must not be exported as if it were exact.
+  let exportWarning = '';
+  if (importSource === "bungie" && bungieProfileState) {
+    const equipState = getInventorySolutionEquipState(entry);
+    if (!equipState.available && equipState.plan) {
+      const blocking = equipState.plan.assignment?.unassignedMods || [];
+      if (blocking.length > 0) {
+        const first = bungiePlanErrorMessage(equipState.plan.errors[0]);
+        exportWarning = l(
+          `链接已生成，但 ${blocking.length} 个模组无法在目标角色上安装（${first}）。DIM 会自动灰显无法放置的模组。`,
+          `連結已產生，但 ${blocking.length} 個模組無法在目標角色上安裝（${first}）。DIM 會自動灰顯無法放置的模組。`,
+          `The link was generated, but ${blocking.length} mod(s) cannot be installed on the target character (${first}). DIM will grey out mods it cannot place.`,
+        );
+      }
+    }
+  }
   try {
     await copyText(url);
-    renderDimExportMessage(messages, url, count, modCount, true);
+    renderDimExportMessage(messages, url, count, modCount, true, exportWarning);
   } catch (error) {
     console.error('DIM loadout export failed', error);
-    renderDimExportMessage(messages, url, count, modCount, false);
+    renderDimExportMessage(messages, url, count, modCount, false, exportWarning);
   }
 }
 
