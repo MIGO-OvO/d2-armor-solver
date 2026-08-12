@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   analyzeUpgradeCandidates,
+  applyManualUpgradeModifiers,
   compareUpgradeMetrics,
   compareUpgradePlans,
   createDefaultUpgradePiece,
+  createUpgradePieceFromItem,
   evaluateUpgradePieces,
+  getUpgradeConfig,
   getUpgradeMetrics,
   getUpgradePieceIdentity,
   getUpgradeReplacements,
@@ -255,6 +258,68 @@ test("legacy upgrade drafts reconstruct their full-masterwork projection", () =>
   assert.deepEqual(piece.optimizationBaseStats, {
     health: 5, melee: 20, grenade: 30, super: 25, class: 5, weapons: 5,
   });
+});
+
+// Regression (handoff 3.4): the Bungie path used to fabricate a tuning
+// destination with `STATS.find(stat => stat !== tertiary)` when neither the
+// installed plug nor the fixed tuning stat was known. That guess produced
+// wrong six-stat totals and DIM assignments for armor whose tuning socket data
+// was missing. An unknown fixed tuning stat must stay unknown.
+test("an imported piece with unknown tuning never fabricates a direction", () => {
+  const item = {
+    id: "instance-1",
+    hash: 656307180,
+    name: "Eidolon Pursuant Mask",
+    slot: "helmet",
+    classId: "hunter",
+    tier: "5",
+    rarity: "Legendary",
+    exotic: false,
+    archetypeId: "Powerhouse",
+    tertiary: "grenade",
+    tuningStat: null, // no reusable plugs: fixed stat cannot be confirmed
+    baseStats: { health: 5, melee: 5, grenade: 20, super: 25, class: 5, weapons: 30 },
+    masterworkTier: 10,
+    tuningMode: null, // no tuning installed
+    tuningFrom: null,
+    tuningTo: null,
+    armorModSize: 0,
+    armorModStat: null,
+  };
+  const piece = createUpgradePieceFromItem(item, 0);
+  assert.equal(piece.tuningUnknown, true);
+  assert.equal(piece.tuningTo, null, "no fabricated +5 destination");
+  assert.equal(piece.tuningFrom, null);
+  // Manual totals must skip the unknown tuning instead of counting a guess.
+  // effectiveBaseStats already carries the masterwork bonus: health 5+5.
+  const totals = applyManualUpgradeModifiers(getUpgradeConfig(piece), piece);
+  assert.equal(totals.health, 10, "masterwork-inclusive base only: the unknown tuning adds nothing");
+  assert.equal(totals.weapons, 30);
+});
+
+test("a known fixed tuning stat becomes the piece's tuning destination", () => {
+  const item = {
+    id: "instance-2",
+    hash: 656307180,
+    slot: "helmet",
+    classId: "hunter",
+    tier: "5",
+    rarity: "Legendary",
+    exotic: false,
+    archetypeId: "Powerhouse",
+    tertiary: "grenade",
+    tuningStat: "health", // derived from the tuning socket's reusable plugs
+    baseStats: { health: 5, melee: 5, grenade: 20, super: 25, class: 5, weapons: 30 },
+    masterworkTier: 10,
+    tuningMode: null,
+    tuningFrom: null,
+    tuningTo: null,
+    armorModSize: 0,
+    armorModStat: null,
+  };
+  const piece = createUpgradePieceFromItem(item, 0);
+  assert.equal(piece.tuningUnknown, false);
+  assert.equal(piece.tuningTo, "health");
 });
 
 // "Only +5/-5" restricts every proposed plan and candidate, while the entered

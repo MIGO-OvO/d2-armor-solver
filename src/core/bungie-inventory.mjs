@@ -21,6 +21,12 @@ import {
   STAT_MOD_HASHES,
   TUNING_MOD_HASH_BY_TUNING,
 } from "./armor-mods.data.mjs";
+import {
+  buildSocketCapabilities,
+  deriveTuningStats,
+  findSocketByRole,
+  SOCKET_ROLE,
+} from "./armor-sockets.mjs";
 import { ARMOR_ITEMS } from "./armor-items.data.mjs";
 import {
   CLASS_ABILITY_PENALTY_FRAGMENTS,
@@ -29,6 +35,10 @@ import {
 } from "./fragment-data.data.mjs";
 
 // The DestinyComponentType values the armor inventory request needs.
+// ItemReusablePlugs (310) supplies the per-instance, per-socketIndex candidate
+// plugs that make socket roles and the fixed tuning stat derivable without a
+// runtime manifest download. ProfilePlugSets / CharacterPlugSets are NOT
+// component types (they ride along with ItemSockets); never add them here.
 export const ARMOR_COMPONENTS = [
   "Profiles",
   "ProfileInventories",
@@ -39,6 +49,7 @@ export const ARMOR_COMPONENTS = [
   "ItemStats",
   "ItemSockets",
   "ItemPlugStates",
+  "ItemReusablePlugs",
 ];
 
 // Armor bucket hashes -> solver slots (the five armor buckets; anything else
@@ -133,19 +144,14 @@ function inferTertiary(baseStats, archetypeId) {
     .sort((left, right) => (baseStats[right] || 0) - (baseStats[left] || 0))[0] || null;
 }
 
-// Every plug hash attached to an instance, gathered from the sockets and
-// plugStates components (either may be missing or empty). Hashes that hit no
-// known table are ignored — only armor mods and tuning mods matter here.
-function collectPlugHashes(instanceId, sockets, plugs) {
+// Every plug hash installed on an instance, gathered from the sockets
+// component. The ItemPlugStates component is NOT an installed-plug source: it
+// reports per-plug-ITEM statuses (canInsert/enabled/insertFailIndexes), keyed
+// by plug item hash, and feeds availability checks instead (handoff 3.2).
+function collectPlugHashes(instanceId, sockets) {
   const hashes = new Set();
   for (const socket of sockets?.[instanceId]?.sockets || []) {
     if (socket?.isEnabled !== false && socket?.plugHash) hashes.add(Number(socket.plugHash));
-  }
-  const plugState = plugs?.[instanceId];
-  const plugList = Array.isArray(plugState) ? plugState : plugState?.plugs;
-  for (const plug of plugList || []) {
-    const hash = plug && typeof plug === "object" ? plug.plugHash : plug;
-    if (hash) hashes.add(Number(hash));
   }
   return hashes;
 }
@@ -156,7 +162,8 @@ export function normalizeApiItem(apiItem, context = {}) {
     instances = {},
     itemStats = {},
     sockets = {},
-    plugs = {},
+    reusablePlugs = null,
+    availablePlugHashes = null,
     catalog = null,
     language = "zh-chs",
     equipped = false,
@@ -243,7 +250,7 @@ export function normalizeApiItem(apiItem, context = {}) {
     .map(([id, meta]) => [meta.hash, id]));
   const primaryPerkIds = new Set((exoticClassItem?.primary || []).map(([id]) => id));
   const secondaryPerkIds = new Set((exoticClassItem?.secondary || []).map(([id]) => id));
-  for (const plugHash of collectPlugHashes(instanceId, sockets, plugs)) {
+  for (const plugHash of collectPlugHashes(instanceId, sockets)) {
     if (plugHash === BALANCED_TUNING_MOD_HASH) {
       tuningMode = "plus3";
     } else if (TUNING_HASH_TO_TUNING.has(plugHash)) {
@@ -282,6 +289,29 @@ export function normalizeApiItem(apiItem, context = {}) {
   }
 
   const set = getArmorSetByItemHash(hash);
+  // Per-instance socket capabilities: roles identified from candidate/current
+  // plug hashes (armor-sockets.mjs), so stat/tuning sockets are never guessed
+  // by index. The raw socketPlugs list stays for the loadout module.
+  const socketPlugs = (sockets?.[instanceId]?.sockets || []).map((socket, socketIndex) => ({
+    socketIndex,
+    plugHash: Number(socket?.plugHash) || 0,
+    enabled: socket?.isEnabled !== false,
+    visible: socket?.isVisible !== false,
+  }));
+  const socketsCapability = buildSocketCapabilities(
+    sockets?.[instanceId]?.sockets || [],
+    reusablePlugs?.[instanceId]?.plugs ?? null,
+    availablePlugHashes,
+  );
+  const tuningSocket = findSocketByRole(socketsCapability, SOCKET_ROLE.TUNING);
+  const statSocket = findSocketByRole(socketsCapability, SOCKET_ROLE.STAT);
+  const tuningInfo = deriveTuningStats(tuningSocket);
+  const dataConfidence = {
+    stats: "exact", // ItemStats + masterwork, plugs added forward below
+    framework: archetypeId && tertiary ? "exact" : "unknown",
+    tuning: tuningInfo.confidence,
+    sockets: tuningSocket && tuningSocket.candidateState === "known" ? "exact" : "partial",
+  };
   const item = {
     id: instanceId,
     hash,
@@ -295,7 +325,13 @@ export function normalizeApiItem(apiItem, context = {}) {
     exotic: String(rarity).toLowerCase() === "exotic" || Boolean(exoticClassItem),
     archetypeId,
     tertiary,
-    tuningStat: null,
+    // The piece's fixed tuning stat, derived from the tuning socket's reusable
+    // plugs (DIM getArmor3TuningStat). null does NOT mean "guess": confidence
+    // "unknown" means the data could not establish it and the solver must not
+    // pretend it knows (upgrade-optimizer no longer falls back to a guess).
+    tuningStat: tuningInfo.fixedTuningStat,
+    allowedTuningStats: tuningInfo.allowedTuningStats,
+    dataConfidence,
     baseStats,
     masterworkTier,
     displayedStats,
@@ -312,12 +348,11 @@ export function normalizeApiItem(apiItem, context = {}) {
     } : null,
     // Socket indexes are required by InsertSocketPlugFree. Keep the exact
     // per-instance ordering from ItemSockets; the solver ignores this field.
-    socketPlugs: (sockets?.[instanceId]?.sockets || []).map((socket, socketIndex) => ({
-      socketIndex,
-      plugHash: Number(socket?.plugHash) || 0,
-      enabled: socket?.isEnabled !== false,
-      visible: socket?.isVisible !== false,
-    })),
+    socketPlugs,
+    // Rich per-socket capabilities consumed by armor-mod-assignment.mjs.
+    sockets: socketsCapability,
+    statSocketIndex: statSocket ? statSocket.socketIndex : null,
+    tuningSocketIndex: tuningSocket ? tuningSocket.socketIndex : null,
     dimLocked: false,
     power: Number(instance.primaryStat?.value) || 0,
     setHash: set ? set.hash : null,
@@ -400,7 +435,11 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
   const instances = data.itemComponents?.instances?.data ?? {};
   const itemStats = data.itemComponents?.stats?.data ?? {};
   const sockets = data.itemComponents?.sockets?.data ?? {};
-  const plugs = data.itemComponents?.plugStates?.data ?? {};
+  // Per-instance candidate plugs (component 310). Unlock filtering happens at
+  // plan time against the target character's plug sets; the import keeps the
+  // item-definition socket contract so candidates are never emptied by a
+  // missing/partial plug-set response.
+  const reusablePlugs = data.itemComponents?.reusablePlugs?.data ?? null;
   const catalog = getCatalogIndex();
 
   const byInstance = new Map();
@@ -413,7 +452,7 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
       instances,
       itemStats,
       sockets,
-      plugs,
+      reusablePlugs,
       catalog,
       language,
       equipped,

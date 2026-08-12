@@ -103,6 +103,7 @@ const EXPECTED_ARMOR_COMPONENTS = [
   "ItemStats",
   "ItemSockets",
   "ItemPlugStates",
+  "ItemReusablePlugs",
 ];
 
 test(
@@ -117,6 +118,18 @@ test(
       [...ARMOR_COMPONENTS].sort(),
       [...EXPECTED_ARMOR_COMPONENTS].sort(),
     );
+  },
+);
+
+test(
+  "ARMOR_COMPONENTS never requests the pseudo-components ProfilePlugSets/CharacterPlugSets",
+  inventoryModuleExists
+    ? undefined
+    : { skip: `${inventoryModulePath} not created yet (pending T8/T9)` },
+  async () => {
+    const { ARMOR_COMPONENTS } = await import(`../${inventoryModulePath}`);
+    assert.equal(ARMOR_COMPONENTS.includes("ProfilePlugSets"), false);
+    assert.equal(ARMOR_COMPONENTS.includes("CharacterPlugSets"), false);
   },
 );
 

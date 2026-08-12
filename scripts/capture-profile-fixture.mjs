@@ -4,6 +4,10 @@
 // GetProfile response, sanitized by sanitizeProfileFixture: instance ids,
 // account names and long numeric ids are masked, while item hashes / stats /
 // bucketHash / plugHash are left untouched for test assertions.
+// ARMOR_COMPONENTS includes ItemReusablePlugs (component 310), so the capture
+// also retains per-instance, per-socketIndex candidate plugs plus the
+// profilePlugSets / characterPlugSets unlock data (both ride along with
+// ItemSockets and are sanitized like any other long-id-keyed map).
 //
 // Prerequisites — register an application in the Bungie portal first
 // (https://www.bungie.net/en/Application, Confidential client; register
@@ -255,6 +259,14 @@ async function main() {
   const sanitized = sanitizeProfileFixture(envelope);
   await writeFile(FIXTURE_URL, `${JSON.stringify(sanitized, null, 2)}\n`, "utf8");
   console.log(`Fixture written: ${countProfileItems(envelope)} items, ${countProfileInstances(envelope)} instances sanitized`);
+  const data = envelopeData(envelope);
+  const itemComponents = data.itemComponents || {};
+  if (!itemComponents.stats) {
+    console.warn("注意：响应缺少 itemComponents.itemStats，无法做 Bungie ↔ DIM CSV 差分核对（见 fixture-readme）。");
+  }
+  if (!itemComponents.reusablePlugs) {
+    console.warn("注意：响应缺少 itemComponents.reusablePlugs，无法推导每件护甲的插槽候选与固定调谐属性。");
+  }
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {

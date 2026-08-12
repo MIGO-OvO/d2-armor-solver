@@ -6,10 +6,12 @@
 
 - 通过 OAuth 授权的访问令牌调用 `GET /Destiny2/GetMembershipsForCurrentUser/`
   取得账号档案，再对 cross-save 主号（或首个 membership）调用
-  `GET /Destiny2/{membershipType}/Profile/{membershipId}/?components=Profiles,ProfileInventories,Characters,CharacterInventories,CharacterEquipment,ItemInstances,ItemSockets,ItemPlugStates`
-  （`ARMOR_COMPONENTS` 的 8 项）。
-- 原始响应（含完整 `itemComponents`）经 `scripts/capture-profile-fixture.mjs`
-  的 `sanitizeProfileFixture` 脱敏后写入本文件，可安全提交到仓库。
+  `GET /Destiny2/{membershipType}/Profile/{membershipId}/?components=Profiles,ProfileInventories,Characters,CharacterInventories,CharacterEquipment,ItemInstances,ItemStats,ItemSockets,ItemPlugStates,ItemReusablePlugs`
+  （`ARMOR_COMPONENTS` 的 10 项；`ProfilePlugSets` / `CharacterPlugSets` 不是
+  component type，随 `ItemSockets` 一起返回，不要加进 `components=`）。
+- 原始响应（含完整 `itemComponents`，其中 `reusablePlugs` 按实例 + socketIndex
+  提供候选 plug）经 `scripts/capture-profile-fixture.mjs` 的
+  `sanitizeProfileFixture` 脱敏后写入本文件，可安全提交到仓库。
 - 该 fixture 是 T8/T9（`src/core/bungie-inventory.mjs`）测试的**唯一数据源**；
   CI 永远不会调用真实 Bungie API。
 
@@ -43,11 +45,25 @@
 
 | 数据 | 处理 |
 | --- | --- |
-| `instanceId`（16-20 位数字字符串） | 替换为递增占位 `"1000000000000000NNN"`，保持字符串类型；同一实例在物品列表与 `itemComponents`（instances / sockets / plugStates 的键）中替换为**同一个**占位 |
+| `instanceId`（16-20 位数字字符串） | 替换为递增占位 `"1000000000000000NNN"`，保持字符串类型；同一实例在物品列表与 `itemComponents`（instances / sockets / plugStates / reusablePlugs 的键）中替换为**同一个**占位 |
 | `displayName` / `bungieGlobalDisplayName` / `lastSeenDisplayName` / `uniqueName` / `normalizedName` / `psnDisplayName` / `xboxDisplayName` / `fbDisplayName` / `blizzardDisplayName` | 替换为 `"MockGuardian"` |
 | 其它长数字字符串（`membershipId`、`characterId`、BungieNet 账号 id 等，≥15 位纯数字） | 保留长度，打码为 `"9<零填充序号>"`（字符键与对应字段值保持一致） |
 | `itemHash`、stats 数值、`bucketHash`、`plugHash`、`statHash`、`energyCapacity` 等**所有数字** | **不做任何修改**（测试断言的数据） |
 | 短数字字符串（stat hash 键等 10 位） | 不做任何修改 |
+
+## ItemStats 语义核对清单（每次重新抓取后必须执行）
+
+`tests/bungie-csv-parity.test.mjs` 锁定了当前归一化公式：Bungie `ItemStats`
+= 基础属性 + 大师加成，已装 tuning/属性模组由应用正向加回（与 DIM CSV 显示列
+口径一致）。该公式需要真实数据差分确认。重新抓取后：
+
+1. 在真实 fixture 中挑一件装 +10 属性模组的护甲，把它的 `ItemStats` 六维与
+   DIM CSV 同实例的显示列（Base + Masterwork + Mod + Tuning）对照。
+2. 若 `ItemStats` 已经包含模组/调谐效果（显示列比 ItemStats 少一层模组），
+   则 `normalizeApiItem` 的统计公式需要翻转（不再加回），并同步更新
+   `tests/bungie-csv-parity.test.mjs` 的 ItemStats 构造。
+3. 用 `itemComponents.reusablePlugs` 验证 `deriveTuningStats` 对每件传奇护甲
+   推出的 `tuningStat` 与该实例 DIM CSV "Tuning Stat" 列一致。
 
 ## 断言要求（capture 产物必须满足）
 
@@ -68,6 +84,10 @@ node -e "const f=require('./tests/fixtures/profile-fixture.json');const d=f.Resp
 - 至少 1 个 **+10 属性模组**（plugHash 命中 `STAT_MOD_HASHES` 的 10 档）；
 - 至少 1 个 **tuning 模组**（plugHash 命中 `TUNING_MOD_HASH_BY_TUNING` 或
   `BALANCED_TUNING_MOD_HASH`）；
+- **`itemComponents.itemStats`** 非空（当前仓库里的旧 fixture 缺此项；缺此项时
+  无法做 Bungie ↔ DIM CSV 差分核对，请重新抓取）；
+- **`itemComponents.reusablePlugs`** 非空，且至少一件护甲的
+  `reusablePlugs.data[<instanceId>].plugs` 覆盖属性模组 socket 与调谐 socket；
 - **仓库护甲（General 桶）**：仓库里的所有实例物品都以 `bucketHash 138197802`
   （"General" 桶，itemCount 500）返回，而不是各自的护甲桶；目录
   （`armor-items.data.mjs`）中的 `bucketHash` / `classType` 必须能恢复这些

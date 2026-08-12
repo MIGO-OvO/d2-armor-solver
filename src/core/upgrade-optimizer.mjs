@@ -60,10 +60,19 @@ export function normalizeUpgradePiece(piece, slotIndex) {
     ]));
   }
   if (!['shift', 'plus3'].includes(normalized.tuningMode)) normalized.tuningMode = 'shift';
-  if (!STATS.includes(normalized.tuningFrom)) normalized.tuningFrom = archetype.primary;
-  if (!STATS.includes(normalized.tuningTo) || normalized.tuningTo === normalized.tuningFrom) {
-    normalized.tuningTo = STATS.find(stat => stat !== normalized.tuningFrom);
+  // An imported piece whose fixed tuning stat could not be established keeps
+  // null tuning fields (no fabricated direction); the manual totals skip it
+  // and the equip path rejects it with "cannot confirm tuning" (handoff 3.4).
+  if (normalized.tuningUnknown) {
+    normalized.tuningTo = null;
+    normalized.tuningFrom = null;
+  } else {
+    if (!STATS.includes(normalized.tuningFrom)) normalized.tuningFrom = archetype.primary;
+    if (!STATS.includes(normalized.tuningTo) || normalized.tuningTo === normalized.tuningFrom) {
+      normalized.tuningTo = STATS.find(stat => stat !== normalized.tuningFrom);
+    }
   }
+  normalized.tuningUnknown = Boolean(normalized.tuningUnknown);
   normalized.armorModSize = [0, 5, 10].includes(Number(normalized.armorModSize))
     ? Number(normalized.armorModSize) : 10;
   if (!STATS.includes(normalized.armorModStat)) normalized.armorModStat = archetype.secondary;
@@ -92,10 +101,17 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     ? item.tertiary
     : STATS.find(stat => stat !== archetype.primary && stat !== archetype.secondary);
   const tuningMode = item.tuningMode === "plus3" ? "plus3" : "shift";
-  const tuningTo = item.tuningTo || item.tuningStat || STATS.find(stat => stat !== tertiary);
+  // The +5 destination is rolled onto the piece. For the Bungie path it comes
+  // from the installed plug (item.tuningTo) or the fixed tuning stat derived
+  // from the tuning socket's reusable plugs (item.tuningStat); for DIM CSV it
+  // is the "Tuning Stat" column. When neither is known the piece must NOT fall
+  // back to a fabricated direction (handoff 3.4) — it carries tuningUnknown so
+  // the plan/equip path can reject "cannot confirm tuning" instead of guessing.
+  const tuningTo = item.tuningTo || item.tuningStat || null;
+  const tuningUnknown = !tuningTo;
   const tuningFrom = STATS.includes(item.tuningFrom)
     ? item.tuningFrom
-    : STATS.find(stat => stat !== tuningTo);
+    : (tuningTo ? STATS.find(stat => stat !== tuningTo) : null);
   const armorModSize = [0, 5, 10].includes(Number(item.armorModSize))
     ? Number(item.armorModSize)
     : 10;
@@ -109,6 +125,7 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     tuningMode,
     tuningFrom,
     tuningTo,
+    tuningUnknown,
     armorModSize,
     armorModStat,
     exotic: Boolean(item.exotic),
@@ -154,7 +171,9 @@ export function applyManualUpgradeModifiers(config, piece) {
     for (const stat of STATS) {
       if (stat !== config.primary && stat !== config.secondary && stat !== config.tertiary) totals[stat] += 1;
     }
-  } else {
+  } else if (piece.tuningTo && piece.tuningFrom) {
+    // An unknown-tuned imported piece carries null tuning fields and simply
+    // contributes its base stats — never a fabricated +5/-5 (handoff 3.4).
     totals[piece.tuningFrom] -= 5;
     totals[piece.tuningTo] += 5;
   }
@@ -289,9 +308,11 @@ export function evaluateUpgradePieces(
   const manualArmorTotals = getManualUpgradeArmorTotals(pieces);
   const manualEvaluation = {
     totals: manualArmorTotals,
-    tuningAssignments: pieces.map(piece => piece.tuningMode === 'plus3'
-      ? { mode:'+3', from:null, to:null }
-      : { mode:'+5-5', from:piece.tuningFrom, to:piece.tuningTo }),
+    tuningAssignments: pieces.map(piece => piece.tuningUnknown
+      ? null // no fabricated direction for an unknown-tuned imported piece
+      : piece.tuningMode === 'plus3'
+        ? { mode:'+3', from:null, to:null }
+        : { mode:'+5-5', from:piece.tuningFrom, to:piece.tuningTo }),
     modAssignments: Object.fromEntries(pieces.map((piece, index) => [
       index,
       piece.armorModSize > 0 ? { size:piece.armorModSize, stat:piece.armorModStat } : null

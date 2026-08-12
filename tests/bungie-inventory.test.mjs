@@ -423,11 +423,18 @@ const EXPECTED_ARMOR_COMPONENTS = [
   "ItemStats",
   "ItemSockets",
   "ItemPlugStates",
+  "ItemReusablePlugs",
 ];
 
 test("ARMOR_COMPONENTS includes every Bungie component needed for armor stats", () => {
-  assert.equal(ARMOR_COMPONENTS.length, 9);
+  assert.equal(ARMOR_COMPONENTS.length, 10);
   assert.deepEqual([...ARMOR_COMPONENTS].sort(), [...EXPECTED_ARMOR_COMPONENTS].sort());
+});
+
+test("ARMOR_COMPONENTS never lists the pseudo-components ProfilePlugSets/CharacterPlugSets", () => {
+  // They are not DestinyComponentType values; they ride along with ItemSockets.
+  assert.equal(ARMOR_COMPONENTS.includes("ProfilePlugSets"), false);
+  assert.equal(ARMOR_COMPONENTS.includes("CharacterPlugSets"), false);
 });
 
 test("buildArmorInventory merges vault, character inventory and equipment without duplicate instanceIds", () => {
