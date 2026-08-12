@@ -58,6 +58,7 @@ export function solveInventoryLoadout({
   const results = [];
   const seen = new Set();
   const push = (pieces, evaluation) => {
+    if (!isLegalArmorLoadout(pieces)) return;
     const key = keyOf(pieces);
     if (seen.has(key)) return;
     seen.add(key);
@@ -74,6 +75,7 @@ export function solveInventoryLoadout({
     );
     if (exhaustivePieces) {
       for (const pieces of exhaustivePieces) {
+        if (!isLegalArmorLoadout(pieces)) continue;
         if (!satisfiesRequirement(pieces, setRequirement)) continue;
         push(pieces, evaluate(pieces));
         examined++;
@@ -94,6 +96,7 @@ export function solveInventoryLoadout({
       })).sort((left, right) =>
         compareUpgradeMetrics(left.evaluation.metrics, right.evaluation.metrics));
       for (const entry of evaluatedBeam) {
+        if (!isLegalArmorLoadout(entry.pieces)) continue;
         if (!satisfiesRequirement(entry.pieces, setRequirement)) continue;
         push(entry.pieces, entry.evaluation);
         examined++;
@@ -114,7 +117,8 @@ export function solveInventoryLoadout({
     if (!filled) continue;
     // A locked piece may occupy a slot selected by the set assignment. Reject
     // that assignment unless the resulting five real pieces still satisfy it.
-    if (!satisfiesRequirement(filled.pieces, setRequirement)) continue;
+    if (!isLegalArmorLoadout(filled.pieces)
+      || !satisfiesRequirement(filled.pieces, setRequirement)) continue;
     push(filled.pieces, evaluate(filled.pieces));
     examined++;
     const searchableSlots = SLOT_ORDER.filter(slot => !lockedPiecesBySlot.has(slot));
@@ -127,12 +131,14 @@ export function solveInventoryLoadout({
   const currentKey = Array.isArray(currentPieces)
     ? keyOf(currentPieces)
     : null;
-  if (currentKey && satisfiesRequirement(currentPieces, setRequirement)) {
+  if (currentKey && isLegalArmorLoadout(currentPieces)
+    && satisfiesRequirement(currentPieces, setRequirement)) {
     push(currentPieces.map(piece => ({ ...piece })), evaluate(currentPieces));
   }
 
   const validResults = results.filter(entry =>
-    satisfiesRequirement(entry.pieces, setRequirement));
+    isLegalArmorLoadout(entry.pieces)
+    && satisfiesRequirement(entry.pieces, setRequirement));
   validResults.sort((left, right) =>
     compareUpgradeMetrics(left.evaluation.metrics, right.evaluation.metrics)
   );
@@ -173,7 +179,7 @@ function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot
 
   const loadouts = [];
   const chosen = Array(SLOT_ORDER.length);
-  const enumerate = slotIndex => {
+  const enumerate = (slotIndex, exoticCount) => {
     if (slotIndex === SLOT_ORDER.length) {
       loadouts.push(chosen.map((candidate, index) => candidate.piece
         ? { ...candidate.piece }
@@ -181,11 +187,15 @@ function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot
       return;
     }
     for (const candidate of candidatesBySlot[slotIndex]) {
+      const nextExoticCount = exoticCount + Number(Boolean(
+        candidate.piece?.exotic ?? candidate.item?.exotic,
+      ));
+      if (nextExoticCount > 1) continue;
       chosen[slotIndex] = candidate;
-      enumerate(slotIndex + 1);
+      enumerate(slotIndex + 1, nextExoticCount);
     }
   };
-  enumerate(0);
+  enumerate(0, 0);
   return loadouts;
 }
 
@@ -196,6 +206,7 @@ function searchAssignmentBeam(
     chosen: [],
     partial: Object.fromEntries(STATS.map(stat => [stat, 0])),
     score: 0,
+    exoticCount: 0,
   }];
   for (let slotIndex = 0; slotIndex < SLOT_ORDER.length; slotIndex++) {
     const slot = SLOT_ORDER[slotIndex];
@@ -204,6 +215,8 @@ function searchAssignmentBeam(
     const next = [];
     for (const state of states) {
       if (lockedPiece) {
+        const exoticCount = state.exoticCount + Number(Boolean(lockedPiece.exotic));
+        if (exoticCount > 1) continue;
         const baseStats = getUpgradeConfig(lockedPiece).baseStats;
         const partial = { ...state.partial };
         for (const stat of STATS) partial[stat] += baseStats?.[stat] || 0;
@@ -211,6 +224,7 @@ function searchAssignmentBeam(
           chosen: [...state.chosen, { piece: { ...lockedPiece } }],
           partial,
           score: fitScore(null, partial, slotIndex + 1, armorTarget, requiredStats),
+          exoticCount,
         });
         continue;
       }
@@ -218,9 +232,12 @@ function searchAssignmentBeam(
         ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
         : bySlot.get(slot);
       const candidates = rankSlotCandidates(
-        items, state.partial, slotIndex + 1, armorTarget, requiredStats
+        items.filter(item => !item.exotic || state.exoticCount === 0),
+        state.partial, slotIndex + 1, armorTarget, requiredStats
       );
       for (const item of candidates) {
+        const exoticCount = state.exoticCount + Number(Boolean(item.exotic));
+        if (exoticCount > 1) continue;
         const partial = { ...state.partial };
         const itemStats = getItemStats(item);
         for (const stat of STATS) partial[stat] += itemStats[stat] || 0;
@@ -228,6 +245,7 @@ function searchAssignmentBeam(
           chosen: [...state.chosen, { item }],
           partial,
           score: fitScore(null, partial, slotIndex + 1, armorTarget, requiredStats),
+          exoticCount,
         });
       }
     }
@@ -354,9 +372,12 @@ function greedyFill(
 ) {
   const fixed = [];
   const partial = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  let exoticCount = 0;
   for (const slot of SLOT_ORDER) {
     const lockedPiece = lockedPiecesBySlot.get(slot);
     if (lockedPiece) {
+      exoticCount += Number(Boolean(lockedPiece.exotic));
+      if (exoticCount > 1) return null;
       fixed.push({ slot, piece: { ...lockedPiece } });
       const baseStats = getUpgradeConfig(lockedPiece).baseStats;
       for (const stat of STATS) partial[stat] += baseStats?.[stat] || 0;
@@ -365,13 +386,17 @@ function greedyFill(
     const requiredSetHash = assignment.fixed.get(slot);
     if (!requiredSetHash) continue;
     const item = rankSlotCandidates(
-      bySlot.get(slot).filter(candidate => candidate.setHash === requiredSetHash),
+      bySlot.get(slot).filter(candidate =>
+        candidate.setHash === requiredSetHash
+        && (!candidate.exotic || exoticCount === 0)
+      ),
       partial,
       fixed.length + 1,
       armorTarget,
       requiredStats,
     )[0];
     if (!item) return null;
+    exoticCount += Number(Boolean(item.exotic));
     fixed.push({ slot, item });
     const itemStats = getItemStats(item);
     for (const stat of STATS) partial[stat] += itemStats[stat] || 0;
@@ -381,10 +406,12 @@ function greedyFill(
   let completed = fixed.length;
   for (const slot of assignment.free) {
     const candidates = rankSlotCandidates(
-      bySlot.get(slot), partial, completed + 1, armorTarget, requiredStats
+      bySlot.get(slot).filter(candidate => !candidate.exotic || exoticCount === 0),
+      partial, completed + 1, armorTarget, requiredStats
     );
     const item = candidates[0];
     if (!item) return null;
+    exoticCount += Number(Boolean(item.exotic));
     chosen.push({ slot, item });
     const itemStats = getItemStats(item);
     for (const stat of STATS) partial[stat] += itemStats[stat] || 0;
@@ -414,7 +441,13 @@ function localSearch(
       const slotItems = requiredSetHash
         ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
         : bySlot.get(slot);
-      const candidates = rankSlotCandidates(slotItems, {}, 5, armorTarget, requiredStats)
+      const otherExoticCount = bestPieces.filter((piece, pieceIndex) =>
+        pieceIndex !== index && piece.exotic
+      ).length;
+      const candidates = rankSlotCandidates(
+        slotItems.filter(item => !item.exotic || otherExoticCount === 0),
+        {}, 5, armorTarget, requiredStats,
+      )
         .slice(0, MAX_LOCAL_CANDIDATES);
       for (const item of candidates) {
         if (getPieceInstanceKey(bestPieces[index]) === getPieceInstanceKey(item)) continue;
@@ -423,6 +456,7 @@ function localSearch(
             ? createUpgradePieceFromItem(item, SLOT_ORDER.indexOf(slot))
             : piece
         );
+        if (!isLegalArmorLoadout(trial)) continue;
         const trialEvaluation = evaluate(trial);
         examined++;
         if (compareUpgradeMetrics(trialEvaluation.metrics, best.metrics) < 0) {
@@ -436,6 +470,10 @@ function localSearch(
     if (!improved) break;
   }
   return examined;
+}
+
+function isLegalArmorLoadout(pieces) {
+  return pieces.filter(piece => piece?.exotic).length <= 1;
 }
 
 function satisfiesRequirement(pieces, requirement) {

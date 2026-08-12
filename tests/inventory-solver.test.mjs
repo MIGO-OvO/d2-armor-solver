@@ -65,6 +65,73 @@ test("no requirement searches the whole inventory", () => {
     Math.min(...shorts), "best owned combo should be ranked first");
 });
 
+test("owned-armor loadouts never equip more than one Exotic armor piece", () => {
+  const items = SLOTS.flatMap((slot, index) => {
+    const legendary = makeItem(`Legendary ${slot}`, slot, null, {
+      ...zero,
+      weapons: 10,
+    }, index + 1);
+    if (!['helmet', 'arms'].includes(slot)) return [legendary];
+    return [
+      legendary,
+      {
+        ...makeItem(`Exotic ${slot}`, slot, null, {
+          ...zero,
+          weapons: 60,
+        }, index + 11),
+        exotic: true,
+      },
+    ];
+  });
+
+  const result = solveInventoryLoadout({
+    items,
+    targets: { ...zero, weapons: 200 },
+    fragments: FRAGMENTS,
+    setRequirement: { type: "none" },
+    reassignModifiers: false,
+  });
+
+  assert.ok(result.results.length > 0);
+  assert.ok(result.results.every(entry =>
+    entry.pieces.filter(piece => piece.exotic).length <= 1
+  ));
+});
+
+test("large-inventory beam search keeps legal alternatives when Exotics score highest", () => {
+  const items = SLOTS.flatMap((slot, slotIndex) => {
+    const legendaries = Array.from({ length: 6 }, (_, itemIndex) =>
+      makeItem(`Legendary ${slot} ${itemIndex}`, slot, null, {
+        ...zero,
+        weapons: 10 + itemIndex,
+      }, slotIndex * 10 + itemIndex + 1));
+    if (!['helmet', 'arms'].includes(slot)) return legendaries;
+    return [
+      ...legendaries,
+      {
+        ...makeItem(`Exotic ${slot}`, slot, null, {
+          ...zero,
+          weapons: 80,
+        }, slotIndex + 91),
+        exotic: true,
+      },
+    ];
+  });
+
+  const result = solveInventoryLoadout({
+    items,
+    targets: { ...zero, weapons: 200 },
+    fragments: FRAGMENTS,
+    setRequirement: { type: "none" },
+    reassignModifiers: false,
+  });
+
+  assert.ok(result.results.length > 0);
+  assert.ok(result.results.every(entry =>
+    entry.pieces.filter(piece => piece.exotic).length <= 1
+  ));
+});
+
 test("4-piece requirement allows other armor while requiring at least four set pieces", () => {
   const result = solveInventoryLoadout({
     items: buildInventory(),
