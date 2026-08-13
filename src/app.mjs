@@ -124,9 +124,8 @@ let showAllSolutions = false;
 // Both apply to the from-scratch solver (normal and Exotic Class Item modes).
 let statPriority = {};
 let statFuzzyMode = {};
-const PRIORITY_BADGE_TEXT = { 0: '—', 1: '①', 2: '②', 3: '③' };
 const FUZZY_MODE_ORDER = ['=', '>=', '<=', 'range'];
-const FUZZY_MODE_SYMBOL = { '=': '=', '>=': '≥', '<=': '≤', 'range': '⇔' };
+const FUZZY_MODE_SYMBOL = { '=': '=', '>=': '≥', '<=': '≤', 'range': '↔' };
 
 function displayArchetypeKey(config, exoticIndex = null) {
   const freq = {};
@@ -180,17 +179,11 @@ function getStatInputHTML(prefix, stat, val) {
   const priority = statPriority[stat] || 0;
   const fuzzy = statFuzzyMode[stat] || '=';
   const priorityTitle = `${l('优先级', '優先級', 'Priority')}：${priorityLevelName(priority)}`;
-  const fuzzyTitle = `${l('约束', '約束', 'Constraint')}：${fuzzyModeName(fuzzy)}`;
+  const fuzzyTitle = `${l('规则', '規則', 'Rule')}：${fuzzyModeName(fuzzy)}`;
   return `
     <div class="input-group target-stat-group">
       <div class="stat-label" style="color:${STAT_COLORS[stat]};display:flex;align-items:center;justify-content:space-between;">
-        <span class="stat-label-left">
-          <span class="icon-text stat-name target-stat-name">${icon(stat)}<span>${STAT_LABELS[stat]}</span></span>
-          <span class="stat-badges">
-            <button type="button" class="stat-badge priority-badge${priority ? ' is-active' : ''}" id="priorityBadge_${stat}" data-level="${priority}" onclick="cyclePriority('${stat}')" title="${priorityTitle}" aria-label="${priorityTitle}" aria-pressed="${priority > 0}">${PRIORITY_BADGE_TEXT[priority]}</button>
-            <button type="button" class="stat-badge fuzzy-badge${fuzzy !== '=' ? ' is-active' : ''}" id="fuzzyBadge_${stat}" data-mode="${fuzzy}" onclick="cycleFuzzyMode('${stat}')" title="${fuzzyTitle}" aria-label="${fuzzyTitle}" aria-pressed="${fuzzy !== '='}">${FUZZY_MODE_SYMBOL[fuzzy]}</button>
-          </span>
-        </span>
+        <span class="icon-text stat-name target-stat-name">${icon(stat)}<span>${STAT_LABELS[stat]}</span></span>
         <label class="lock-control exotic-only">
           <input type="checkbox" id="targetLock_${stat}" aria-label="${STAT_LABELS[stat]} ${t('lock')}" style="accent-color:var(--accent);width:13px;height:13px;">${icon('lock', { size: 'sm' })}<span>${t('lock')}</span>
         </label>
@@ -207,6 +200,14 @@ function getStatInputHTML(prefix, stat, val) {
         inputmode="numeric" min="0" max="200" aria-label="${STAT_LABELS[stat]} ${l('上限', '上限', 'max')}"
         placeholder="${l('上限', '上限', 'max')}">
       <div class="stat-range-hint" id="rangeHint_${stat}" aria-live="polite"></div>
+      <div class="stat-mode-controls" role="group" aria-label="${STAT_LABELS[stat]} ${l('优先级与规则', '優先級與規則', 'priority and rule')}">
+        <button type="button" class="stat-mode-control priority-badge${priority ? ' is-active' : ''}" id="priorityBadge_${stat}" data-level="${priority}" onclick="cyclePriority('${stat}')" title="${priorityTitle}" aria-label="${priorityTitle}">
+          <span class="stat-mode-label">${l('优先', '優先', 'Priority')}</span><span class="stat-mode-value">${priorityLevelName(priority)}</span>
+        </button>
+        <button type="button" class="stat-mode-control fuzzy-badge${fuzzy !== '=' ? ' is-active' : ''}" id="fuzzyBadge_${stat}" data-mode="${fuzzy}" onclick="cycleFuzzyMode('${stat}')" title="${fuzzyTitle}" aria-label="${fuzzyTitle}">
+          <span class="stat-mode-label">${l('规则', '規則', 'Rule')}</span><span class="stat-mode-value">${FUZZY_MODE_SYMBOL[fuzzy]} ${fuzzyModeName(fuzzy)}</span>
+        </button>
+      </div>
     </div>`;
 }
 
@@ -214,10 +215,10 @@ function syncPriorityUI(stat) {
   const badge = document.getElementById('priorityBadge_' + stat);
   if (!badge) return;
   const level = statPriority[stat] || 0;
-  badge.textContent = PRIORITY_BADGE_TEXT[level];
+  const value = badge.querySelector('.stat-mode-value');
+  if (value) value.textContent = priorityLevelName(level);
   badge.dataset.level = String(level);
   badge.classList.toggle('is-active', level > 0);
-  badge.setAttribute('aria-pressed', String(level > 0));
   const title = `${l('优先级', '優先級', 'Priority')}：${priorityLevelName(level)}`;
   badge.title = title;
   badge.setAttribute('aria-label', title);
@@ -239,11 +240,11 @@ function syncStatModeUI(stat) {
   const maxInput = document.getElementById('targetMax_' + stat);
   const mode = statFuzzyMode[stat] || '=';
   if (badge) {
-    badge.textContent = FUZZY_MODE_SYMBOL[mode];
+    const value = badge.querySelector('.stat-mode-value');
+    if (value) value.textContent = `${FUZZY_MODE_SYMBOL[mode]} ${fuzzyModeName(mode)}`;
     badge.dataset.mode = mode;
     badge.classList.toggle('is-active', mode !== '=');
-    badge.setAttribute('aria-pressed', String(mode !== '='));
-    const title = `${l('约束', '約束', 'Constraint')}：${fuzzyModeName(mode)}`;
+    const title = `${l('规则', '規則', 'Rule')}：${fuzzyModeName(mode)}`;
     badge.title = title;
     badge.setAttribute('aria-label', title);
   }
@@ -2544,10 +2545,11 @@ function showImportMessage(text, tone = "error") {
 
 const BUNGIE_DISPLAY_NAME_KEY = channelStorageKey("d2_armor_bungie_display_name_v1");
 const BUNGIE_OAUTH_STATE_KEY = channelStorageKey("bungieOAuthState");
-const BUNGIE_AUTO_REFRESH_MIN_MS = 15 * 1000;
+const BUNGIE_AUTO_REFRESH_MS = 10 * 1000;
 
 let isBungieImporting = false;
 let lastBungieImportAt = 0;
+let bungieAutoRefreshTimer = 0;
 let isBungieApplying = false;
 let bungieProfileState = null;
 let bungieTargetCharacterId = "";
@@ -2634,9 +2636,13 @@ function handleBungieAuthError(error) {
   showImportMessage(bungieErrorMessage(error));
 }
 
-// Authentication has one persistent home in the page header. Keeping the
-// account actions in a menu prevents login/refresh/logout from being duplicated
-// beside the inventory import controls, and separates the destructive action.
+function formatBungieLastSync() {
+  if (!lastBungieImportAt) return l("等待首次同步", "等待首次同步", "Waiting for first sync");
+  return l("刚刚更新", "剛剛更新", "Updated just now");
+}
+
+// Authentication and the frequently used inventory action share the page
+// header, while sign-out remains inside the account menu.
 function bungieAccountHtml() {
   if (!__BUNGIE_OAUTH_CLIENT_ID__) return "";
   if (!hasToken()) {
@@ -2645,8 +2651,13 @@ function bungieAccountHtml() {
   const displayName = getBungieDisplayName() || l("已连接账户", "已連線帳戶", "Connected account");
   const syncLabel = isBungieImporting
     ? l("正在同步库存…", "正在同步庫存…", "Syncing inventory…")
-    : l("同步 Bungie 库存", "同步 Bungie 庫存", "Sync Bungie inventory");
-  return `<details class="bungie-account-menu">
+    : l("同步库存", "同步庫存", "Sync inventory");
+  const autoRefreshLabel = l("页面打开时每 10 秒自动刷新", "頁面開啟時每 10 秒自動重新整理", "Auto-refreshes every 10s while this page is open");
+  return `<div class="bungie-sync-control">
+    <button type="button" class="btn bungie-sync-button" onclick="importInventoryFromBungie()" ${isBungieImporting ? "disabled" : ""}>${icon("refresh")}<span>${syncLabel}</span></button>
+    <span class="bungie-sync-meta" title="${escapeHtml(autoRefreshLabel)}"><span class="bungie-sync-pulse" aria-hidden="true"></span>${formatBungieLastSync()} · ${l("自动 10 秒", "自動 10 秒", "Auto 10s")}</span>
+  </div>
+  <details class="bungie-account-menu">
     <summary aria-label="${escapeHtml(l(`Bungie 账户：${displayName}`, `Bungie 帳戶：${displayName}`, `Bungie account: ${displayName}`))}">
       <span class="bungie-account-status" aria-hidden="true"></span>
       <span class="bungie-account-copy"><small>Bungie</small><strong>${escapeHtml(displayName)}</strong></span>
@@ -2656,7 +2667,6 @@ function bungieAccountHtml() {
         <span>${l("已连接 Bungie", "已連線 Bungie", "Bungie connected")}</span>
         <strong>${escapeHtml(displayName)}</strong>
       </div>
-      <button type="button" class="bungie-account-action" onclick="importInventoryFromBungie()" ${isBungieImporting ? "disabled" : ""}>${icon("refresh")}<span>${syncLabel}</span></button>
       <div class="bungie-account-danger">
         <button type="button" onclick="bungieLogout()">${l("退出 Bungie 账户", "登出 Bungie 帳戶", "Sign out of Bungie")}</button>
       </div>
@@ -2671,6 +2681,7 @@ function renderBungieAuthState() {
 function renderHeaderBungieAuthState() {
   const area = document.getElementById("headerBungieAuth");
   if (area) area.innerHTML = bungieAccountHtml();
+  syncBungieAutoRefresh();
 }
 
 function bungieLogin() {
@@ -2708,10 +2719,30 @@ function bungieLogout() {
   renderBungieAuthState();
 }
 
-// Throttle gate for the visibilitychange auto-refresh: refresh at most once
-// per 15s per visible-return. No timers involved.
+// Auto-refresh stays active only while the document is visible. The in-flight
+// gate prevents overlapping profile requests if one sync takes longer than 10s.
 function shouldAutoRefresh(now = Date.now()) {
-  return hasToken() && now - lastBungieImportAt > BUNGIE_AUTO_REFRESH_MIN_MS;
+  return document.visibilityState === "visible"
+    && hasToken()
+    && !isBungieImporting
+    && now - lastBungieImportAt >= BUNGIE_AUTO_REFRESH_MS;
+}
+
+function stopBungieAutoRefresh() {
+  if (!bungieAutoRefreshTimer) return;
+  clearInterval(bungieAutoRefreshTimer);
+  bungieAutoRefreshTimer = 0;
+}
+
+function syncBungieAutoRefresh() {
+  if (document.visibilityState !== "visible" || !hasToken()) {
+    stopBungieAutoRefresh();
+    return;
+  }
+  if (bungieAutoRefreshTimer) return;
+  bungieAutoRefreshTimer = window.setInterval(() => {
+    if (shouldAutoRefresh()) importInventoryFromBungie({ silent: true });
+  }, BUNGIE_AUTO_REFRESH_MS);
 }
 
 function getBungieCharactersForClass(classId = importClassFilter) {
@@ -2736,7 +2767,7 @@ function syncBungieTargetCharacter() {
 function formatBungieCharacterLabel(character) {
   const classLabel = getClassLabel(character?.classId);
   const light = Number(character?.light) || 0;
-  return `${classLabel}${light ? l(` · 光能 ${light}`, ` · 光能 ${light}`, ` · Power ${light}`) : ""}`;
+  return `${classLabel}${light ? l(` · 光等 ${light}`, ` · Power ${light}`, ` · Power ${light}`) : ""}`;
 }
 
 function formatBungieCharacterOption(character, characters) {
@@ -2864,9 +2895,9 @@ function renderSavedBungieLoadoutDetail(summary, detailId) {
         <ul class="bungie-loadout-weapon-list">${summary.weapons.map(weapon => {
           const labels = BUNGIE_WEAPON_BUCKET_LABELS.get(Number(weapon.bucketHash));
           const label = l(labels[0], labels[1], labels[2]);
-          return `<li><span>${escapeHtml(label)}</span><strong>${weapon.power ? l(`光能 ${weapon.power}`, `光能 ${weapon.power}`, `Power ${weapon.power}`) : l("已保存", "已儲存", "Saved")}</strong></li>`;
+          return `<li><span>${escapeHtml(label)}</span><strong>${weapon.power ? l(`光等 ${weapon.power}`, `Power ${weapon.power}`, `Power ${weapon.power}`) : l("已保存", "已儲存", "Saved")}</strong></li>`;
         }).join("")}</ul>
-        <p class="bungie-loadout-data-note">${l("当前本地物品库未包含武器名称；同步状态和光能来自 Bungie 配装记录。", "目前本機物品庫未包含武器名稱；同步狀態與光能來自 Bungie 配裝記錄。", "The local item catalog does not include weapon names; saved state and Power come from Bungie.")}</p>
+        <p class="bungie-loadout-data-note">${l("当前本地物品库未包含武器名称；同步状态和光等来自 Bungie 配装记录。", "目前本機物品庫未包含武器名稱；同步狀態與 Power 來自 Bungie 配裝記錄。", "The local item catalog does not include weapon names; saved state and Power come from Bungie.")}</p>
       </section>`
     : "";
   return `<div class="bungie-loadout-detail" id="${detailId}">
@@ -3200,7 +3231,7 @@ async function equipInventorySolution(index) {
   }
 }
 
-async function importInventoryFromBungie() {
+async function importInventoryFromBungie({ silent = false } = {}) {
   if (!getToken()) {
     showImportMessage(l(
       "尚未登录 Bungie。",
@@ -3243,7 +3274,7 @@ async function importInventoryFromBungie() {
     }
     if (Object.keys(fragmentsByClass).length > 0) bungieSubclassFragments = fragmentsByClass;
     const replaced = importedInventory.length > 0;
-    applyImportedInventory(items, "bungie");
+    applyImportedInventory(items, "bungie", { passive: silent });
     syncBungieTargetCharacter();
     renderUpgradeImportPanel();
     lastBungieImportAt = Date.now();
@@ -3260,7 +3291,10 @@ async function importInventoryFromBungie() {
         `已匯入 ${items.length} 件 Bungie 防具。`,
         `Imported ${items.length} armor pieces from Bungie.`,
       ];
-    if (calculatorMode === "solve") {
+    if (silent) {
+      // Inventory data updates in place without overwriting targets or the
+      // current-loadout editor while the user is working.
+    } else if (calculatorMode === "solve") {
       showImportMessage(l(
         `${countNote[0]} 请选择职业，再设置目标、套装和异域后求解。`,
         `${countNote[1]} 請選擇職業，再設定目標、套裝和異域後求解。`,
@@ -3325,11 +3359,13 @@ async function handleBungieOAuthCallback() {
 
 // Shared post-import pipeline for both CSV and Bungie imports: adopt the
 // items, reset results/exotic filters, detect the class, re-render, persist.
-function applyImportedInventory(items, source) {
+function applyImportedInventory(items, source, { passive = false } = {}) {
   importedInventory = items;
   importSource = source;
-  inventoryImportExpanded = true;
-  clearInventoryResults();
+  if (!passive) {
+    inventoryImportExpanded = true;
+    clearInventoryResults();
+  }
   const importedClasses = new Set(items.map(item => item.classId).filter(Boolean));
   const detectedClass = detectEquippedClass(items);
   if (!importedClasses.has(importClassFilter)) {
@@ -3355,6 +3391,7 @@ function applyImportedInventory(items, source) {
     }
   }
   renderUpgradeImportPanel();
+  if (passive) refreshInventoryPlansFromSolutions();
   saveUpgradeDraft();
 }
 
@@ -5411,9 +5448,8 @@ loadCurrentDraft();
 renderSavedBuilds();
 initializeUpgradeOptimizer();
 initializeFloatingJumpVisibility();
-handleBungieOAuthCallback();
+handleBungieOAuthCallback().finally(syncBungieAutoRefresh);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && shouldAutoRefresh()) {
-    importInventoryFromBungie();
-  }
+  syncBungieAutoRefresh();
+  if (shouldAutoRefresh()) importInventoryFromBungie({ silent: true });
 });

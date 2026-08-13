@@ -2460,41 +2460,51 @@ a:focus-visible {
   height: .875rem;
   color: color-mix(in oklab, var(--text-dim) 86%, transparent);
 }
-/* Priority + fuzzy constraint badges sit next to the stat name. */
-.target-stat-group .stat-label-left {
-  display: flex;
+/* Priority and rule controls use the same labeled structure so their purpose
+   is visible without relying on tooltip-only symbols. */
+.stat-mode-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem;
+  margin-top: .125rem;
+  padding-top: .625rem;
+  border-top: 1px solid var(--border-subtle);
+}
+.stat-mode-control {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: .45rem;
+  gap: .35rem;
   min-width: 0;
-}
-.target-stat-group .stat-badges {
-  display: inline-flex;
-  align-items: center;
-  gap: .25rem;
-  flex: none;
-}
-.stat-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.4rem;
-  height: 1.4rem;
-  padding: 0 .3rem;
+  min-height: 2rem;
+  padding: .3rem .5rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--bg);
   color: var(--text-dim);
-  font-size: .75rem;
-  font-weight: 700;
-  line-height: 1;
+  font-family: inherit;
+  font-size: .6875rem;
+  line-height: 1.2;
   cursor: pointer;
   transition: border-color .12s ease, color .12s ease, background .12s ease;
 }
-.stat-badge:hover { border-color: var(--border-strong); color: var(--text); }
-.stat-badge.is-active {
+.stat-mode-control:hover { border-color: var(--border-strong); color: var(--text); }
+.stat-mode-control.is-active {
   border-color: var(--accent);
   color: var(--accent-strong);
   background: color-mix(in oklab, var(--accent) 10%, var(--bg));
+}
+.stat-mode-label {
+  color: color-mix(in oklab, currentColor 78%, var(--text-dim));
+  font-weight: 560;
+}
+.stat-mode-value {
+  overflow: hidden;
+  color: currentColor;
+  font-weight: 750;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .priority-badge[data-level="1"] {
   border-color: #ff6b6b;
@@ -3359,18 +3369,23 @@ a:focus-visible {
 .upgrade-build-card[hidden],
 .upgrade-results[hidden] { display: none !important; }
 .upgrade-card-header {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 .upgrade-card-header h2 {
-  margin-bottom: 6px;
-  font-size: 1.125rem;
-  font-weight: 700;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 8px 14px;
+  margin-bottom: 0;
+  font-size: 1rem;
+  font-weight: 720;
+  flex-wrap: wrap;
 }
 .upgrade-card-copy {
-  max-width: 50rem;
+  max-width: 64rem;
   color: var(--text-dim);
-  font-size: .9375rem;
-  line-height: 1.7;
+  font-size: .8125rem;
+  font-weight: 500;
+  line-height: 1.55;
   text-wrap: pretty;
 }
 .upgrade-drag-handle { display: none; }
@@ -3609,6 +3624,8 @@ a:focus-visible {
   color: var(--text-dim);
   font-size: .8125rem;
   line-height: 1.65;
+  max-width: 82ch;
+  text-wrap: pretty;
 }
 .is-upgrade-mode .target-mode-hint { display: none; }
 .is-upgrade-mode .msg {
@@ -4351,6 +4368,10 @@ a:focus-visible {
     gap: .5rem;
     padding: .625rem;
   }
+  .stat-mode-controls {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .375rem;
+  }
   .target-stat-group > .stat-label {
     min-height: var(--touch-target);
     gap: .25rem;
@@ -4420,9 +4441,46 @@ a:focus-visible {
 .header-tools .language-switcher { position: static; }
 .header-bungie-auth {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 0;
 }
+.bungie-sync-control {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+.bungie-sync-button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.bungie-sync-button .icon {
+  width: 1rem;
+  height: 1rem;
+}
+.bungie-sync-button:disabled .icon {
+  animation: bungie-sync-spin .9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bungie-sync-button:disabled .icon { animation: none; }
+}
+.bungie-sync-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: .625rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.bungie-sync-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--success);
+}
+@keyframes bungie-sync-spin { to { transform: rotate(360deg); } }
 .bungie-login-button {
   min-height: 44px;
   white-space: nowrap;
@@ -4510,7 +4568,6 @@ a:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bungie-account-action,
 .bungie-account-danger button {
   display: flex;
   width: 100%;
@@ -4526,8 +4583,6 @@ a:focus-visible {
   text-align: left;
   cursor: pointer;
 }
-.bungie-account-action:hover { background: color-mix(in oklab, var(--text) 6%, transparent); }
-.bungie-account-action .icon { width: 1rem; height: 1rem; }
 .bungie-account-danger {
   margin-top: 5px;
   padding-top: 5px;
@@ -4751,7 +4806,8 @@ a:focus-visible {
     margin-bottom: 1rem;
   }
   .header-tools .language-switcher { align-self: auto; }
-  .bungie-account-menu > summary { max-width: min(210px, 52vw); }
+  .bungie-sync-meta { display: none; }
+  .bungie-account-menu > summary { max-width: min(180px, 44vw); }
   .bungie-saved-list { grid-template-columns: minmax(0, 1fr); }
   .bungie-loadout-card { padding: 13px; }
   .bungie-loadout-card:hover .bungie-loadout-detail,
@@ -4779,8 +4835,17 @@ a:focus-visible {
   }
   .header-tools .language-switcher,
   .header-bungie-auth,
-  .bungie-login-button,
+  .bungie-login-button { width: 100%; max-width: none; }
+  .header-bungie-auth {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .bungie-sync-control,
+  .bungie-sync-button,
+  .bungie-account-menu,
   .bungie-account-menu > summary { width: 100%; max-width: none; }
+  .bungie-sync-control { justify-items: stretch; }
   .header-tools .language-switcher { justify-content: space-between; }
   .bungie-account-popover { right: 0; width: min(100%, calc(100vw - 24px)); }
 }

@@ -1067,10 +1067,32 @@ async function checkBungieAuthFlow(browser) {
       "the consumed OAuth state must be cleared",
     );
     assert.equal(await page.locator("#bungieLoginButton").count(), 0);
+    assert.equal(
+      await page.locator('.bungie-account-popover [onclick="importInventoryFromBungie()"]').count(),
+      0,
+      "inventory sync should not be hidden in the account menu",
+    );
+    assert.equal(await page.locator(".bungie-sync-button").isVisible(), true);
+    assert.match(await page.locator(".bungie-sync-meta").innerText(), /10/);
+    assert.equal(
+      await page.evaluate(() => window.shouldAutoRefresh(Date.now() + 10_001)),
+      true,
+      "a visible signed-in page should become eligible for refresh after 10 seconds",
+    );
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    });
+    assert.equal(
+      await page.evaluate(() => window.shouldAutoRefresh(Date.now() + 10_001)),
+      false,
+      "a hidden page must not auto-refresh inventory",
+    );
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    });
 
     // --- (d) refresh inventory from the mocked GetProfile fixture ---
-    await page.locator(".bungie-account-menu > summary").click();
-    await page.locator('.bungie-account-action[onclick="importInventoryFromBungie()"]').click();
+    await page.locator('.bungie-sync-button[onclick="importInventoryFromBungie()"]').click();
     await page.waitForFunction(() => /已导入 [1-9]\d* 件 Bungie 护甲/.test(
       document.getElementById("upgradeImportSummary")?.textContent || "",
     ));
@@ -1124,8 +1146,7 @@ async function checkBungieAuthFlow(browser) {
       "classItem",
       "enabling Exotic Class Item mode must pin the Exotic slot filter",
     );
-    await page.locator(".bungie-account-menu > summary").click();
-    await page.locator('.bungie-account-action[onclick="importInventoryFromBungie()"]').click();
+    await page.locator('.bungie-sync-button[onclick="importInventoryFromBungie()"]').click();
     await page.waitForFunction(() => /Bungie 库存/.test(
       document.getElementById("upgradeImportSummary")?.textContent || "",
     ));
@@ -1192,8 +1213,7 @@ async function checkBungieAuthFlow(browser) {
       ["network", "网络错误或 CORS"],
     ]) {
       profileMode = mode;
-      await page.locator(".bungie-account-menu > summary").click();
-      await page.locator('.bungie-account-action[onclick="importInventoryFromBungie()"]').click();
+      await page.locator('.bungie-sync-button[onclick="importInventoryFromBungie()"]').click();
       await page.waitForFunction(text => (
         document.getElementById("upgradeImportSummary")?.textContent || ""
       ).includes(text), expectedText);
@@ -1310,6 +1330,14 @@ try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   assert.equal(await page.locator("#targetGrid input[id^=\"target_\"]").count(), 6);
   assert.equal(await page.locator("#fragmentGrid .fragment-stepper").count(), 6);
+  assert.equal(await page.locator("#targetGrid .stat-mode-controls").count(), 6);
+  assert.equal(await page.locator("#targetGrid .stat-mode-control").count(), 12);
+  assert.match(await page.locator("#priorityBadge_health").innerText(), /优先\s*无/);
+  assert.match(await page.locator("#fuzzyBadge_health").innerText(), /规则\s*=\s*精确/);
+  await page.locator("#priorityBadge_health").click();
+  assert.match(await page.locator("#priorityBadge_health").innerText(), /优先\s*高/);
+  await page.locator("#fuzzyBadge_health").click();
+  assert.match(await page.locator("#fuzzyBadge_health").innerText(), /规则\s*≥\s*至少/);
 
   await page.locator("#onlyPlus5Tuning").check();
   assert.equal(
@@ -1357,6 +1385,16 @@ try {
 
   await page.evaluate(() => window.setCalculatorMode("upgrade"));
   assert.equal(await page.locator("#upgradeBuildCard").getAttribute("hidden"), null);
+  assert.equal(
+    await page.locator("#upgradeBuildCard .upgrade-card-header h2").count(),
+    1,
+    "the current-loadout editor should use one consolidated heading component",
+  );
+  assert.equal(
+    await page.locator("#upgradeBuildCard .upgrade-current-head").count(),
+    0,
+    "the duplicate current-loadout heading should be removed",
+  );
   const upgradeRows = await page.locator(
     "#upgradeBuildEditor .upgrade-piece-row",
   ).count();
