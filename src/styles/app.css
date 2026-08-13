@@ -2460,6 +2460,66 @@ a:focus-visible {
   height: .875rem;
   color: color-mix(in oklab, var(--text-dim) 86%, transparent);
 }
+/* Priority + fuzzy constraint badges sit next to the stat name. */
+.target-stat-group .stat-label-left {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  min-width: 0;
+}
+.target-stat-group .stat-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  flex: none;
+}
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 .3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .12s ease, color .12s ease, background .12s ease;
+}
+.stat-badge:hover { border-color: var(--border-strong); color: var(--text); }
+.stat-badge.is-active {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: color-mix(in oklab, var(--accent) 10%, var(--bg));
+}
+.priority-badge[data-level="1"] {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+  background: color-mix(in oklab, #ff6b6b 10%, var(--bg));
+}
+.priority-badge[data-level="2"] {
+  border-color: #ffb84d;
+  color: #ffb84d;
+  background: color-mix(in oklab, #ffb84d 10%, var(--bg));
+}
+.priority-badge[data-level="3"] {
+  border-color: #a8b0bd;
+  color: #a8b0bd;
+  background: color-mix(in oklab, #a8b0bd 10%, var(--bg));
+}
+.target-stat-group > input.range-max-input {
+  min-height: 2.5rem;
+  font-size: .9375rem;
+  font-weight: 600;
+}
+.target-stat-group > input.range-max-input[hidden] { display: none; }
+/* Lock is an Exotic Class Item mode control; hidden in normal solve mode. */
+#inputCard .exotic-only { display: none; }
+#inputCard.is-exotic-mode .exotic-only { display: inline-flex; }
 .target-stat-group .required-control {
   display: none;
   align-items: center;
@@ -3544,6 +3604,13 @@ a:focus-visible {
   line-height: 1.65;
 }
 .is-upgrade-mode .upgrade-target-hint { display: block; }
+.target-mode-hint {
+  margin: -4px 0 12px;
+  color: var(--text-dim);
+  font-size: .8125rem;
+  line-height: 1.65;
+}
+.is-upgrade-mode .target-mode-hint { display: none; }
 .is-upgrade-mode .msg {
   font-size: .875rem;
   line-height: 1.5;

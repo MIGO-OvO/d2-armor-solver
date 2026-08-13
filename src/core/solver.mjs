@@ -72,7 +72,9 @@ function chooseGreedyModifierAllocation(
   const modAssignments = {};
   const hasAdvancedConstraints = (constraints?.priorityOrder?.length || 0) > 0
     || Object.values(constraints?.priorities || {}).some(Boolean)
+    || Object.values(constraints?.priorityLevels || {}).some(value => value > 0)
     || Object.values(constraints?.minimums || {}).some(value => value > 0)
+    || Object.values(constraints?.maximums || {}).some(value => value !== undefined)
     || Object.values(constraints?.exact || {}).some(Boolean)
     || Object.values(constraints?.le100 || {}).some(Boolean)
     || Object.values(constraints?.force0 || {}).some(Boolean);
@@ -138,7 +140,9 @@ function chooseGreedyModifierAllocation(
 // free. Pass null (the from-scratch solver) to let both sides be chosen.
 export function applySingleTuning(totals, target, constraints, forcedFromHits, fixedTo = null) {
   const hasAdvancedConstraints = (constraints?.priorityOrder?.length || 0) > 0 ||
+    Object.values(constraints?.priorityLevels || {}).some(v => v > 0) ||
     Object.values(constraints?.minimums || {}).some(v => v > 0) ||
+    Object.values(constraints?.maximums || {}).some(v => v !== undefined) ||
     Object.values(constraints?.exact || {}).some(Boolean);
   if (!hasAdvancedConstraints) {
     const hits = { ...forcedFromHits };
@@ -321,7 +325,9 @@ export function evaluateConfig(
   const hasHardTargetConstraint = Object.values(minimums).some(value => value > 0)
     || Object.values(exact).some(Boolean);
   const searchFullTuningNeighborhood = hasHardTargetConstraint
-    || (constraints?.priorityOrder?.length || 0) > 0;
+    || (constraints?.priorityOrder?.length || 0) > 0
+    || Object.values(constraints?.priorityLevels || {}).some(value => value > 0)
+    || Object.values(constraints?.maximums || {}).some(value => value !== undefined);
   if (bestOverall && bestOverall.score > 0 &&
       (bestOverall.score < 10000 || hasHardTargetConstraint)) {
     let improved = true;
@@ -396,16 +402,20 @@ export function evaluateConfig(
   return bestOverall;
 }
 
-export function singlePenalty(actual, target, isPriority, le100, force0, priorityRank = -1, minimum = 0, exact = false) {
+export function singlePenalty(actual, target, isPriority, le100, force0, priorityRank = -1, minimum = 0, exact = false, level = 0, maximum = undefined) {
   const diff = actual - target;
   let penalty = diff < 0 ? diff * diff * 3 : diff * diff;
   if (isPriority) penalty *= 50;
   if (priorityRank === 0) penalty *= 1e12;
   else if (priorityRank === 1) penalty *= 1e6;
+  if (level === 1) penalty *= 1e12;
+  else if (level === 2) penalty *= 1e6;
+  else if (level === 3) penalty *= 1e3;
   if (minimum > 0 && actual < minimum) penalty += (minimum - actual) * (minimum - actual) * 1e18;
   if (exact && actual !== target) penalty += (actual - target) * (actual - target) * 1e18;
   // Hard constraints
   if (le100 && actual > 100) penalty += (actual - 100) * (actual - 100) * 500;
+  if (maximum !== undefined && actual > maximum) penalty += (actual - maximum) * (actual - maximum) * 500;
   if (force0 && actual > 0) penalty += actual * actual * 500;
   return penalty;
 }
@@ -413,42 +423,51 @@ export function singlePenalty(actual, target, isPriority, le100, force0, priorit
 // Structural score used for every internal optimization decision. Keeping hard
 // constraints and priority tiers in separate tuple fields avoids the precision
 // loss caused by encoding lexicographic order with 1e18/1e12 multipliers.
+// Tuple layout: [hard, p1, p2, p3, soft] — hard constraints dominate, then each
+// priority level in turn, then unranked fit and soft caps (≤maximum, ≤100, →0).
 function singleStatScoreRank(stat, actual, target, constraints) {
   const priorities = constraints?.priorities || {};
   const le100 = constraints?.le100 || {};
   const force0 = constraints?.force0 || {};
-  const priorityOrder = constraints?.priorityOrder || [];
+  const priorityLevels = constraints?.priorityLevels || {};
   const minimums = constraints?.minimums || {};
+  const maximums = constraints?.maximums || {};
   const exact = constraints?.exact || {};
   const difference = actual - target;
   let fitPenalty = difference < 0
     ? difference * difference * 3
     : difference * difference;
   if (priorities[stat]) fitPenalty *= 50;
-  const priorityRank = priorityOrder.indexOf(stat);
+  const level = priorityLevels[stat] || 0;
   let hardPenalty = 0;
-  let firstPriorityPenalty = priorityRank === 0 ? fitPenalty : 0;
-  let secondPriorityPenalty = priorityRank === 1 ? fitPenalty : 0;
-  let softPenalty = priorityRank < 0 || priorityRank > 1 ? fitPenalty : 0;
+  const tier = [0, 0, 0];
+  let softPenalty = 0;
+  if (level >= 1 && level <= 3) tier[level - 1] = fitPenalty;
+  else softPenalty = fitPenalty;
   const minimum = minimums[stat] || 0;
   if (minimum > 0 && actual < minimum) {
     hardPenalty += (minimum - actual) ** 2;
   }
   if (exact[stat] && actual !== target) hardPenalty += difference ** 2;
+  const maximum = maximums[stat];
+  if (maximum !== undefined && actual > maximum) {
+    softPenalty += (actual - maximum) ** 2 * 500;
+  }
   if (le100[stat] && actual > 100) {
     softPenalty += (actual - 100) ** 2 * 500;
   }
   if (force0[stat] && actual > 0) softPenalty += actual ** 2 * 500;
   return [
     hardPenalty,
-    firstPriorityPenalty,
-    secondPriorityPenalty,
+    tier[0],
+    tier[1],
+    tier[2],
     softPenalty,
   ];
 }
 
 export function scoreStatsRank(actual, target, constraints) {
-  const total = [0, 0, 0, 0];
+  const total = [0, 0, 0, 0, 0];
   for (const stat of STATS) {
     const rank = singleStatScoreRank(
       stat, actual[stat], target[stat], constraints
@@ -473,12 +492,15 @@ export function scoreStats(actual, target, constraints) {
   const l100 = constraints?.le100 || {};
   const f0 = constraints?.force0 || {};
   const priorityOrder = constraints?.priorityOrder || [];
+  const priorityLevels = constraints?.priorityLevels || {};
   const minimums = constraints?.minimums || {};
+  const maximums = constraints?.maximums || {};
   const exact = constraints?.exact || {};
   for (const st of STATS) {
     s += singlePenalty(
       actual[st], target[st], p[st], l100[st], f0[st],
-      priorityOrder.indexOf(st), minimums[st], exact[st]
+      priorityOrder.indexOf(st), minimums[st], exact[st],
+      priorityLevels[st] || 0, maximums[st]
     );
   }
   return s;

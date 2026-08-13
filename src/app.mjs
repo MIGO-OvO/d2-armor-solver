@@ -119,6 +119,15 @@ let currentSolutionIdx = 0;
 let lastExoticSettings = null;
 let showAllSolutions = false;
 
+// Per-stat priority (1=high, 2=mid, 3=low; 0 = none, key omitted) and fuzzy
+// constraint mode ('=' exact, '>=' at-least, '<=' at-most, 'range' min–max).
+// Both apply to the from-scratch solver (normal and Exotic Class Item modes).
+let statPriority = {};
+let statFuzzyMode = {};
+const PRIORITY_BADGE_TEXT = { 0: '—', 1: '①', 2: '②', 3: '③' };
+const FUZZY_MODE_ORDER = ['=', '>=', '<=', 'range'];
+const FUZZY_MODE_SYMBOL = { '=': '=', '>=': '≥', '<=': '≤', 'range': '⇔' };
+
 function displayArchetypeKey(config, exoticIndex = null) {
   const freq = {};
   for (let index = 0; index < 5; index++) {
@@ -150,25 +159,107 @@ function getUpgradeStatOptions(selectedValue, excludedValue = '') {
 // UI HELPERS
 // ============================================================
 
+function priorityLevelName(level) {
+  return l(
+    ['无', '高', '中', '低'][level] || '无',
+    ['無', '高', '中', '低'][level] || '無',
+    ['None', 'High', 'Mid', 'Low'][level] || 'None'
+  );
+}
+
+function fuzzyModeName(mode) {
+  return l(
+    { '=': '精确', '>=': '至少', '<=': '至多', range: '区间' }[mode] || '精确',
+    { '=': '精確', '>=': '至少', '<=': '至多', range: '區間' }[mode] || '精確',
+    { '=': 'Exact', '>=': 'At least', '<=': 'At most', range: 'Range' }[mode] || 'Exact'
+  );
+}
+
 function getStatInputHTML(prefix, stat, val) {
   const isUpgradeRequired = upgradeRequiredStats.includes(stat);
+  const priority = statPriority[stat] || 0;
+  const fuzzy = statFuzzyMode[stat] || '=';
+  const priorityTitle = `${l('优先级', '優先級', 'Priority')}：${priorityLevelName(priority)}`;
+  const fuzzyTitle = `${l('约束', '約束', 'Constraint')}：${fuzzyModeName(fuzzy)}`;
   return `
-    <div class="input-group ${prefix === 'target' ? 'target-stat-group' : ''}">
+    <div class="input-group target-stat-group">
       <div class="stat-label" style="color:${STAT_COLORS[stat]};display:flex;align-items:center;justify-content:space-between;">
-        <span class="icon-text stat-name target-stat-name">${icon(stat)}<span>${STAT_LABELS[stat]}</span></span>
-        ${prefix === 'target' ? `<label class="lock-control">
+        <span class="stat-label-left">
+          <span class="icon-text stat-name target-stat-name">${icon(stat)}<span>${STAT_LABELS[stat]}</span></span>
+          <span class="stat-badges">
+            <button type="button" class="stat-badge priority-badge${priority ? ' is-active' : ''}" id="priorityBadge_${stat}" data-level="${priority}" onclick="cyclePriority('${stat}')" title="${priorityTitle}" aria-label="${priorityTitle}" aria-pressed="${priority > 0}">${PRIORITY_BADGE_TEXT[priority]}</button>
+            <button type="button" class="stat-badge fuzzy-badge${fuzzy !== '=' ? ' is-active' : ''}" id="fuzzyBadge_${stat}" data-mode="${fuzzy}" onclick="cycleFuzzyMode('${stat}')" title="${fuzzyTitle}" aria-label="${fuzzyTitle}" aria-pressed="${fuzzy !== '='}">${FUZZY_MODE_SYMBOL[fuzzy]}</button>
+          </span>
+        </span>
+        <label class="lock-control exotic-only">
           <input type="checkbox" id="targetLock_${stat}" aria-label="${STAT_LABELS[stat]} ${t('lock')}" style="accent-color:var(--accent);width:13px;height:13px;">${icon('lock', { size: 'sm' })}<span>${t('lock')}</span>
-        </label><label class="required-control">
+        </label>
+        <label class="required-control">
           <input type="checkbox" id="upgradeRequired_${stat}" ${isUpgradeRequired ? 'checked' : ''}
             aria-label="${STAT_LABELS[stat]} ${t('upgradeRequiredStat')}"
             onchange="updateUpgradeRequiredStat('${stat}',this.checked)"><span class="required-label-long">${t('upgradeRequiredStat')}</span><span class="required-label-short">${t('upgradeRequiredStatShort')}</span>
-        </label>` : ''}
+        </label>
       </div>
-      <input type="number" id="${prefix}_${stat}" value="${val||0}"${prefix === 'target' ? ` aria-describedby="rangeHint_${stat}"` : ''}
+      <input type="number" id="${prefix}_${stat}" value="${val||0}" aria-describedby="rangeHint_${stat}"
         inputmode="numeric" min="0" max="200" aria-label="${STAT_LABELS[stat]}"
         style="border-color:${(val||0)!==0?STAT_COLORS[stat]:'var(--border)'}">
-      ${prefix === 'target' ? `<div class="stat-range-hint" id="rangeHint_${stat}" aria-live="polite"></div>` : ''}
+      <input type="number" id="targetMax_${stat}" value="0" class="range-max-input"${fuzzy !== 'range' ? ' hidden' : ''}
+        inputmode="numeric" min="0" max="200" aria-label="${STAT_LABELS[stat]} ${l('上限', '上限', 'max')}"
+        placeholder="${l('上限', '上限', 'max')}">
+      <div class="stat-range-hint" id="rangeHint_${stat}" aria-live="polite"></div>
     </div>`;
+}
+
+function syncPriorityUI(stat) {
+  const badge = document.getElementById('priorityBadge_' + stat);
+  if (!badge) return;
+  const level = statPriority[stat] || 0;
+  badge.textContent = PRIORITY_BADGE_TEXT[level];
+  badge.dataset.level = String(level);
+  badge.classList.toggle('is-active', level > 0);
+  badge.setAttribute('aria-pressed', String(level > 0));
+  const title = `${l('优先级', '優先級', 'Priority')}：${priorityLevelName(level)}`;
+  badge.title = title;
+  badge.setAttribute('aria-label', title);
+}
+
+function cyclePriority(stat) {
+  const current = statPriority[stat] || 0;
+  const next = (current + 1) % 4;
+  if (next === 0) delete statPriority[stat];
+  else statPriority[stat] = next;
+  syncPriorityUI(stat);
+  updateBudget();
+  scheduleRealtimeRanges();
+  saveCurrentDraft();
+}
+
+function syncStatModeUI(stat) {
+  const badge = document.getElementById('fuzzyBadge_' + stat);
+  const maxInput = document.getElementById('targetMax_' + stat);
+  const mode = statFuzzyMode[stat] || '=';
+  if (badge) {
+    badge.textContent = FUZZY_MODE_SYMBOL[mode];
+    badge.dataset.mode = mode;
+    badge.classList.toggle('is-active', mode !== '=');
+    badge.setAttribute('aria-pressed', String(mode !== '='));
+    const title = `${l('约束', '約束', 'Constraint')}：${fuzzyModeName(mode)}`;
+    badge.title = title;
+    badge.setAttribute('aria-label', title);
+  }
+  if (maxInput) maxInput.hidden = mode !== 'range';
+}
+
+function cycleFuzzyMode(stat) {
+  const current = statFuzzyMode[stat] || '=';
+  const index = FUZZY_MODE_ORDER.indexOf(current);
+  const next = FUZZY_MODE_ORDER[(index + 1) % FUZZY_MODE_ORDER.length];
+  if (next === '=') delete statFuzzyMode[stat];
+  else statFuzzyMode[stat] = next;
+  syncStatModeUI(stat);
+  updateBudget();
+  scheduleRealtimeRanges();
+  saveCurrentDraft();
 }
 
 function renderInputs() {
@@ -198,6 +289,12 @@ function resetTargetStats() {
     if (lock) lock.checked = false;
     const required = document.getElementById('upgradeRequired_' + stat);
     if (required) required.checked = false;
+    const maxInput = document.getElementById('targetMax_' + stat);
+    if (maxInput) maxInput.value = 0;
+    delete statPriority[stat];
+    delete statFuzzyMode[stat];
+    syncPriorityUI(stat);
+    syncStatModeUI(stat);
   }
   upgradeRequiredStats = [];
   updateBudget();
@@ -514,6 +611,15 @@ function toggleExoticMode({ syncInventory = true, refreshInventory = true } = {}
   const enabled = document.getElementById('useExoticMode')?.checked;
   const showSettings = enabled && calculatorMode !== 'upgrade';
   document.getElementById('exoticSettingsBody').style.display = showSettings ? 'block' : 'none';
+  // Lock is an Exotic-only control; reveal it and, when leaving Exotic mode,
+  // clear any stale locks so they cannot leak into auto-balance protection.
+  document.getElementById('inputCard')?.classList.toggle('is-exotic-mode', enabled);
+  if (!enabled) {
+    for (const stat of STATS) {
+      const lock = document.getElementById('targetLock_' + stat);
+      if (lock) lock.checked = false;
+    }
+  }
   if (showSettings) updateExoticFramework();
   if (syncInventory && calculatorMode === 'solve') {
     if (enabled) {
@@ -562,6 +668,10 @@ function changePageLanguage() {
     renderInputs();
     for (const stat of STATS) {
       document.getElementById('target_' + stat).value = controlState.targets[stat];
+      const maxInput = document.getElementById('targetMax_' + stat);
+      if (maxInput && controlState.targetMax?.[stat] !== undefined) {
+        maxInput.value = controlState.targetMax[stat];
+      }
       document.getElementById('targetLock_' + stat).checked = controlState.targetLocks[stat];
       const fragment = document.getElementById('fragVal_' + stat);
       fragment.textContent = controlState.fragments[stat];
@@ -660,6 +770,42 @@ function buildExoticConstraints(settings, _fragments) {
   return settings ? {} : null;
 }
 
+// Whether any stat carries a priority level or a non-exact fuzzy constraint.
+// When true the exact-budget validation is relaxed so the solver distributes
+// the surplus/deficit by priority instead of demanding an exact sum.
+function hasFuzzyOrPriority() {
+  return STATS.some(stat =>
+    (statPriority[stat] || 0) > 0 ||
+    (statFuzzyMode[stat] && statFuzzyMode[stat] !== '=')
+  );
+}
+
+// Build solver constraints from the per-stat priority badges and fuzzy modes.
+// minimums/maximums are expressed in the armor-needed domain (target minus
+// Fragment bonus), matching the adjTarget the solver already receives.
+function buildUserConstraints(fragments) {
+  const priorityLevels = {};
+  const minimums = {};
+  const maximums = {};
+  for (const stat of STATS) {
+    const level = statPriority[stat] || 0;
+    if (level > 0) priorityLevels[stat] = level;
+    const mode = statFuzzyMode[stat] || '=';
+    if (mode === '=') continue;
+    const value = getVal('target_' + stat);
+    const frag = fragments[stat] || 0;
+    if (mode === '>=') {
+      minimums[stat] = Math.max(0, value - frag);
+    } else if (mode === '<=') {
+      maximums[stat] = Math.max(0, value - frag);
+    } else if (mode === 'range') {
+      minimums[stat] = Math.max(0, value - frag);
+      maximums[stat] = Math.max(0, getVal('targetMax_' + stat) - frag);
+    }
+  }
+  return { priorityLevels, minimums, maximums };
+}
+
 async function calculateExoticRanges(exoticConfig, numPlus5, numPlus10, numPlus3, fragments) {
   const reachable = await calculateReachabilityAsync({
     fixedPiece: exoticConfig,
@@ -684,8 +830,11 @@ function collectDraftState() {
   return {
     language: getPageLanguage(),
     targets: Object.fromEntries(STATS.map(s => [s, getVal('target_' + s)])),
+    targetMax: Object.fromEntries(STATS.map(s => [s, getVal('targetMax_' + s)])),
     targetLocks: Object.fromEntries(STATS.map(s => [s, document.getElementById('targetLock_' + s)?.checked || false])),
     targetLocksExplicit: true,
+    statPriority: { ...statPriority },
+    statFuzzyMode: { ...statFuzzyMode },
     fragments: Object.fromEntries(STATS.map(s => [s, getFragVal(s)])),
     numPlus5: getVal('numPlus5'),
     numPlus10: getVal('numPlus10'),
@@ -722,6 +871,12 @@ function loadCurrentDraft() {
     if (draft.targets && draft.targets[stat] !== undefined) {
       document.getElementById('target_' + stat).value = draft.targets[stat];
     }
+    const maxInput = document.getElementById('targetMax_' + stat);
+    if (maxInput && draft.targetMax && draft.targetMax[stat] !== undefined) {
+      maxInput.value = draft.targetMax[stat];
+    }
+    if (draft.statPriority?.[stat]) statPriority[stat] = draft.statPriority[stat];
+    if (draft.statFuzzyMode?.[stat]) statFuzzyMode[stat] = draft.statFuzzyMode[stat];
     const lock = document.getElementById('targetLock_' + stat);
     if (lock) {
       // Drafts saved before manual-lock behavior may contain locks that were
@@ -733,6 +888,10 @@ function loadCurrentDraft() {
       fragment.textContent = draft.fragments[stat];
       fragment.style.color = draft.fragments[stat] !== 0 ? STAT_COLORS[stat] : '';
     }
+  }
+  for (const stat of STATS) {
+    syncPriorityUI(stat);
+    syncStatModeUI(stat);
   }
   if (draft.numPlus5 !== undefined) document.getElementById('numPlus5').value = draft.numPlus5;
   if (draft.numPlus10 !== undefined) document.getElementById('numPlus10').value = draft.numPlus10;
@@ -911,7 +1070,7 @@ async function getNearestTargetSuggestion(exoticSettings, numPlus5, numPlus10, n
     numPlus5,
     numPlus10,
     numPlus3,
-    constraints: buildExoticConstraints(exoticSettings, fragments),
+    constraints: buildUserConstraints(fragments),
     exoticSettings,
     runtimeOptions: { fastMode: true },
   }))[0];
@@ -1037,33 +1196,12 @@ async function updateRealtimeRanges() {
   }
 
   nearestTargetSuggestion = null;
+  // Reachable ranges live inline under each stat input (rangeHint_*); a separate
+  // summary grid would duplicate the same values in two places. Only the
+  // unreachable error + suggestion keeps the summary element.
   updateInlineRangeHints(reachable.ranges, locks);
-  const items = STATS.map(stat => {
-    const range = reachable.ranges[stat];
-    const locked = locks.includes(stat);
-    return `<div class="range-item${locked ? ' is-locked' : ''}">
-      <div class="range-item-label" style="color:${STAT_COLORS[stat]}">${STAT_LABELS[stat]}${locked ? ' ' : ''}</div>
-      <div class="range-item-value">${formatReachableRange(range)}</div>
-    </div>`;
-  }).join('');
-  const lockText = locks.length > 0
-    ? `${l('已锁定','已鎖定','Locked')} ${joinLocalized(locks.map(stat => `${STAT_LABELS[stat]} ${lockedTargets[stat]}`))}`
-    : l('尚未锁定具体属性，先显示全局可达范围','尚未鎖定具體數值，先顯示全域可達範圍','No stats locked yet; showing the global reachable range');
-  summary.innerHTML = `<div class="range-panel">
-    <div class="range-panel-head">
-      <div class="range-panel-title">${l('职业金真实可达范围','職業金真實可達範圍','Exotic Class Item reachable range')}</div>
-      <div class="range-panel-caption">${lockText}</div>
-    </div>
-    <div class="range-grid">${items}</div>
-    <div style="margin-top:8px;font-size:11px;color:var(--text-dim);">
-      ${l(
-        '可达值已逐件枚举异域职业物品、四件传说护甲、调整模组与护甲模组。“步进5”表示只可选择该序列中的值，斜杠分隔不同的可达序列。',
-        '可達值已逐件列舉異域職業物品、四件傳說防具、調整模組與防具模組。「步進5」表示只可選擇該序列中的值，斜線分隔不同的可達序列。',
-        'Reachable values enumerate the Exotic Class Item, four Legendary Armor pieces, Tuning Mods, and Armor Mods. “Step 5” means only values in that sequence are valid; slashes separate different reachable sequences.'
-      )}
-    </div>
-  </div>`;
-  summary.style.display = 'block';
+  summary.innerHTML = '';
+  summary.style.display = 'none';
 }
 
 function scheduleRealtimeRanges() {
@@ -1097,6 +1235,7 @@ async function solve() {
   let numPlus10 = getVal('numPlus10');
   const numPlus3 = getEnabledPlus3Count();
   const exoticSettings = getExoticSettings();
+  const advancedTargets = hasFuzzyOrPriority();
   if (exoticSettings && !exoticSettings.config) {
     msgs.innerHTML = `<div class="msg error">${icon('block')}${l(
       '异域职业物品的属性框架无效，请重新选择特性。',
@@ -1150,7 +1289,7 @@ async function solve() {
     }
   }
 
-  if (minViolations.length > 0 && !exoticSettings) {
+  if (minViolations.length > 0 && !exoticSettings && !advancedTargets) {
     const vList = minViolations.map(v => l(
       `${STAT_LABELS[v.stat]}：目标<strong>${v.target}</strong>，当前最低只能到<strong>${v.min}</strong>（${armorMinPerStat}点护甲基础 + 碎片${fragments[v.stat]||0}）。请改为${v.min}或以上。`,
       `${STAT_LABELS[v.stat]}：目標<strong>${v.target}</strong>，目前最低只能到<strong>${v.min}</strong>（${armorMinPerStat}點防具基礎 + 碎片${fragments[v.stat]||0}）。請改為${v.min}或以上。`,
@@ -1166,7 +1305,7 @@ async function solve() {
 
   // Check tuning slot feasibility
   // Stats below the "no-tuning" baseline need -5 slots. Sum must fit within available slots.
-  if (numPlus3 < 5 && !exoticSettings) {
+  if (numPlus3 < 5 && !exoticSettings && !advancedTargets) {
     const availSlots = 5 - numPlus3;
     const noTuneBase = armorMinPerStat + availSlots * 5;
     const slotDetails = [];
@@ -1210,7 +1349,7 @@ async function solve() {
 
   // Validation: total sum
   const diff = adjSum - totalBudget;
-  if (diff > 0 && !exoticSettings) {
+  if (diff > 0 && !exoticSettings && !advancedTargets) {
     msgs.innerHTML += `<div class="msg error">${icon('block')}
       ${l(
         `<strong>目标总和超出预算</strong><br>护甲需提供<strong>${adjSum}</strong>点（目标${Object.values(targets).reduce((a,b)=>a+b,0)} - 碎片${fragSumVal}），但护甲上限为<strong>${totalBudget}</strong>点（基础450 + 模组${numPlus5*5+numPlus10*10}）。<br>超出<strong>${diff}</strong>点，请降低目标或增加模组。`,
@@ -1219,7 +1358,7 @@ async function solve() {
       )}
     </div>`;
     return;
-  } else if (diff < 0 && !exoticSettings) {
+  } else if (diff < 0 && !exoticSettings && !advancedTargets) {
     msgs.innerHTML += `<div class="msg warn">${icon('warn')}
       ${l(
         `<strong>目标总和（${adjSum}点）低于护甲产出（${totalBudget}点），相差${-diff}点。</strong><br>多余点数无法消除。请将目标总和调整为<strong>${totalBudget}</strong>再求解。`,
@@ -1229,15 +1368,21 @@ async function solve() {
     </div>`;
     return;
   }
-  if (exoticSettings && diff !== 0) {
-    const priorityText = exoticSettings.priorityOrder.length > 0
-      ? exoticSettings.priorityOrder.map(s => STAT_LABELS[s]).join(' -> ')
-      : l('综合接近目标','綜合接近目標','overall closeness to targets');
+  if ((exoticSettings || advancedTargets) && diff !== 0) {
+    const priorityStats = [];
+    for (let level = 1; level <= 3; level++) {
+      for (const stat of STATS) {
+        if ((statPriority[stat] || 0) === level) priorityStats.push(stat);
+      }
+    }
+    const priorityText = priorityStats.length > 0
+      ? priorityStats.map(s => STAT_LABELS[s]).join(' → ')
+      : l('综合接近目标', '綜合接近目標', 'overall closeness to targets');
     msgs.innerHTML += `<div class="msg warn">${icon('warn')}
       ${l(
-        `异域职业物品模式允许目标超出或低于当前预算。求解器将按<strong>${priorityText}</strong>的顺序计算可达极限，再兼顾其余属性。`,
-        `異域職業物品模式允許目標超出或低於目前預算。求解器將依<strong>${priorityText}</strong>的順序計算可達極限，再兼顧其餘數值。`,
-        `Exotic Class Item mode allows targets above or below the current budget. The solver maximizes reachable values in this order: <strong>${priorityText}</strong>, then balances the remaining stats.`
+        `当前模式允许目标超出或低于预算。求解器按<strong>${priorityText}</strong>的顺序计算可达极限，再兼顾其余属性。`,
+        `目前模式允許目標超出或低於預算。求解器依<strong>${priorityText}</strong>的順序計算可達極限，再兼顧其餘數值。`,
+        `This mode allows targets above or below the budget. The solver maximizes reachable values in this order: <strong>${priorityText}</strong>, then balances the remaining stats.`
       )}
     </div>`;
   }
@@ -1248,7 +1393,7 @@ async function solve() {
   document.getElementById('btnSolve').disabled = true;
 
   try {
-    const solverConstraints = buildExoticConstraints(exoticSettings, fragments);
+    const solverConstraints = buildUserConstraints(fragments);
     allSolutions = await solveLoadoutAsync({
       target: adjTarget,
       numPlus5,
@@ -5040,8 +5185,11 @@ function saveBuild() {
     name,
     language: getPageLanguage(),
     targets,
+    targetMax: Object.fromEntries(STATS.map(s => [s, getVal('targetMax_' + s)])),
     fragments,
     targetLocks: Object.fromEntries(STATS.map(s => [s, document.getElementById('targetLock_' + s)?.checked || false])),
+    statPriority: { ...statPriority },
+    statFuzzyMode: { ...statFuzzyMode },
     numPlus5: getVal('numPlus5'),
     numPlus10: getVal('numPlus10'),
     onlyPlus5Tuning,
@@ -5071,12 +5219,22 @@ function loadBuild(build) {
     document.getElementById('pageLanguage').value = buildLanguage;
     changePageLanguage();
   }
+  statPriority = {};
+  statFuzzyMode = {};
   for (const s of STATS) {
     document.getElementById('target_' + s).value = build.targets[s];
+    const maxEl = document.getElementById('targetMax_' + s);
+    if (maxEl) maxEl.value = build.targetMax?.[s] ?? 0;
+    if (build.statPriority?.[s]) statPriority[s] = build.statPriority[s];
+    if (build.statFuzzyMode?.[s]) statFuzzyMode[s] = build.statFuzzyMode[s];
     const lockEl = document.getElementById('targetLock_' + s);
     if (lockEl) lockEl.checked = build.targetLocks?.[s] || false;
     const el = document.getElementById('fragVal_' + s);
     if (el) { el.textContent = build.fragments[s]; el.style.color = build.fragments[s] !== 0 ? STAT_COLORS[s] : ''; }
+  }
+  for (const s of STATS) {
+    syncPriorityUI(s);
+    syncStatModeUI(s);
   }
   document.getElementById('numPlus5').value = build.numPlus5;
   document.getElementById('numPlus10').value = build.numPlus10;
@@ -5180,6 +5338,8 @@ Object.assign(window, {
   changePageLanguage,
   clearAllBuilds,
   copyDimExportLink,
+  cycleFuzzyMode,
+  cyclePriority,
   exportInventorySolution,
   editBungieSavedLoadout,
   equipInventorySolution,

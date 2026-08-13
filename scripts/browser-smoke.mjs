@@ -1308,7 +1308,7 @@ try {
   });
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
-  assert.equal(await page.locator("#targetGrid input[type=number]").count(), 6);
+  assert.equal(await page.locator("#targetGrid input[id^=\"target_\"]").count(), 6);
   assert.equal(await page.locator("#fragmentGrid .fragment-stepper").count(), 6);
 
   await page.locator("#onlyPlus5Tuning").check();
@@ -1447,7 +1447,7 @@ try {
       JSON.stringify(desktopPieceSummary),
   );
 
-  await page.locator("#targetGrid input[type=number]").evaluateAll(elements => {
+  await page.locator("#targetGrid input[id^=\"target_\"]").evaluateAll(elements => {
     for (const element of elements) {
       element.value = "200";
       element.dispatchEvent(new Event("input", { bubbles: true }));
