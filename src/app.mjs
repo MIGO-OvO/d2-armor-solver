@@ -3845,11 +3845,8 @@ function updateSetRequirementMode(value) {
     }
     setRequirement = { type: "split", a: aValue, b: bValue };
   }
-  // The generic replacement optimizer has no armor-set dimension. Any result
-  // it produced before this selection is therefore unsafe to show under a set
-  // requirement; only the inventory solver below validates concrete setHash
-  // values for all five pieces.
-  clearUpgradeAnalysis();
+  // The replacement plan is stat-only and unaffected by the set selection, so
+  // it stays valid; only the owned-armor results are invalidated above.
   renderSetEffects();
   renderUpgradeBuildEditor();
   saveUpgradeDraft();
@@ -4856,14 +4853,6 @@ function renderInventoryResultOption(entry, index) {
     </button>`;
 }
 
-function clearUpgradeAnalysis() {
-  lastUpgradeAnalysis = null;
-  const section = document.getElementById("upgradeResults");
-  const body = document.getElementById("upgradeResultsBody");
-  if (body) body.innerHTML = "";
-  if (section) section.hidden = true;
-}
-
 function renderInventoryBungieEquip(entry, index) {
   const equipState = getInventorySolutionEquipState(entry);
   if (equipState.hidden) return "";
@@ -5130,20 +5119,10 @@ async function analyzeArmorUpgrades() {
     if (inventoryMessage === null) return;
   }
 
-  // A theoretical replacement has archetype/stat information but no concrete
-  // armor-set identity, so it cannot prove a 2pc/4pc requirement. When a set
-  // requirement is active, present only the concrete inventory result that
-  // solveInventoryLoadout has checked against every piece's setHash.
-  if (snapshotSetRequirement().type !== "none") {
-    clearUpgradeAnalysis();
-    messages.innerHTML = inventoryMessage || `<div class="msg error">${icon('block')}${l(
-      '请先导入护甲清单，才能计算满足套装要求的实际组合。',
-      '請先匯入防具清單，才能計算符合套裝要求的實際組合。',
-      'Import an armor inventory before solving a concrete set-constrained loadout.'
-    )}</div>`;
-    return;
-  }
-
+  // The replacement plan is stat-only: set membership does not constrain the
+  // archetype/tertiary search (legendary set pieces roll any frame), so it is
+  // computed independently of the set requirement. The set constraint applies
+  // only to the owned-armor search above.
   const unlockedCount = upgradeBuildState.filter(piece => !piece.locked).length;
   if (unlockedCount === 0) {
     messages.innerHTML = inventoryMessage + `<div class="msg error">${icon('block')}${l(

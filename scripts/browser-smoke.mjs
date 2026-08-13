@@ -670,8 +670,8 @@ async function checkUpgradeTargetSync(browser) {
     await page.evaluate(() => window.analyzeArmorUpgrades());
     assert.equal(
       await page.locator("#upgradeResults").isHidden(),
-      true,
-      "set-constrained analysis must not show the unconstrained theoretical replacement plan",
+      false,
+      "the stat-only replacement plan must stay visible under a set requirement",
     );
     assert.equal(
       await page.locator(".inventory-results-title").innerText(),
