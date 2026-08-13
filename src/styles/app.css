@@ -4337,6 +4337,386 @@ a:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ============================================================
+   Bungie account + saved-loadout workspace
+   ============================================================ */
+.header-tools {
+  position: absolute;
+  top: 28px;
+  right: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.header-tools .language-switcher { position: static; }
+.header-bungie-auth {
+  position: relative;
+  display: block;
+  margin: 0;
+}
+.bungie-login-button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.bungie-account-menu { position: relative; }
+.bungie-account-menu > summary {
+  display: flex;
+  min-height: 44px;
+  max-width: 240px;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 12px 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-quiet);
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+.bungie-account-menu > summary::-webkit-details-marker { display: none; }
+.bungie-account-menu > summary::after {
+  width: 6px;
+  height: 6px;
+  margin-left: 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: "";
+  transform: translateY(-2px) rotate(45deg);
+}
+.bungie-account-menu[open] > summary::after { transform: translateY(2px) rotate(225deg); }
+.bungie-account-status {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 2px 7px color-mix(in oklab, var(--success) 45%, transparent);
+}
+.bungie-account-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.2;
+  text-align: left;
+}
+.bungie-account-copy small {
+  color: var(--text-dim);
+  font-size: .625rem;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.bungie-account-copy strong {
+  overflow: hidden;
+  font-size: .8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bungie-account-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: min(300px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card-strong);
+  box-shadow: 0 16px 36px rgba(0,0,0,.32);
+}
+.bungie-account-identity {
+  display: grid;
+  gap: 2px;
+  padding: 5px 7px 11px;
+}
+.bungie-account-identity span {
+  color: var(--success);
+  font-size: .75rem;
+  font-weight: 700;
+}
+.bungie-account-identity strong {
+  overflow: hidden;
+  font-size: .9375rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bungie-account-action,
+.bungie-account-danger button {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bungie-account-action:hover { background: color-mix(in oklab, var(--text) 6%, transparent); }
+.bungie-account-action .icon { width: 1rem; height: 1rem; }
+.bungie-account-danger {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border-subtle);
+}
+.bungie-account-danger button { color: color-mix(in oklab, var(--health) 88%, var(--text)); }
+.bungie-account-danger button:hover { background: color-mix(in oklab, var(--health) 10%, transparent); }
+
+.bungie-saved-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+  gap: 12px;
+  padding-top: 14px;
+}
+.bungie-loadout-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--surface-quiet) 88%, var(--card));
+  transition:
+    border-color var(--duration-fast) var(--ease-out-quart),
+    background-color var(--duration-fast) var(--ease-out-quart);
+}
+.bungie-loadout-card:hover,
+.bungie-loadout-card:focus-within {
+  z-index: 8;
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+  background: var(--surface-raised);
+}
+.bungie-loadout-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.bungie-loadout-card-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.bungie-loadout-card-head strong { color: var(--text); font-size: .9375rem; }
+.bungie-loadout-card-head small { color: var(--text-dim); font-size: .75rem; }
+.bungie-loadout-detail-toggle {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: .75rem;
+  cursor: pointer;
+}
+.bungie-loadout-detail-toggle:hover {
+  background: color-mix(in oklab, var(--text) 6%, transparent);
+  color: var(--text);
+}
+.bungie-loadout-detail-toggle .icon { width: .9rem; height: .9rem; }
+.bungie-loadout-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border-block: 1px solid var(--border-subtle);
+}
+.bungie-loadout-stats > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 7px 2px;
+  text-align: center;
+}
+.bungie-loadout-stats small {
+  overflow: hidden;
+  color: color-mix(in oklab, var(--loadout-stat) 75%, var(--text));
+  font-size: .625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bungie-loadout-stats strong {
+  color: var(--text);
+  font-family: var(--font-numeric);
+  font-size: .875rem;
+  font-variant-numeric: tabular-nums;
+}
+.bungie-loadout-highlights {
+  display: grid;
+  gap: 3px;
+  min-height: 38px;
+  color: var(--text-dim);
+  font-size: .75rem;
+  line-height: 1.45;
+}
+.bungie-loadout-highlights span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bungie-loadout-highlights .is-exotic { color: var(--accent-strong); font-weight: 700; }
+.bungie-loadout-detail {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% - 5px);
+  left: 12px;
+  display: none;
+  width: min(430px, calc(100% - 24px));
+  max-height: min(66vh, 620px);
+  gap: 14px;
+  padding: 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card-strong);
+  box-shadow: 0 18px 38px rgba(0,0,0,.38);
+}
+.bungie-loadout-card:hover .bungie-loadout-detail,
+.bungie-loadout-card:focus-within .bungie-loadout-detail,
+.bungie-loadout-card.is-detail-open .bungie-loadout-detail { display: grid; }
+.bungie-loadout-detail-section { display: grid; gap: 8px; }
+.bungie-loadout-detail-section + .bungie-loadout-detail-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.bungie-loadout-detail-section h5 { color: var(--text); font-size: .8125rem; }
+.bungie-loadout-armor-list,
+.bungie-loadout-bonus-list,
+.bungie-loadout-weapon-list {
+  display: grid;
+  gap: 0;
+  list-style: none;
+}
+.bungie-loadout-armor-item {
+  display: grid;
+  gap: 6px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.bungie-loadout-armor-item:first-child { border-top: 0; }
+.bungie-loadout-armor-item > div:first-child {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 1px 8px;
+}
+.bungie-loadout-armor-item small { color: var(--text-dim); font-size: .6875rem; }
+.bungie-loadout-armor-item > div:first-child > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: .8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bungie-loadout-armor-item > div:first-child > span {
+  grid-column: 2;
+  color: var(--text-dim);
+  font-size: .6875rem;
+}
+.bungie-loadout-piece-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 3px;
+}
+.bungie-loadout-piece-stats span {
+  color: color-mix(in oklab, var(--loadout-stat) 74%, var(--text));
+  font-size: .625rem;
+  text-align: center;
+}
+.bungie-loadout-piece-stats strong { color: var(--text); font-family: var(--font-numeric); }
+.bungie-loadout-armor-item p,
+.bungie-loadout-data-note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: .6875rem;
+  line-height: 1.5;
+}
+.bungie-loadout-bonus-list li,
+.bungie-loadout-weapon-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  color: var(--text-dim);
+  font-size: .75rem;
+}
+.bungie-loadout-bonus-list strong { color: var(--accent-strong); }
+.bungie-loadout-weapon-list strong { color: var(--text); font-size: .75rem; }
+.bungie-loadout-card .bungie-saved-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+.bungie-loadout-card .bungie-saved-actions .btn,
+.bungie-loadout-card .bungie-saved-actions .btn-solve {
+  min-width: 0;
+  min-height: 38px;
+  flex: 1;
+  padding: 8px 10px;
+  font-size: .8125rem;
+}
+
+@media (max-width: 860px) {
+  .header-tools {
+    position: static;
+    align-self: stretch;
+    flex-wrap: wrap;
+  }
+  .header-tools .language-switcher { margin: 0; }
+}
+@media (max-width: 680px) {
+  .header-tools {
+    order: -1;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+  }
+  .header-tools .language-switcher { align-self: auto; }
+  .bungie-account-menu > summary { max-width: min(210px, 52vw); }
+  .bungie-saved-list { grid-template-columns: minmax(0, 1fr); }
+  .bungie-loadout-card { padding: 13px; }
+  .bungie-loadout-card:hover .bungie-loadout-detail,
+  .bungie-loadout-card:focus-within .bungie-loadout-detail { display: none; }
+  .bungie-loadout-card.is-detail-open .bungie-loadout-detail {
+    position: static;
+    display: grid;
+    width: auto;
+    max-height: none;
+    padding: 13px 0 2px;
+    overflow: visible;
+    border: 0;
+    border-top: 1px solid var(--border-subtle);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .bungie-loadout-detail-toggle { min-height: var(--touch-target); }
+}
+@media (max-width: 480px) {
+  .header-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+  }
+  .header-tools .language-switcher,
+  .header-bungie-auth,
+  .bungie-login-button,
+  .bungie-account-menu > summary { width: 100%; max-width: none; }
+  .header-tools .language-switcher { justify-content: space-between; }
+  .bungie-account-popover { right: 0; width: min(100%, calc(100vw - 24px)); }
+}
 /* Development channel marker; hidden in stable and offline builds. */
 .development-build-banner[hidden] {
   display: none;

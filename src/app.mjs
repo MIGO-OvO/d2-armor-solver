@@ -41,6 +41,7 @@ import {
 } from "./core/build-channel.mjs";
 import {
   UPGRADE_SLOTS,
+  applyManualUpgradeModifiers,
   createUpgradePieceFromItem,
   finalizeUpgradeTotals,
   getManualUpgradeArmorTotals,
@@ -2323,7 +2324,6 @@ function renderUpgradeImportPanel() {
           <span class="btn upgrade-import-primary">${icon("folder")}${importedInventory.length > 0 ? l("重新导入", "重新匯入", "Replace inventory") : l("导入清单", "匯入清單", "Import inventory")}</span>
           <input type="file" id="dimCsvFile" accept=".csv,text/csv" onchange="handleDimCsvFile(this)">
         </label>
-        <span class="bungie-auth" id="bungieAuthArea" aria-live="polite"></span>
         <button type="button" class="btn upgrade-import-toggle" id="toggleInventoryImportButton" aria-expanded="${inventoryImportExpanded}" aria-controls="upgradeImportBody" onclick="toggleInventoryImportPanel()">${icon(inventoryImportExpanded ? 'up' : 'down')}<span>${toggleLabel}</span></button>
       </div>
     </div>
@@ -2489,36 +2489,43 @@ function handleBungieAuthError(error) {
   showImportMessage(bungieErrorMessage(error));
 }
 
-// Shared markup builder: both the import-area entry (#bungieAuthArea) and the
-// header entry (#headerBungieAuth) render the same compact control set.
-function bungieAuthAreaHtml(loginButtonId = "", nameClass = "bungie-auth-name") {
+// Authentication has one persistent home in the page header. Keeping the
+// account actions in a menu prevents login/refresh/logout from being duplicated
+// beside the inventory import controls, and separates the destructive action.
+function bungieAccountHtml() {
   if (!__BUNGIE_OAUTH_CLIENT_ID__) return "";
-  const displayName = `<span class="${nameClass}">${escapeHtml(getBungieDisplayName())}</span>`;
-  const logoutButton = `<button type="button" class="btn" onclick="bungieLogout()">${l("登出", "登出", "Sign out")}</button>`;
-  if (isBungieImporting) {
-    return displayName +
-      `<button type="button" class="btn" disabled>${icon("refresh")}${l("导入中…", "匯入中…", "Importing…")}</button>` +
-      logoutButton;
+  if (!hasToken()) {
+    return `<button type="button" class="btn bungie-login-button" id="bungieLoginButton" onclick="bungieLogin()">${l("Bungie 登录", "Bungie 登入", "Bungie login")}</button>`;
   }
-  if (hasToken()) {
-    return displayName +
-      `<button type="button" class="btn" onclick="importInventoryFromBungie()">${icon("refresh")}${l("刷新库存", "重新整理庫存", "Refresh inventory")}</button>` +
-      logoutButton;
-  }
-  return `<button type="button" class="btn"${loginButtonId ? ` id="${loginButtonId}"` : ""} onclick="bungieLogin()">${l("Bungie 登录", "Bungie 登入", "Bungie login")}</button>`;
+  const displayName = getBungieDisplayName() || l("已连接账户", "已連線帳戶", "Connected account");
+  const syncLabel = isBungieImporting
+    ? l("正在同步库存…", "正在同步庫存…", "Syncing inventory…")
+    : l("同步 Bungie 库存", "同步 Bungie 庫存", "Sync Bungie inventory");
+  return `<details class="bungie-account-menu">
+    <summary aria-label="${escapeHtml(l(`Bungie 账户：${displayName}`, `Bungie 帳戶：${displayName}`, `Bungie account: ${displayName}`))}">
+      <span class="bungie-account-status" aria-hidden="true"></span>
+      <span class="bungie-account-copy"><small>Bungie</small><strong>${escapeHtml(displayName)}</strong></span>
+    </summary>
+    <div class="bungie-account-popover">
+      <div class="bungie-account-identity">
+        <span>${l("已连接 Bungie", "已連線 Bungie", "Bungie connected")}</span>
+        <strong>${escapeHtml(displayName)}</strong>
+      </div>
+      <button type="button" class="bungie-account-action" onclick="importInventoryFromBungie()" ${isBungieImporting ? "disabled" : ""}>${icon("refresh")}<span>${syncLabel}</span></button>
+      <div class="bungie-account-danger">
+        <button type="button" onclick="bungieLogout()">${l("退出 Bungie 账户", "登出 Bungie 帳戶", "Sign out of Bungie")}</button>
+      </div>
+    </div>
+  </details>`;
 }
 
-// Single render entry point: updating the import-area entry keeps the header
-// entry in sync (the login id stays unique to the import area).
 function renderBungieAuthState() {
-  const area = document.getElementById("bungieAuthArea");
-  if (area) area.innerHTML = bungieAuthAreaHtml("bungieLoginButton");
   renderHeaderBungieAuthState();
 }
 
 function renderHeaderBungieAuthState() {
   const area = document.getElementById("headerBungieAuth");
-  if (area) area.innerHTML = bungieAuthAreaHtml("", "header-bungie-auth-name");
+  if (area) area.innerHTML = bungieAccountHtml();
 }
 
 function bungieLogin() {
@@ -2532,6 +2539,12 @@ function bungieLogin() {
 }
 
 function bungieLogout() {
+  const confirmed = confirm(l(
+    "退出后将移除当前导入的 Bungie 库存与未保存的求解结果；浏览器中已保存的配装不会被删除。确定退出吗？",
+    "登出後將移除目前匯入的 Bungie 庫存與未儲存的求解結果；瀏覽器中已儲存的配裝不會被刪除。確定登出嗎？",
+    "Signing out removes the imported Bungie inventory and unsaved solver results. Loadouts saved in this browser will remain. Sign out?",
+  ));
+  if (!confirmed) return;
   clearToken();
   try {
     localStorage.removeItem(BUNGIE_DISPLAY_NAME_KEY);
@@ -2578,14 +2591,26 @@ function syncBungieTargetCharacter() {
 function formatBungieCharacterLabel(character) {
   const classLabel = getClassLabel(character?.classId);
   const light = Number(character?.light) || 0;
-  const suffix = String(character?.characterId || "").slice(-4);
-  return `${classLabel}${light ? ` · ${light}` : ""}${suffix ? ` · …${suffix}` : ""}`;
+  return `${classLabel}${light ? l(` · 光能 ${light}`, ` · 光能 ${light}`, ` · Power ${light}`) : ""}`;
+}
+
+function formatBungieCharacterOption(character, characters) {
+  const base = formatBungieCharacterLabel(character);
+  if (characters.length < 2) return base;
+  if (character?.characterId === characters[0]?.characterId) {
+    return `${base}${l(" · 最近使用", " · 最近使用", " · Most recent")}`;
+  }
+  const played = new Date(character?.dateLastPlayed || "");
+  if (!Number.isFinite(played.getTime())) return base;
+  const date = played.toLocaleDateString(localeCode(), { month: "short", day: "numeric" });
+  return `${base}${l(` · 上次游玩 ${date}`, ` · 上次遊玩 ${date}`, ` · Last played ${date}`)}`;
 }
 
 function getBungieTargetOptionsHtml() {
   syncBungieTargetCharacter();
-  return getBungieCharactersForClass().map(character =>
-    `<option value="${escapeHtml(character.characterId)}" ${character.characterId === bungieTargetCharacterId ? "selected" : ""}>${escapeHtml(formatBungieCharacterLabel(character))}</option>`
+  const characters = getBungieCharactersForClass();
+  return characters.map(character =>
+    `<option value="${escapeHtml(character.characterId)}" ${character.characterId === bungieTargetCharacterId ? "selected" : ""}>${escapeHtml(formatBungieCharacterOption(character, characters))}</option>`
   ).join("");
 }
 
@@ -2616,6 +2641,129 @@ function fragmentAdjustmentsMatch(left, right) {
   return STATS.every(stat => (Number(left?.[stat]) || 0) === (Number(right?.[stat]) || 0));
 }
 
+const BUNGIE_WEAPON_BUCKET_LABELS = new Map([
+  [1498876634, ["主武器", "主要武器", "Kinetic weapon"]],
+  [2465295065, ["副武器", "特殊武器", "Energy weapon"]],
+  [953998645, ["重武器", "重型武器", "Power weapon"]],
+]);
+
+function getSavedBungieLoadoutSummary(loadout) {
+  const armor = mapSavedLoadoutArmor(loadout, importedInventory);
+  const pieces = armor.map(item => {
+    const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === item.slot);
+    if (slotIndex < 0) return null;
+    const piece = createUpgradePieceFromItem(item, slotIndex);
+    return {
+      item,
+      piece,
+      stats: applyManualUpgradeModifiers(getUpgradeConfig(piece), piece),
+    };
+  }).filter(Boolean);
+  const character = bungieProfileState?.characters?.[bungieTargetCharacterId] || null;
+  const plugHashes = (loadout?.items || []).flatMap(item => item.plugItemHashes || []);
+  const fragments = getFragmentAdjustments(plugHashes, character?.classId);
+  const totals = pieces.length === 5
+    ? finalizeUpgradeTotals(getManualUpgradeArmorTotals(pieces.map(entry => entry.piece)), fragments)
+    : null;
+  const itemHashes = armor.map(item => item.hash).filter(Boolean);
+  const sets = [...getSetPieceCounts(itemHashes)].map(([set, count]) => ({
+    set,
+    count,
+    name: getSetName(set, getPageLanguage()),
+  })).sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+  const activeBonuses = getActiveSetBonuses(itemHashes, getPageLanguage());
+  const exotic = armor.find(item => item.exotic) || null;
+  const weapons = (loadout?.items || []).filter(item => BUNGIE_WEAPON_BUCKET_LABELS.has(Number(item.bucketHash)));
+  return { armor, pieces, totals, sets, activeBonuses, exotic, weapons };
+}
+
+function renderSavedBungieLoadoutStats(totals) {
+  return `<div class="bungie-loadout-stats" aria-label="${escapeHtml(l("配装六维属性", "配裝六維數值", "Loadout stats"))}">${STATS.map(stat => `
+    <span style="--loadout-stat:${STAT_COLORS[stat]}">
+      <small>${escapeHtml(STAT_LABELS[stat])}</small>
+      <strong>${totals ? totals[stat] : "—"}</strong>
+    </span>`).join("")}</div>`;
+}
+
+function formatSavedArmorModifier(item) {
+  const tuning = item.tuningMode === "plus3"
+    ? l("+3 调整", "+3 調整", "+3 Tuning")
+    : item.tuningTo && item.tuningFrom
+      ? l(
+        `调整 -5${STAT_LABELS[item.tuningFrom]} / +5${STAT_LABELS[item.tuningTo]}`,
+        `調整 -5${STAT_LABELS[item.tuningFrom]} / +5${STAT_LABELS[item.tuningTo]}`,
+        `Tuning -5 ${STAT_LABELS[item.tuningFrom]} / +5 ${STAT_LABELS[item.tuningTo]}`,
+      )
+      : l("调整未知", "調整未知", "Tuning unknown");
+  const mod = item.armorModSize > 0 && item.armorModStat
+    ? l(
+      `模组 +${item.armorModSize}${STAT_LABELS[item.armorModStat]}`,
+      `模組 +${item.armorModSize}${STAT_LABELS[item.armorModStat]}`,
+      `Mod +${item.armorModSize} ${STAT_LABELS[item.armorModStat]}`,
+    )
+    : l("无属性模组", "無數值模組", "No stat mod");
+  return `${tuning} · ${mod}`;
+}
+
+function renderSavedBungieLoadoutDetail(summary, detailId) {
+  const setBonusHtml = summary.activeBonuses.length > 0
+    ? `<section class="bungie-loadout-detail-section">
+        <h5>${l("已激活套装效果", "已啟用套裝效果", "Active set bonuses")}</h5>
+        <ul class="bungie-loadout-bonus-list">${summary.activeBonuses.map(bonus => `
+          <li><strong>${escapeHtml(bonus.name)}</strong><span>${escapeHtml(bonus.requiredCount + l(" 件套", " 件套", "-piece"))}</span></li>`).join("")}</ul>
+      </section>`
+    : "";
+  const weaponHtml = summary.weapons.length > 0
+    ? `<section class="bungie-loadout-detail-section">
+        <h5>${l("武器", "武器", "Weapons")}</h5>
+        <ul class="bungie-loadout-weapon-list">${summary.weapons.map(weapon => {
+          const labels = BUNGIE_WEAPON_BUCKET_LABELS.get(Number(weapon.bucketHash));
+          const label = l(labels[0], labels[1], labels[2]);
+          return `<li><span>${escapeHtml(label)}</span><strong>${weapon.power ? l(`光能 ${weapon.power}`, `光能 ${weapon.power}`, `Power ${weapon.power}`) : l("已保存", "已儲存", "Saved")}</strong></li>`;
+        }).join("")}</ul>
+        <p class="bungie-loadout-data-note">${l("当前本地物品库未包含武器名称；同步状态和光能来自 Bungie 配装记录。", "目前本機物品庫未包含武器名稱；同步狀態與光能來自 Bungie 配裝記錄。", "The local item catalog does not include weapon names; saved state and Power come from Bungie.")}</p>
+      </section>`
+    : "";
+  return `<div class="bungie-loadout-detail" id="${detailId}">
+    <section class="bungie-loadout-detail-section">
+      <h5>${l("护甲详情", "防具詳情", "Armor details")}</h5>
+      <ul class="bungie-loadout-armor-list">${summary.pieces.map(({ item, piece, stats }) => {
+        const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === item.slot);
+        const set = item.setHash ? getArmorSetByHash(item.setHash) : null;
+        const badges = [
+          item.exotic ? l("异域", "異域", "Exotic") : "",
+          set ? getSetName(set, getPageLanguage()) : "",
+          getArchetypeLabel(piece.archetypeId),
+        ].filter(Boolean).join(" · ");
+        return `<li class="bungie-loadout-armor-item">
+          <div><small>${getUpgradeSlotLabel(slotIndex)}</small><strong>${escapeHtml(item.name || l("未命名护甲", "未命名防具", "Unnamed armor"))}</strong><span>${escapeHtml(badges)}</span></div>
+          <div class="bungie-loadout-piece-stats">${STATS.map(stat => `<span style="--loadout-stat:${STAT_COLORS[stat]}">${escapeHtml(STAT_LABELS[stat])} <strong>${stats[stat] ?? 0}</strong></span>`).join("")}</div>
+          <p>${escapeHtml(formatSavedArmorModifier(item))}</p>
+        </li>`;
+      }).join("")}</ul>
+    </section>
+    ${setBonusHtml}
+    ${weaponHtml}
+  </div>`;
+}
+
+function toggleBungieLoadoutDetail(button) {
+  const card = button?.closest(".bungie-loadout-card");
+  if (!card) return;
+  const isOpen = !card.classList.contains("is-detail-open");
+  card.classList.toggle("is-detail-open", isOpen);
+  button.setAttribute("aria-expanded", String(isOpen));
+}
+
+function handleBungieLoadoutDetailKeydown(event) {
+  if (event.key !== "Escape") return;
+  const card = event.currentTarget;
+  const button = card.querySelector(".bungie-loadout-detail-toggle");
+  card.classList.remove("is-detail-open");
+  button?.setAttribute("aria-expanded", "false");
+  button?.focus();
+}
+
 function getSavedBungieLoadoutsHtml() {
   if (!__BUNGIE_OAUTH_CLIENT_ID__ || !hasToken() || !bungieProfileState) return "";
   syncBungieTargetCharacter();
@@ -2641,14 +2789,26 @@ function getSavedBungieLoadoutsHtml() {
     <div class="bungie-saved-list">${loadouts.length === 0
       ? `<p class="upgrade-empty">${l("该角色还没有游戏内配装。", "該角色還沒有遊戲內配裝。", "This character has no in-game loadouts yet.")}</p>`
       : loadouts.map(loadout => {
-        const armorCount = mapSavedLoadoutArmor(loadout, importedInventory).length;
-        return `<div class="bungie-saved-row">
-          <span><strong>${l(`配装 ${loadout.loadoutIndex + 1}`, `配裝 ${loadout.loadoutIndex + 1}`, `Loadout ${loadout.loadoutIndex + 1}`)}</strong><small>${l(`${loadout.items.length} 个记录项`, `${loadout.items.length} 個記錄項`, `${loadout.items.length} saved items`)}</small></span>
-          <span class="bungie-saved-actions">
-            <button type="button" class="btn" onclick="editBungieSavedLoadout('${escapeHtml(bungieTargetCharacterId)}',${loadout.loadoutIndex})" ${armorCount < 5 || isBungieApplying ? "disabled" : ""}>${icon("refresh")}${l("载入编辑", "載入編輯", "Load for editing")}</button>
+        const summary = getSavedBungieLoadoutSummary(loadout);
+        const loadoutNumber = loadout.loadoutIndex + 1;
+        const detailId = `bungieLoadoutDetail-${loadout.loadoutIndex}`;
+        const setSummary = summary.sets.map(entry => `${entry.name} ${entry.count}/5`).join(" · ");
+        return `<article class="bungie-loadout-card" tabindex="0" onkeydown="handleBungieLoadoutDetailKeydown(event)">
+          <header class="bungie-loadout-card-head">
+            <div><strong>${l(`配装 ${loadoutNumber}`, `配裝 ${loadoutNumber}`, `Loadout ${loadoutNumber}`)}</strong><small>${l(`护甲 ${summary.armor.length}/5 · 武器 ${summary.weapons.length}`, `防具 ${summary.armor.length}/5 · 武器 ${summary.weapons.length}`, `${summary.armor.length}/5 armor · ${summary.weapons.length} weapons`)}</small></div>
+            <button type="button" class="bungie-loadout-detail-toggle" aria-expanded="false" aria-controls="${detailId}" onclick="toggleBungieLoadoutDetail(this)">${icon("hint")}<span>${l("详情", "詳情", "Details")}</span></button>
+          </header>
+          ${renderSavedBungieLoadoutStats(summary.totals)}
+          <div class="bungie-loadout-highlights">
+            ${summary.exotic ? `<span class="is-exotic">${escapeHtml(summary.exotic.name)}</span>` : `<span>${l("无异域护甲", "無異域防具", "No Exotic armor")}</span>`}
+            ${setSummary ? `<span>${escapeHtml(setSummary)}</span>` : `<span>${l("无套装效果", "無套裝效果", "No set bonus")}</span>`}
+          </div>
+          ${renderSavedBungieLoadoutDetail(summary, detailId)}
+          <footer class="bungie-saved-actions">
+            <button type="button" class="btn" onclick="editBungieSavedLoadout('${escapeHtml(bungieTargetCharacterId)}',${loadout.loadoutIndex})" ${summary.armor.length < 5 || isBungieApplying ? "disabled" : ""}>${icon("refresh")}${l("载入编辑", "載入編輯", "Load for editing")}</button>
             <button type="button" class="btn-solve" onclick="applyBungieSavedLoadout('${escapeHtml(bungieTargetCharacterId)}',${loadout.loadoutIndex})" ${isBungieApplying ? "disabled" : ""}>${icon("check")}${l("直接应用", "直接套用", "Apply")}</button>
-          </span>
-        </div>`;
+          </footer>
+        </article>`;
       }).join("")}</div>
   </details>`;
 }
@@ -5016,6 +5176,7 @@ Object.assign(window, {
   balanceTargetsToBudget,
   bungieLogin,
   bungieLogout,
+  handleBungieLoadoutDetailKeydown,
   changePageLanguage,
   clearAllBuilds,
   copyDimExportLink,
@@ -5039,6 +5200,7 @@ Object.assign(window, {
   saveBuild,
   selectInventorySolution,
   setBungieTargetCharacter,
+  toggleBungieLoadoutDetail,
   setCalculatorMode,
   shouldAutoRefresh,
   solve,

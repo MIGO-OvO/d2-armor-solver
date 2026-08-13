@@ -114,30 +114,32 @@
 <a class="skip-link" href="#inputCard" data-i18n="skipToTargets">跳到目标输入</a>
 <main class="container" aria-labelledby="pageTitle">
   <div class="header">
-    <div class="language-switcher">
-      <label for="pageLanguage" data-i18n="pageLanguageLabel">网页语言</label>
-      <select id="pageLanguage" onchange="changePageLanguage()">
-        <option value="zh-chs">简体中文</option>
-        <option value="zh-cht">繁體中文</option>
-        <option value="en">English</option>
-      </select>
+    <div class="header-tools">
+      <div class="language-switcher">
+        <label for="pageLanguage" data-i18n="pageLanguageLabel">网页语言</label>
+        <select id="pageLanguage" onchange="changePageLanguage()">
+          <option value="zh-chs">简体中文</option>
+          <option value="zh-cht">繁體中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+      <div class="header-bungie-auth" id="headerBungieAuth" aria-live="polite"></div>
     </div>
     <h1 id="pageTitle" data-i18n-html="pageHeading">命运2 <span>T5</span> 配装求解器</h1>
     <p class="subtitle" data-i18n="pageSubtitle">设置目标属性 → 计算 5 件护甲的最佳组合 · 12 种护甲框架 · 自动分配调整</p>
-    <span class="header-bungie-auth" id="headerBungieAuth" aria-live="polite"></span>
   </div>
 
   <!-- Free Notice -->
   <div class="notice notice--free">
-    <span class="icon-text" style="font-size:18px;font-weight:800;color:var(--success);"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-free"/></svg><span data-i18n="freeNotice">本程序完全免费</span></span>
-    <span class="icon-text" style="font-size:14px;color:var(--health);margin-left:16px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warn"/></svg><span data-i18n="fraudNotice">如果你是付费购买的，说明你被骗了！</span></span>
+    <span class="icon-text" style="font-weight:800;color:var(--success);"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-free"/></svg><span data-i18n="freeNotice">本程序完全免费</span></span>
+    <span class="icon-text" style="color:var(--health);margin-left:16px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warn"/></svg><span data-i18n="fraudNotice">如果你是付费购买的，说明你被骗了！</span></span>
   </div>
 
   <!-- Program Introduction -->
   <div class="card card--intro">
     <details>
-      <summary style="cursor:pointer;font-weight:700;font-size:15px;color:var(--accent);" data-i18n="introSummary">程序介绍</summary>
-      <div style="margin-top:12px;font-size:14px;color:var(--text-dim);line-height:1.8;" data-i18n-html="introContent"></div>
+      <summary style="cursor:pointer;font-weight:700;color:var(--accent);" data-i18n="introSummary">程序介绍</summary>
+      <div style="margin-top:12px;color:var(--text-dim);line-height:1.8;" data-i18n-html="introContent"></div>
     </details>
   </div>
 
@@ -200,15 +202,15 @@
     <div class="upgrade-target-budget" id="upgradeTargetBudget" aria-live="polite"></div>
     <div id="realtimeRangeSummary" style="margin-top:8px;display:none;" aria-live="polite"></div>
     <div class="exotic-settings">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;">
         <input type="checkbox" id="useExoticMode" onchange="toggleExoticMode()" style="accent-color:var(--accent);width:17px;height:17px;">
         <span data-i18n-html="exoticModeLabel">启用<strong style="color:var(--accent);">异域职业物品模式</strong></span>
       </label>
       <div id="exoticSettingsBody" style="display:none;">
-        <p style="font-size:12px;color:var(--text-dim);margin-top:6px;" data-i18n="exoticModeDescription">
+        <p style="color:var(--text-dim);margin-top:6px;" data-i18n="exoticModeDescription">
           锁定异域职业物品的主要/次要/第三属性框架，再用其余四件传说护甲计算最优解与六维理论极限。调整由求解器自动分配，无需手动指定。
         </p>
-        <div style="font-size:12px;color:var(--text-dim);margin:6px 0 10px;" data-i18n="exoticModeDetail">
+        <div style="color:var(--text-dim);margin:6px 0 10px;" data-i18n="exoticModeDetail">
           选择职业及左右栏特性后，程序自动锁定对应的 30/25/20 固定框架；右栏特性与主要/次要属性冲突时按游戏候补顺序取剩余属性。调整属性由求解器自动分配。
         </div>
         <div class="exotic-settings-grid">
@@ -274,8 +276,8 @@
 
   <!-- Floating jump button -->
   <div id="floatJump" style="display:none;position:fixed;bottom:20px;right:20px;z-index:99;flex-direction:column;gap:8px;">
-    <button type="button" class="icon-btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" aria-label="返回方案列表" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="返回方案列表" data-i18n-title="backToSolutionsTitle" data-i18n-aria="backToSolutionsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg></button>
-    <button type="button" class="icon-btn" onclick="document.getElementById('compCard').scrollIntoView({behavior:'smooth'})" aria-label="跳转到配装详情" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="跳转到配装详情" data-i18n-title="jumpToDetailsTitle" data-i18n-aria="jumpToDetailsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-down"/></svg></button>
+    <button type="button" class="icon-btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" aria-label="返回方案列表" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="返回方案列表" data-i18n-title="backToSolutionsTitle" data-i18n-aria="backToSolutionsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg></button>
+    <button type="button" class="icon-btn" onclick="document.getElementById('compCard').scrollIntoView({behavior:'smooth'})" aria-label="跳转到配装详情" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="跳转到配装详情" data-i18n-title="jumpToDetailsTitle" data-i18n-aria="jumpToDetailsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-down"/></svg></button>
   </div>
 
   <div id="messages" aria-live="polite" aria-atomic="false"></div>
@@ -288,9 +290,9 @@
   </section>
 
   <div class="card" id="savedCard" style="display:none;">
-    <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n-html="savedBuildsHeading">已保存配装 <span style="font-size:11px;color:var(--text-dim);">（点击名称加载，点 × 删除）</span></span></h2>
+    <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n-html="savedBuildsHeading">已保存配装 <span style="color:var(--text-dim);">（点击名称加载，点 × 删除）</span></span></h2>
     <div id="savedBuildsList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-    <button class="btn danger" onclick="clearAllBuilds()" style="margin-top:8px;font-size:11px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span data-i18n="clearAllButton">清空全部</span></button>
+    <button class="btn danger" onclick="clearAllBuilds()" style="margin-top:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span data-i18n="clearAllButton">清空全部</span></button>
   </div>
   <div class="loading" id="loading" role="status" aria-live="polite" aria-busy="false">
     <div class="spinner"></div>
@@ -301,10 +303,10 @@
     <div class="card" id="solutionNav" style="display:none;padding:12px 24px;margin-bottom:0;border-bottom:none;border-radius:12px 12px 0 0;"></div>
     <div class="results-main">
     <div class="card" id="compCard" style="border-radius:0 0 12px 12px;">
-      <h2><span data-i18n="targetVsActual">目标 vs 实际</span> <button class="btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" style="font-size:11px;padding:2px 8px;float:right;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg><span data-i18n="backToSolutionsButton">返回方案列表</span></button></h2>
+      <h2><span data-i18n="targetVsActual">目标 vs 实际</span> <button class="btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" style="padding:2px 8px;float:right;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg><span data-i18n="backToSolutionsButton">返回方案列表</span></button></h2>
       <div class="comparison" id="comparisonGrid"></div>
       <div id="exoticRangeSummary" style="display:none;margin-bottom:14px;"></div>
-      <div style="text-align:center;margin-top:12px;font-size:13px;color:var(--text-dim);" id="scoreDisplay"></div>
+      <div style="text-align:center;margin-top:12px;color:var(--text-dim);" id="scoreDisplay"></div>
       <div id="ownedGearSection" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:none;"></div>
     </div>
 
@@ -319,7 +321,7 @@
         <button class="btn" type="button" onclick="resetConstraints()"><span data-i18n="clearAllButton">清空全部</span></button>
         <button class="btn-solve" id="btnRefine" type="button" onclick="refineWithPriorities()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="refineButton">重新优化</span></button>
       </div>
-      <div id="refineCost" style="margin-top:14px;font-size:13px;"></div>
+      <div id="refineCost" style="margin-top:14px;"></div>
     </div>
 
     <div class="card" id="piecesCard">
@@ -329,7 +331,7 @@
 
     <div class="card" id="exoticCard" style="display:none;">
       <h2 data-i18n="exoticRecommendationHeading">异域护甲推荐</h2>
-      <p style="font-size:12px;color:var(--text-dim);margin-bottom:14px;" data-i18n="exoticRecommendationDescription">
+      <p style="color:var(--text-dim);margin-bottom:14px;" data-i18n="exoticRecommendationDescription">
         普通模式按方案推荐异域护甲框架；异域职业物品模式严格使用你锁定的属性框架。
       </p>
       <div id="exoticRecommendation"></div>

@@ -86,6 +86,7 @@ test("an explicitly present plug set stays a known set, even when it is empty", 
 test("extractBungieLoadoutState maps characters, saved loadouts, subclass plugs, and unlocks", () => {
   const characterId = "2305843000000000001";
   const subclassId = "1000000000000000100";
+  const armorId = "armor-1";
   const fragmentHash = 1727069366;
   const profile = {
     characters: { data: { [characterId]: { classType: 1, light: 2020, dateLastPlayed: "2026-08-11T00:00:00Z" } } },
@@ -93,17 +94,24 @@ test("extractBungieLoadoutState maps characters, saved loadouts, subclass plugs,
       itemHash: 1234,
       itemInstanceId: subclassId,
       bucketHash: 3284755031,
+    }, {
+      itemHash: 4321,
+      itemInstanceId: armorId,
+      bucketHash: 3448274439,
     }] } } },
     characterLoadouts: { data: { [characterId]: { loadouts: [{
       nameHash: 10,
       colorHash: 20,
       iconHash: 30,
-      items: [{ itemInstanceId: "armor-1", plugItemHashes: [4183296050] }],
+      items: [{ itemInstanceId: armorId, plugItemHashes: [4183296050] }],
     }, { items: [] }] } } },
-    itemComponents: { sockets: { data: { [subclassId]: { sockets: [
+    itemComponents: {
+      instances: { data: { [armorId]: { primaryStat: { value: 550 } } } },
+      sockets: { data: { [subclassId]: { sockets: [
       { plugHash: fragmentHash, isEnabled: true },
       { plugHash: 0, isEnabled: false },
-    ] } } } },
+      ] } } },
+    },
     profilePlugSets: { data: { plugs: { 1: [{ plugItemHash: 111, canInsert: true, enabled: true }] } } },
     characterPlugSets: { data: { [characterId]: { plugs: {
       2: [{ plugItemHash: 222, canInsert: true, enabled: true }],
@@ -114,6 +122,9 @@ test("extractBungieLoadoutState maps characters, saved loadouts, subclass plugs,
   assert.equal(state.characters[characterId].classId, "hunter");
   assert.equal(state.savedLoadouts[characterId].length, 1);
   assert.equal(state.savedLoadouts[characterId][0].loadoutIndex, 0);
+  assert.equal(state.savedLoadouts[characterId][0].items[0].itemHash, 4321);
+  assert.equal(state.savedLoadouts[characterId][0].items[0].bucketHash, 3448274439);
+  assert.equal(state.savedLoadouts[characterId][0].items[0].power, 550);
   assert.deepEqual(state.currentSubclassByCharacter[characterId].adjustments, { melee: 10 });
   assert.deepEqual(
     [...state.availablePlugHashesByCharacter[characterId]].sort((a, b) => a - b),

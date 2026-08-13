@@ -828,7 +828,7 @@ async function checkBungieLoginHidden(browser) {
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     assert.equal(
-      await page.locator("#bungieAuthArea").innerText(),
+      await page.locator("#headerBungieAuth").innerText(),
       "",
       "a build without Bungie secrets must leave the auth area empty",
     );
@@ -1045,9 +1045,9 @@ async function checkBungieAuthFlow(browser) {
     await page.goto(baseUrl + `?code=mock-auth-code&state=${encodeURIComponent(state)}`, {
       waitUntil: "networkidle",
     });
-    await page.locator(".bungie-auth-name").waitFor();
+    await page.locator(".bungie-account-copy strong").waitFor();
     assert.equal(
-      await page.locator(".bungie-auth-name").innerText(),
+      await page.locator(".bungie-account-copy strong").innerText(),
       "MockGuardian",
       "the signed-in state should render the Bungie display name",
     );
@@ -1069,7 +1069,8 @@ async function checkBungieAuthFlow(browser) {
     assert.equal(await page.locator("#bungieLoginButton").count(), 0);
 
     // --- (d) refresh inventory from the mocked GetProfile fixture ---
-    await page.locator('#bungieAuthArea button[onclick="importInventoryFromBungie()"]').click();
+    await page.locator(".bungie-account-menu > summary").click();
+    await page.locator('.bungie-account-action[onclick="importInventoryFromBungie()"]').click();
     await page.waitForFunction(() => /已导入 [1-9]\d* 件 Bungie 护甲/.test(
       document.getElementById("upgradeImportSummary")?.textContent || "",
     ));
@@ -1123,7 +1124,8 @@ async function checkBungieAuthFlow(browser) {
       "classItem",
       "enabling Exotic Class Item mode must pin the Exotic slot filter",
     );
-    await page.locator('#bungieAuthArea button[onclick="importInventoryFromBungie()"]').click();
+    await page.locator(".bungie-account-menu > summary").click();
+    await page.locator('.bungie-account-action[onclick="importInventoryFromBungie()"]').click();
     await page.waitForFunction(() => /Bungie 库存/.test(
       document.getElementById("upgradeImportSummary")?.textContent || "",
     ));
@@ -1190,7 +1192,8 @@ async function checkBungieAuthFlow(browser) {
       ["network", "网络错误或 CORS"],
     ]) {
       profileMode = mode;
-      await page.locator('#bungieAuthArea button[onclick="importInventoryFromBungie()"]').click();
+      await page.locator(".bungie-account-menu > summary").click();
+      await page.locator('.bungie-account-action[onclick="importInventoryFromBungie()"]').click();
       await page.waitForFunction(text => (
         document.getElementById("upgradeImportSummary")?.textContent || ""
       ).includes(text), expectedText);
@@ -1203,7 +1206,7 @@ async function checkBungieAuthFlow(browser) {
         assert.match(message, /秒后重试/, "throttle copy should name the retry window");
       }
       assert.equal(
-        await page.locator(".bungie-auth-name").innerText(),
+        await page.locator(".bungie-account-copy strong").innerText(),
         "MockGuardian",
         "an import failure must not sign the user out",
       );
@@ -1211,7 +1214,9 @@ async function checkBungieAuthFlow(browser) {
     profileMode = "ok";
 
     // --- (g) sign out clears token, display name, and Bungie-sourced inventory ---
-    await page.locator('#bungieAuthArea button[onclick="bungieLogout()"]').click();
+    page.once("dialog", dialog => dialog.accept());
+    await page.locator(".bungie-account-menu > summary").click();
+    await page.locator('.bungie-account-danger button[onclick="bungieLogout()"]').click();
     assert.equal(
       await page.evaluate(key => localStorage.getItem(key), TEST_STORAGE_KEYS.token),
       null,

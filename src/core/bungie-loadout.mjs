@@ -115,6 +115,7 @@ export function getFragmentAdjustments(plugHashes, classId) {
 export function extractBungieLoadoutState(profileResponse) {
   const data = unwrapProfile(profileResponse);
   const sockets = data.itemComponents?.sockets?.data ?? {};
+  const instances = data.itemComponents?.instances?.data ?? {};
   const characters = {};
   for (const [characterId, character] of Object.entries(data.characters?.data ?? {})) {
     characters[characterId] = {
@@ -127,6 +128,26 @@ export function extractBungieLoadoutState(profileResponse) {
     };
   }
 
+  // CharacterLoadouts identifies saved gear by instance id but does not
+  // consistently repeat its slot metadata. Enrich those records from the same
+  // profile response so the UI can distinguish weapons, armor and subclass
+  // entries without exposing opaque instance ids to the player.
+  const profileItemsByInstance = new Map();
+  const indexProfileItems = items => {
+    for (const item of items || []) {
+      const instanceId = String(item?.itemInstanceId ?? "");
+      if (!instanceId) continue;
+      profileItemsByInstance.set(instanceId, item);
+    }
+  };
+  indexProfileItems(data.profileInventory?.data?.items);
+  for (const component of Object.values(data.characterInventories?.data ?? {})) {
+    indexProfileItems(component?.items);
+  }
+  for (const component of Object.values(data.characterEquipment?.data ?? {})) {
+    indexProfileItems(component?.items);
+  }
+
   const savedLoadouts = {};
   for (const [characterId, component] of Object.entries(data.characterLoadouts?.data ?? {})) {
     savedLoadouts[characterId] = (component?.loadouts || []).map((loadout, loadoutIndex) => ({
@@ -134,10 +155,18 @@ export function extractBungieLoadoutState(profileResponse) {
       colorHash: Number(loadout?.colorHash) || 0,
       iconHash: Number(loadout?.iconHash) || 0,
       nameHash: Number(loadout?.nameHash) || 0,
-      items: (loadout?.items || []).map(item => ({
-        itemInstanceId: String(item?.itemInstanceId ?? ""),
-        plugItemHashes: (item?.plugItemHashes || []).map(Number).filter(Boolean),
-      })).filter(item => item.itemInstanceId),
+      items: (loadout?.items || []).map(item => {
+        const itemInstanceId = String(item?.itemInstanceId ?? "");
+        const profileItem = profileItemsByInstance.get(itemInstanceId) || {};
+        const instance = instances[itemInstanceId] || {};
+        return {
+          itemInstanceId,
+          itemHash: Number(item?.itemHash ?? profileItem?.itemHash) || 0,
+          bucketHash: Number(item?.bucketHash ?? profileItem?.bucketHash) || 0,
+          power: Number(instance?.primaryStat?.value) || 0,
+          plugItemHashes: (item?.plugItemHashes || []).map(Number).filter(Boolean),
+        };
+      }).filter(item => item.itemInstanceId),
     })).filter(loadout => loadout.items.length > 0);
   }
 
