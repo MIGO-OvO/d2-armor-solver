@@ -3119,6 +3119,7 @@ function getInventorySolutionEquipState(entry) {
     modAssignments: entry?.modAssignments,
     inventory: importedInventory,
     availablePlugHashes: bungieProfileState.availablePlugHashesByCharacter?.[bungieTargetCharacterId],
+    targetCharacterInventory: bungieProfileState.characterInventories?.[bungieTargetCharacterId],
   });
   if (!plan.valid) {
     return { available: false, reason: bungiePlanErrorMessage(plan.errors[0]), plan };
@@ -3195,6 +3196,30 @@ async function equipInventorySolution(index) {
       },
     });
     lastBungieImportAt = 0;
+    const nameByInstanceId = new Map(
+      importedInventory.map(item => [String(item.id), item.name]),
+    );
+    const equipFailures = result.equipFailures || [];
+    const plugFailures = result.plugFailures || [];
+    if (equipFailures.length > 0) {
+      const equipped = result.completed.targetEquip;
+      const failedNames = equipFailures
+        .map(failure => nameByInstanceId.get(String(failure.itemId)) || "")
+        .filter(Boolean)
+        .join("、");
+      const plugNote = plugFailures.length > 0
+        ? `；${plugFailures.length} 个模组写入失败`
+        : "";
+      showBungieEquipMessage(
+        l(
+          `已装备 ${equipped}/5 件护甲，${equipFailures.length} 件未能装备${failedNames ? `（${failedNames}）` : ""}。请确认角色在轨道或社交空间、且背包有空间后重试${plugNote}。`,
+          `已裝備 ${equipped}/5 件防具，${equipFailures.length} 件未能裝備${failedNames ? `（${failedNames}）` : ""}。請確認角色在軌道或社交空間、且背包有空間後重試${plugNote}。`,
+          `Equipped ${equipped}/5 armor pieces; ${equipFailures.length} failed to equip${failedNames ? ` (${failedNames})` : ""}. Make sure the character is in orbit or a social space and has inventory space, then retry${plugNote}.`,
+        ),
+        "warn",
+      );
+      return;
+    }
     const verification = result.verification;
     const realMismatches = verification?.mismatches?.filter(
       match => match.kind !== "missingMembershipId",
@@ -3250,7 +3275,7 @@ async function importInventoryFromBungie({ silent = false } = {}) {
       `/Destiny2/${membershipType}/Profile/${membershipId}/?components=${components.join(",")}`,
       { auth: true },
     );
-    const { items, characters } = buildArmorInventory(response, { language: getPageLanguage() });
+    const { items, characters, characterInventories } = buildArmorInventory(response, { language: getPageLanguage() });
     const loadoutState = extractBungieLoadoutState(response);
     for (const [characterId, summary] of Object.entries(characters)) {
       const target = loadoutState.characters?.[characterId];
@@ -3259,6 +3284,7 @@ async function importInventoryFromBungie({ silent = false } = {}) {
     bungieProfileState = {
       membershipType,
       membershipId,
+      characterInventories,
       ...loadoutState,
     };
     // Map the per-character subclass fragments to class ids so the equipped

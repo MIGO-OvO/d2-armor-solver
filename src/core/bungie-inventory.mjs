@@ -442,6 +442,18 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
       ...(Object.keys(stats).length > 0 ? { stats } : {}),
     };
   }
+
+  // Per-character inventory occupancy (ALL unequipped items, not just armor)
+  // for the loadout planner's spaceLeftForItem check and move-aside candidates.
+  const characterInventories = {};
+  for (const [characterId, component] of Object.entries(data.characterInventories?.data ?? {})) {
+    characterInventories[characterId] = (component?.items || [])
+      .map(apiItem => ({
+        itemInstanceId: String(apiItem?.itemInstanceId ?? ""),
+        itemHash: Number(apiItem?.itemHash) || 0,
+      }))
+      .filter(entry => entry.itemInstanceId);
+  }
   const instances = data.itemComponents?.instances?.data ?? {};
   const itemStats = data.itemComponents?.stats?.data ?? {};
   const sockets = data.itemComponents?.sockets?.data ?? {};
@@ -488,6 +500,7 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs" } = {
     membershipType: userInfo.membershipType ?? null,
     membershipId: userInfo.membershipId ?? null,
     characters,
+    characterInventories,
   };
 }
 
