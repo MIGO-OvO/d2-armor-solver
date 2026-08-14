@@ -169,11 +169,11 @@ jobs:
         shell: bash
         run: |
           cd dist-offline
-          zip -r ../d2-armor-solver-offline.zip .
+          zip -r "../d2-armor-solver-offline-${{ github.event.release.tag_name }}.zip" .
 
       - name: Attach offline distribution to release
         uses: softprops/action-gh-release@v2
         with:
-          files: d2-armor-solver-offline.zip
+          files: d2-armor-solver-offline-${{ github.event.release.tag_name }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

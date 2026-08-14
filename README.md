@@ -32,7 +32,7 @@
 
 完全离线的独立构建，无需 Node、npm 或服务器：
 
-1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.4.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
 2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
 
 离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
@@ -46,7 +46,13 @@
 
 ## Changelog / 更新日志
 
-### v2.0.3（最新版）
+### v2.0.4（最新版）
+
+- 修复目标属性规则执行：优先级与模糊约束（精确 / 至少 / 至多 / 区间）严格生效，替换规划优先把可刷护甲分配给必须达标属性，且不会为减少替换件数而破坏必须达标约束。
+- 修复调整模组匹配：传说护甲的 `+5` 调整必须与方案一致，不一致时降级为待刷；异域护甲的 `+5` 方向仍可自由选择。
+- 修复 Bungie 一键装备：角色栏位已满时自动把非方案装备移开；逐件装备失败按单件记录而非整体中止，逐插槽写入失败软处理；应用后回读档案校验实际插槽。
+
+### v2.0.3
 
 - 新增门户首页，求解器迁移到 `app/` 子路径；根路径门户提供在线 / 离线双入口与三语切换。
 - 新增 Bungie OAuth 登录与真实库存：跨平台存档解析、护甲目录预生成与库存去重，完全由已有实例组成的方案可一键装备到游戏。

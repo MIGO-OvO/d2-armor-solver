@@ -32,7 +32,7 @@ Development build: [https://migo-ovo.github.io/d2-armor-solver/dev/app/](https:/
 
 A standalone build that runs fully offline, no Node, npm, or server required:
 
-1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
+1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.4.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
 2. Unzip it and open `index.html` in a browser over the `file://` protocol.
 
 The offline package matches the online version, with one difference: it doesn't inject Bungie secrets at build time, so the login entry is hidden. DIM CSV import, solving, and saving builds all run fully offline; the DIM Loadout export link is just a URL, so opening it still needs a network connection.
@@ -46,7 +46,13 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 ## Changelog
 
-### v2.0.3 (latest)
+### v2.0.4 (latest)
+
+- Fixed target rule enforcement: priority and fuzzy constraints (exact / at least / at most / range) now apply strictly, and replacement planning allocates farmable armor to must-meet stats first, never breaking a must-meet constraint to reduce swap count.
+- Fixed tuning roll matching: a Legendary piece's `+5` roll must match the plan, otherwise it's downgraded to farm; an Exotic's `+5` direction stays freely selectable.
+- Fixed Bungie equip: when the character is full, non-plan items are moved aside; per-item equip failures are recorded instead of aborting the whole sequence; per-socket write failures are handled softly; the app re-reads the profile to verify the applied plugs.
+
+### v2.0.3
 
 - Added a portal home page and moved the solver to the `app/` subpath; the root portal offers online / offline entries and three languages.
 - Added Bungie OAuth login and real inventory: cross-save resolution, a pre-generated armor catalog, and inventory deduplication. Builds made entirely of owned items can be equipped in game.
