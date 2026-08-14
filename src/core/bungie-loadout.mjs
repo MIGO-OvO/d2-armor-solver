@@ -10,7 +10,7 @@
 // to the target character, bulk-equip, apply socket plugs in order, then
 // re-read the profile and verify every expected instance/plug landed.
 
-import { bungieFetch, bungiePost } from "./bungie-api.mjs";
+import { ApiError, bungieFetch, bungiePost } from "./bungie-api.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
@@ -41,6 +41,21 @@ export const VERIFY_COMPONENTS = [
 
 const CLASS_ID_BY_TYPE = { 0: "titan", 1: "hunter", 2: "warlock" };
 const CLASS_TYPE_BY_ID = { titan: 0, hunter: 1, warlock: 2 };
+
+// Bungie documents a minimum gap between write actions on every action
+// endpoint: 0.1s for transfers/equips, 0.5s for socket plugs. Firing them
+// back-to-back lets the API drop or reorder actions, surfacing as partial
+// transfer/equip in the field.
+const WRITE_DELAY_MS = 100;
+const PLUG_DELAY_MS = 500;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// D2 characters hold unequipped items in the account-wide "General" inventory
+// bucket; its per-character capacity is 10. The Vault's own copy of that
+// bucket is 500 (see bungie-inventory.mjs). Used for the DIM-style
+// spaceLeftForItem check: when the target character cannot hold the incoming
+// pieces, move non-loadout items off it to the vault first.
+const CHARACTER_INVENTORY_CAPACITY = 10;
 
 const STAT_MOD_BY_HASH = new Map();
 for (const [stat, sizes] of Object.entries(STAT_MOD_HASHES)) {
@@ -328,6 +343,7 @@ export function buildCustomLoadoutPlan({
   modAssignments,
   inventory,
   availablePlugHashes = null,
+  targetCharacterInventory = null,
 }) {
   const errors = [];
   const warnings = [];
@@ -444,6 +460,38 @@ export function buildCustomLoadoutPlan({
     transfers.push(transferRequest(item, membershipType, targetCharacterId, false));
   }
 
+  const alreadyOnTargetIds = resolvedItems
+    .filter(item => String(item.owner) === String(targetCharacterId))
+    .map(item => String(item.id));
+
+  // DIM-style spaceLeftForItem: the target character's inventory must hold
+  // every incoming piece. When it cannot, move non-loadout items off the
+  // character to the vault first, so the transfers below do not fail on a full
+  // backpack. targetCharacterInventory is null when the caller did not capture
+  // it (offline / unknown), in which case no move-aside is planned.
+  const incomingCount = resolvedItems.filter(
+    item => String(item.owner) !== String(targetCharacterId),
+  ).length;
+  const moveAsideTransfers = [];
+  if (Array.isArray(targetCharacterInventory) && incomingCount > 0) {
+    const freeSlots = CHARACTER_INVENTORY_CAPACITY - targetCharacterInventory.length;
+    const needToFree = incomingCount - freeSlots;
+    if (needToFree > 0) {
+      for (const entry of targetCharacterInventory) {
+        if (moveAsideTransfers.length >= needToFree) break;
+        if (targetIds.has(String(entry?.itemInstanceId ?? ""))) continue;
+        moveAsideTransfers.push({
+          itemReferenceHash: Number(entry?.itemHash) || 0,
+          stackSize: 1,
+          transferToVault: true,
+          itemId: String(entry?.itemInstanceId ?? ""),
+          characterId: String(targetCharacterId),
+          membershipType: Number(membershipType),
+        });
+      }
+    }
+  }
+
   if (characterClassType === undefined) {
     errors.push({ code: "unknownClass" });
   }
@@ -467,18 +515,37 @@ export function buildCustomLoadoutPlan({
       characterId,
       itemIds,
     })),
+    moveAsideTransfers,
     transfers,
+    alreadyOnTargetIds,
     equipItemIds: resolvedItems.map(item => String(item.id)),
     // Ordered per-socket plug writes produced by the global assignment.
     plugOperations: assignment.plugOperations,
   };
 }
 
-function equipFailures(response) {
-  const results = Array.isArray(response)
+// equipStatus is a PlatformErrorCodes enum, not a boolean: Success === 1 and
+// every other value is a failure reason. The previous `!== 0` check misread
+// every successful equip as a failure, aborted the sequence before writing
+// mods, and surfaced a spurious "equip failed" error.
+const PLATFORM_SUCCESS = 1;
+
+function extractEquipResults(response) {
+  return Array.isArray(response)
     ? response
     : (response?.equipResults || response?.results || []);
-  return results.filter(result => Number(result?.equipStatus) !== 0);
+}
+
+// Per-item equip outcome keyed by instance id. An item Bungie "ignored"
+// (because it was not on the character) has no result entry and therefore maps
+// to undefined, which the caller treats as a failure — not a silent success.
+function equipStatusByInstanceId(response) {
+  const byId = new Map();
+  for (const result of extractEquipResults(response)) {
+    const id = String(result?.itemInstanceId ?? result?.itemId ?? "");
+    if (id) byId.set(id, Number(result?.equipStatus));
+  }
+  return byId;
 }
 
 // Re-read the profile after writing and confirm every expected instance is
@@ -494,7 +561,6 @@ export async function verifyLoadoutApplication({
   if (!membershipId) {
     return { status: "failed", mismatches: [{ kind: "missingMembershipId" }], attempts: 1 };
   }
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let lastMismatches = [];
   for (let attempt = 0; attempt <= retries; attempt++) {
     const response = await bungieFetch(
@@ -531,23 +597,62 @@ export async function verifyLoadoutApplication({
   return { status: "failed", mismatches: lastMismatches, attempts: retries + 1 };
 }
 
-export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify = true } = {}) {
+export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify = true, delays = true } = {}) {
   if (!plan?.valid) throw new BungieLoadoutPlanError(plan?.errors || []);
   const completed = {
+    moveAsideTransfers: 0,
     preparationTransfers: 0,
     sourceEquips: 0,
     transfers: 0,
     targetEquip: 0,
     plugs: 0,
   };
-  let stage = "prepare";
+  const equipFailures = []; // { itemId, errorCode } — pieces that never got equipped
+  const transferFailures = []; // { itemId, errorCode } — pieces that never reached the character
+  const plugFailures = []; // { itemId, socketIndex, errorCode } — mods that failed to insert
+  let stage = "space";
   const progress = detail => onProgress?.({ stage, completed: { ...completed }, ...detail });
+  const pause = delays ? sleep : () => {};
+
+  // A Bungie action error (a specific ErrorCode for the action) is a per-item
+  // soft failure: record it and keep going. Transport / auth / throttle errors
+  // are hard and abort the whole sequence.
+  const softPost = async (path, body, record) => {
+    try {
+      await bungiePost(path, body);
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        record(error);
+        return false;
+      }
+      throw error;
+    }
+  };
+
   try {
+    // 1. Move-aside: free target-character inventory slots before the loadout
+    //    transfers. A failure here is non-fatal — the loadout transfers below
+    //    still run and surface their own per-item failures if space is short.
+    for (const request of plan.moveAsideTransfers) {
+      progress({ action: "move-aside" });
+      if (await softPost("/Destiny2/Actions/Items/TransferItem/", request, () => {})) {
+        completed.moveAsideTransfers++;
+      }
+      await pause(WRITE_DELAY_MS);
+    }
+
+    // 2. Preparation transfers (spare replacements for source characters). A
+    //    failure here means the source piece cannot be freed, so abort hard.
+    stage = "prepare";
     for (const request of plan.preparationTransfers) {
       progress({ action: "transfer" });
       await bungiePost("/Destiny2/Actions/Items/TransferItem/", request);
       completed.preparationTransfers++;
+      await pause(WRITE_DELAY_MS);
     }
+
+    // 3. Source unequip. Hard failure aborts (the piece stays equipped elsewhere).
     stage = "unequip-source";
     for (const source of plan.sourceEquips) {
       progress({ action: "equip-source", characterId: source.characterId });
@@ -556,31 +661,77 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
         characterId: source.characterId,
         membershipType: plan.membershipType,
       });
-      const failures = equipFailures(response);
-      if (failures.length > 0) throw new Error("Source replacement equip failed");
+      const statusById = equipStatusByInstanceId(response);
+      const failed = source.itemIds.some(
+        itemId => statusById.get(String(itemId)) !== PLATFORM_SUCCESS,
+      );
+      if (failed) throw new Error("Source replacement equip failed");
       completed.sourceEquips++;
+      await pause(WRITE_DELAY_MS);
     }
+
+    // 4. Loadout transfers, per-item soft. Track which pieces actually reached
+    //    the character: pieces already there plus pieces whose final transfer
+    //    leg (vault/other -> target) succeeded. The intermediate leg into the
+    //    vault for pieces coming off another character does not count.
     stage = "transfer";
+    const onCharacterIds = new Set(plan.alreadyOnTargetIds || []);
     for (const request of plan.transfers) {
       progress({ action: "transfer" });
-      await bungiePost("/Destiny2/Actions/Items/TransferItem/", request);
-      completed.transfers++;
+      const ok = await softPost("/Destiny2/Actions/Items/TransferItem/", request, error => {
+        transferFailures.push({ itemId: String(request.itemId), errorCode: error.errorCode ?? null });
+      });
+      if (ok) {
+        completed.transfers++;
+        if (!request.transferToVault) onCharacterIds.add(String(request.itemId));
+      }
+      await pause(WRITE_DELAY_MS);
     }
-    stage = "equip";
-    progress({ action: "equip-target" });
-    const equipResponse = await bungiePost("/Destiny2/Actions/Items/EquipItems/", {
-      itemIds: plan.equipItemIds,
-      characterId: plan.targetCharacterId,
-      membershipType: plan.membershipType,
-    });
-    const failures = equipFailures(equipResponse);
-    if (failures.length > 0) throw new Error("Target armor equip failed");
-    completed.targetEquip = 1;
 
+    // 5. Bulk-equip only the pieces that actually reached the character, then
+    //    read the per-item result. A piece that never transferred is a failure.
+    stage = "equip";
+    const equipCandidates = (plan.equipItemIds || []).filter(
+      id => onCharacterIds.has(String(id)),
+    );
+    if (equipCandidates.length > 0) {
+      progress({ action: "equip-target" });
+      const equipResponse = await bungiePost("/Destiny2/Actions/Items/EquipItems/", {
+        itemIds: equipCandidates,
+        characterId: plan.targetCharacterId,
+        membershipType: plan.membershipType,
+      });
+      const statusById = equipStatusByInstanceId(equipResponse);
+      for (const itemId of equipCandidates) {
+        const status = statusById.get(String(itemId));
+        if (status === PLATFORM_SUCCESS) {
+          completed.targetEquip++;
+        } else {
+          equipFailures.push({ itemId: String(itemId), errorCode: status ?? null });
+        }
+      }
+    }
+    // Pieces that never reached the character count as equip failures too.
+    for (const itemId of plan.equipItemIds || []) {
+      if (!onCharacterIds.has(String(itemId)) &&
+          !equipFailures.some(failure => failure.itemId === String(itemId))) {
+        equipFailures.push({ itemId: String(itemId), errorCode: null });
+      }
+    }
+    await pause(WRITE_DELAY_MS);
+
+    // 6. Insert plugs only for pieces that actually equipped. A failed equip
+    //    skips its plugs (reported, never silently dropped).
     stage = "plugs";
-    for (const operation of plan.plugOperations) {
+    const equippedIds = new Set((plan.equipItemIds || []).filter(
+      itemId => !equipFailures.some(failure => failure.itemId === String(itemId)),
+    ));
+    const appliedPlugOperations = [];
+    for (const operation of plan.plugOperations || []) {
+      if (!equippedIds.has(String(operation.itemId))) continue;
+      appliedPlugOperations.push(operation);
       progress({ action: "plug", operation });
-      await bungiePost("/Destiny2/Actions/Items/InsertSocketPlugFree/", {
+      const ok = await softPost("/Destiny2/Actions/Items/InsertSocketPlugFree/", {
         itemId: operation.itemId,
         characterId: plan.targetCharacterId,
         membershipType: plan.membershipType,
@@ -589,10 +740,18 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
           socketArrayType: 0,
           plugItemHash: operation.plugItemHash,
         },
+      }, error => {
+        plugFailures.push({
+          itemId: String(operation.itemId),
+          socketIndex: operation.socketIndex,
+          errorCode: error.errorCode ?? null,
+        });
       });
-      completed.plugs++;
+      if (ok) completed.plugs++;
+      await pause(PLUG_DELAY_MS);
     }
 
+    // 7. Verify only what we attempted: equipped pieces and their applied plugs.
     let verification = null;
     if (verify) {
       stage = "verify";
@@ -601,11 +760,20 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
         membershipType: plan.membershipType,
         membershipId: plan.membershipId,
         targetCharacterId: plan.targetCharacterId,
-        equipItemIds: plan.equipItemIds,
-        plugOperations: plan.plugOperations,
+        equipItemIds: [...equippedIds],
+        plugOperations: appliedPlugOperations,
       });
     }
-    return { completed, skippedMods: [], verification };
+
+    return {
+      completed,
+      skippedMods: [],
+      equipFailures,
+      transferFailures,
+      plugFailures,
+      skippedPlugCount: (plan.plugOperations || []).length - appliedPlugOperations.length,
+      verification,
+    };
   } catch (cause) {
     throw new BungieLoadoutApplyError(stage, completed, cause);
   }

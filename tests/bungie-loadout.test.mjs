@@ -213,6 +213,60 @@ test("buildCustomLoadoutPlan creates vault transfers, one bulk equip, and exact 
   assert.deepEqual(new Set(plan.plugOperations.map(operation => operation.socketIndex)), new Set([0, 11]));
 });
 
+test("buildCustomLoadoutPlan moves non-loadout items aside when the character is full", () => {
+  const fixture = customPlanFixture();
+  // Ten items already fill the character's inventory (capacity 10); none are
+  // part of the loadout.
+  const targetCharacterInventory = Array.from({ length: 10 }, (_, index) => ({
+    itemInstanceId: String(1000 + index),
+    itemHash: 2000 + index,
+  }));
+  const plan = buildCustomLoadoutPlan({
+    membershipType: 3,
+    targetCharacterId: "character-1",
+    classId: "hunter",
+    ...fixture,
+    targetCharacterInventory,
+  });
+  assert.equal(plan.valid, true, JSON.stringify(plan.errors));
+  // Five incoming pieces need five slots; the full inventory forces five moves.
+  assert.equal(plan.moveAsideTransfers.length, 5);
+  assert.ok(plan.moveAsideTransfers.every(request => request.transferToVault === true));
+  assert.ok(plan.moveAsideTransfers.every(request => request.characterId === "character-1"));
+});
+
+test("buildCustomLoadoutPlan skips move-aside when the character has room", () => {
+  const fixture = customPlanFixture();
+  const plan = buildCustomLoadoutPlan({
+    membershipType: 3,
+    targetCharacterId: "character-1",
+    classId: "hunter",
+    ...fixture,
+    targetCharacterInventory: [{ itemInstanceId: "200", itemHash: 2000 }],
+  });
+  assert.equal(plan.moveAsideTransfers.length, 0);
+});
+
+test("buildCustomLoadoutPlan never moves a loadout piece aside", () => {
+  const fixture = customPlanFixture();
+  const targetCharacterInventory = [
+    { itemInstanceId: "100", itemHash: 1000 }, // a loadout piece id
+    ...Array.from({ length: 9 }, (_, index) => ({
+      itemInstanceId: String(300 + index),
+      itemHash: 4000 + index,
+    })),
+  ];
+  const plan = buildCustomLoadoutPlan({
+    membershipType: 3,
+    targetCharacterId: "character-1",
+    classId: "hunter",
+    ...fixture,
+    targetCharacterInventory,
+  });
+  assert.equal(plan.moveAsideTransfers.length, 5);
+  assert.ok(!plan.moveAsideTransfers.some(request => request.itemId === "100"));
+});
+
 test("energy-incompatible stat mods block the plan and never skip to success", () => {
   const fixture = customPlanFixture({ energyCapacity: 2, energyUsed: 3 });
   fixture.pieces[4] = {
@@ -301,6 +355,16 @@ test("applyCustomLoadoutPlan POSTs the manual sequence with JSON bodies", async 
   const requests = [];
   globalThis.fetch = async (url, options) => {
     requests.push({ url, options, body: JSON.parse(options.body) });
+    if (url.endsWith("/EquipItems/")) {
+      const body = JSON.parse(options.body);
+      return jsonResponse({
+        Response: {
+          equipResults: body.itemIds.map(itemInstanceId => ({ itemInstanceId, equipStatus: 1 })),
+        },
+        ErrorCode: 1,
+        ErrorStatus: "Ok",
+      });
+    }
     return jsonResponse({ Response: [], ErrorCode: 1, ErrorStatus: "Ok" });
   };
   try {
@@ -310,10 +374,11 @@ test("applyCustomLoadoutPlan POSTs the manual sequence with JSON bodies", async 
       classId: "hunter",
       ...customPlanFixture(),
     });
-    const result = await applyCustomLoadoutPlan(plan, { verify: false });
+    const result = await applyCustomLoadoutPlan(plan, { verify: false, delays: false });
     assert.equal(result.completed.transfers, 5);
-    assert.equal(result.completed.targetEquip, 1);
+    assert.equal(result.completed.targetEquip, 5);
     assert.equal(result.completed.plugs, 10);
+    assert.equal(result.equipFailures.length, 0);
     assert.equal(requests.length, 16);
     assert.ok(requests.every(request => request.options.method === "POST"));
     assert.equal(requests.filter(request => request.url.endsWith("/TransferItem/")).length, 5);
@@ -406,9 +471,19 @@ test("verifyLoadoutApplication reports a wrong plug instead of trusting the writ
   }
 });
 
-test("manual sequence reports the failed stage and partial completion", async () => {
+test("a plug write failure is a soft per-plug failure, not an abort", async () => {
   installAuth();
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith("/EquipItems/")) {
+      const body = JSON.parse(options.body);
+      return jsonResponse({
+        Response: {
+          equipResults: body.itemIds.map(itemInstanceId => ({ itemInstanceId, equipStatus: 1 })),
+        },
+        ErrorCode: 1,
+        ErrorStatus: "Ok",
+      });
+    }
     if (url.endsWith("/InsertSocketPlugFree/")) {
       return jsonResponse({ ErrorCode: 1675, ErrorStatus: "DestinyCannotAffordMaterialRequirements" });
     }
@@ -421,14 +496,139 @@ test("manual sequence reports the failed stage and partial completion", async ()
       classId: "hunter",
       ...customPlanFixture(),
     });
-    await assert.rejects(applyCustomLoadoutPlan(plan), error => {
+    const result = await applyCustomLoadoutPlan(plan, { verify: false, delays: false });
+    assert.equal(result.completed.targetEquip, 5);
+    assert.equal(result.completed.plugs, 0);
+    assert.equal(result.plugFailures.length, 10);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("a transport error still aborts with BungieLoadoutApplyError", async () => {
+  installAuth();
+  globalThis.fetch = async () => {
+    throw new Error("network down");
+  };
+  try {
+    const plan = buildCustomLoadoutPlan({
+      membershipType: 3,
+      targetCharacterId: "character-1",
+      classId: "hunter",
+      ...customPlanFixture(),
+    });
+    await assert.rejects(applyCustomLoadoutPlan(plan, { delays: false }), error => {
       assert.ok(error instanceof BungieLoadoutApplyError);
-      assert.equal(error.stage, "plugs");
-      assert.equal(error.partial, true);
-      assert.equal(error.completed.transfers, 5);
-      assert.equal(error.completed.targetEquip, 1);
+      assert.equal(error.stage, "transfer");
       return true;
     });
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("partial bulk equip reports per-item failures and only inserts plugs for equipped pieces", async () => {
+  installAuth();
+  globalThis.fetch = async (url, options) => {
+    if (url.endsWith("/EquipItems/")) {
+      const body = JSON.parse(options.body);
+      return jsonResponse({
+        Response: {
+          equipResults: body.itemIds.map((itemInstanceId, index) => ({
+            itemInstanceId,
+            equipStatus: index < 2 ? 1 : 1655, // first two succeed, the rest fail
+          })),
+        },
+        ErrorCode: 1,
+        ErrorStatus: "Ok",
+      });
+    }
+    return jsonResponse({ Response: [], ErrorCode: 1, ErrorStatus: "Ok" });
+  };
+  try {
+    const plan = buildCustomLoadoutPlan({
+      membershipType: 3,
+      targetCharacterId: "character-1",
+      classId: "hunter",
+      ...customPlanFixture(),
+    });
+    const result = await applyCustomLoadoutPlan(plan, { verify: false, delays: false });
+    assert.equal(result.completed.targetEquip, 2);
+    assert.equal(result.equipFailures.length, 3);
+    assert.equal(result.equipFailures.every(failure => failure.errorCode === 1655), true);
+    // Two equipped pieces x two plugs each; the other three pieces skip theirs.
+    assert.equal(result.completed.plugs, 4);
+    assert.equal(result.skippedPlugCount, 6);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("a real Success equipStatus (1) equips all five pieces and proceeds to plugs", async () => {
+  installAuth();
+  globalThis.fetch = async (url) => {
+    if (url.endsWith("/EquipItems/")) {
+      // Real Bungie EquipItems response: Response.equipResults[] where each
+      // result's equipStatus is a PlatformErrorCodes enum, Success === 1.
+      return jsonResponse({
+        Response: {
+          equipResults: ["100", "101", "102", "103", "104"].map(itemInstanceId => ({
+            itemInstanceId,
+            equipStatus: 1,
+          })),
+        },
+        ErrorCode: 1,
+        ErrorStatus: "Ok",
+      });
+    }
+    return jsonResponse({ Response: [], ErrorCode: 1, ErrorStatus: "Ok" });
+  };
+  try {
+    const plan = buildCustomLoadoutPlan({
+      membershipType: 3,
+      targetCharacterId: "character-1",
+      classId: "hunter",
+      ...customPlanFixture(),
+    });
+    // Regression: the old `!== 0` check flagged every Success (1) as a failure,
+    // threw before writing mods, and never reached the plugs stage.
+    const result = await applyCustomLoadoutPlan(plan, { verify: false, delays: false });
+    assert.equal(result.completed.targetEquip, 5);
+    assert.equal(result.completed.plugs, 10);
+    assert.equal(result.equipFailures.length, 0);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("a non-Success equipStatus records per-item failures instead of aborting", async () => {
+  installAuth();
+  globalThis.fetch = async (url) => {
+    if (url.endsWith("/EquipItems/")) {
+      return jsonResponse({
+        Response: {
+          equipResults: ["100", "101", "102", "103", "104"].map(itemInstanceId => ({
+            itemInstanceId,
+            equipStatus: 1655, // DestinyCanOnlyEquipInGame
+          })),
+        },
+        ErrorCode: 1,
+        ErrorStatus: "Ok",
+      });
+    }
+    return jsonResponse({ Response: [], ErrorCode: 1, ErrorStatus: "Ok" });
+  };
+  try {
+    const plan = buildCustomLoadoutPlan({
+      membershipType: 3,
+      targetCharacterId: "character-1",
+      classId: "hunter",
+      ...customPlanFixture(),
+    });
+    const result = await applyCustomLoadoutPlan(plan, { verify: false, delays: false });
+    assert.equal(result.completed.targetEquip, 0);
+    assert.equal(result.equipFailures.length, 5);
+    assert.equal(result.equipFailures.every(failure => failure.errorCode === 1655), true);
   } finally {
     restoreGlobals();
   }

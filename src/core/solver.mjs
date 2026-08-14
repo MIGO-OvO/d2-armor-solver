@@ -320,10 +320,12 @@ export function evaluateConfig(
 
   // Refinement: try swapping each +5/-5 piece's +5 target to improve score
   const minimums = constraints?.minimums || {};
+  const maximums = constraints?.maximums || {};
   const exact = constraints?.exact || {};
-  // Hard minimum/exact constraints must still get a refinement pass when their
+  // Hard target constraints must still get a refinement pass when their
   // large penalty pushes the score above the normal near-miss cutoff.
   const hasHardTargetConstraint = Object.values(minimums).some(value => value > 0)
+    || Object.values(maximums).some(value => value !== undefined)
     || Object.values(exact).some(Boolean);
   const searchFullTuningNeighborhood = hasHardTargetConstraint
     || (constraints?.priorityOrder?.length || 0) > 0
@@ -416,7 +418,9 @@ export function singlePenalty(actual, target, isPriority, le100, force0, priorit
   if (exact && actual !== target) penalty += (actual - target) * (actual - target) * 1e18;
   // Hard constraints
   if (le100 && actual > 100) penalty += (actual - 100) * (actual - 100) * 500;
-  if (maximum !== undefined && actual > maximum) penalty += (actual - maximum) * (actual - maximum) * 500;
+  if (maximum !== undefined && actual > maximum) {
+    penalty += (actual - maximum) * (actual - maximum) * 1e18;
+  }
   if (force0 && actual > 0) penalty += actual * actual * 500;
   return penalty;
 }
@@ -452,7 +456,7 @@ function singleStatScoreRank(stat, actual, target, constraints) {
   if (exact[stat] && actual !== target) hardPenalty += difference ** 2;
   const maximum = maximums[stat];
   if (maximum !== undefined && actual > maximum) {
-    softPenalty += (actual - maximum) ** 2 * 500;
+    hardPenalty += (actual - maximum) ** 2;
   }
   if (le100[stat] && actual > 100) {
     softPenalty += (actual - 100) ** 2 * 500;
