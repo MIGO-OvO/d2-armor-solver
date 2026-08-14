@@ -268,10 +268,11 @@ test("a DIM-imported Exotic Class Item matches its solution slot", () => {
   assert.equal(plan.feasible, true);
 });
 
-test("owned pieces with different fixed +5 rolls still match when the totals stay reachable", () => {
+test("legendary pieces whose +5 roll differs from the solution are downgraded to farm", () => {
   const solution = solveExoticSolution();
   const classItem = makeExoticClassItemFromDIM();
-  // Helmet is missing: the loadout needs exactly one farmed piece (helmet).
+  // Helmet is missing; the three provided legendary pieces all rolled a +5
+  // that differs from the solution, so every legendary slot must farm.
   const ownedArmsChestLegs = rotatedRolls(solution, 5).slice(1);
   const [plan] = rankInventoryPlans({
     solutions: [solution],
@@ -279,27 +280,51 @@ test("owned pieces with different fixed +5 rolls still match when the totals sta
     classId: "hunter",
   });
 
-  assert.equal(plan.feasible, true);
-  assert.equal(plan.ownedCount, 4);
-  assert.equal(plan.farmCount, 1);
-  assert.equal(plan.pieces.find(piece => !piece.item).slot, "helmet");
+  assert.equal(plan.ownedCount, 1);
+  assert.equal(plan.farmCount, 4);
+  assert.equal(plan.pieces.find(piece => piece.item)?.slot, "classItem");
 });
 
-test("pieces whose fixed +5 rolls break exactness are downgraded back to farm", () => {
+test("every legendary slot with a mismatched +5 roll is farmed, not kept", () => {
   const solution = solveExoticSolution();
   const classItem = makeExoticClassItemFromDIM();
-  // All five owned, but the rotated +5 rolls make the exact totals unreachable.
+  // All five owned, but all four legendary pieces rolled the wrong +5, so they
+  // cannot serve the solution's shift requirements and are farmed instead.
   const allOwned = [classItem, ...rotatedRolls(solution, 1)];
-  assert.equal(assignmentCanReachExact(solution, allOwned), false);
   const [plan] = rankInventoryPlans({
     solutions: [solution],
     items: allOwned,
     classId: "hunter",
   });
 
-  // The repair downgrades the smallest number of pieces; the plan stays
-  // exactly reachable instead of claiming an impossible loadout.
-  assert.equal(plan.feasible, true);
-  assert.equal(plan.farmCount, 1);
-  assert.equal(plan.pieces.find(piece => !piece.item).slot, "arms");
+  assert.equal(plan.ownedCount, 1);
+  assert.equal(plan.farmCount, 4);
+  assert.deepEqual(
+    plan.pieces.filter(piece => !piece.item).map(piece => piece.slot),
+    ["helmet", "arms", "chest", "legs"],
+  );
+});
+
+test("an Exotic's +5 roll is freely selectable and never filtered", () => {
+  const solution = solveExoticSolution();
+  const wanted = solution.tuningAssignments[0].to;
+  const different = STATS.find(stat => stat !== wanted);
+  // Force the Exotic Class Item's installed +5 to a stat the solution did not
+  // choose. Exotic armor re-rolls its +5 freely, so the copy still matches.
+  const classItem = { ...makeExoticClassItemFromDIM(), tuningTo: different };
+  const matchingLegendary = [1, 2, 3, 4].map(index =>
+    makeOwnedLegendary(solution, index, solution.tuningAssignments[index].to)
+  );
+  const [plan] = rankInventoryPlans({
+    solutions: [solution],
+    items: [classItem, ...matchingLegendary],
+    classId: "hunter",
+  });
+
+  assert.equal(plan.ownedCount, 5);
+  assert.equal(plan.farmCount, 0);
+  assert.equal(
+    assignmentCanReachExact(solution, [classItem, ...matchingLegendary]),
+    true,
+  );
 });

@@ -104,15 +104,16 @@ function isItemEligible(item, requirement, options) {
   if (options.classId && item.classId !== options.classId) return false;
   if (item.archetypeId !== requirement.archetypeId) return false;
   if (item.tertiary !== requirement.tertiary) return false;
-  // The tuning MODE is installed on the piece and can be read from the export,
-  // but the fixed +5 side of a +5/-5 roll must NOT disqualify a piece here: the
-  // -5 sources and armor mods are free, so any +5 roll may still fit the
-  // solution. Whether the roll actually works is decided by the whole-assignment
-  // feasibility check (assignmentCanReachExact) after matching.
+  // The tuning MODE is installed on the piece and read from the export. The
+  // fixed +5 side of a +5/-5 roll is rolled onto LEGENDARY armor and cannot be
+  // re-picked (only the -5 source is free), so a legendary piece only serves a
+  // shift requirement whose +5 destination matches its fixed roll. Exotic armor
+  // accepts any directional tuning, so its +5 side is never filtered here.
   if (requirement.tuningMode === "plus3") {
     if (item.tuningMode !== "plus3") return false;
-  } else if (item.tuningMode === "plus3") {
-    return false;
+  } else {
+    if (item.tuningMode === "plus3") return false;
+    if (!item.exotic && getItemTuningTo(item) !== requirement.tuningTo) return false;
   }
 
   const fixedExotic = options.fixedExotic || null;
@@ -320,7 +321,8 @@ function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequi
 // ============================================================
 // EXACT-REACHABILITY OF AN OWNED ASSIGNMENT
 // ============================================================
-// An owned piece pins only its fixed +5 roll (the +5 side of a Tuning Mod).
+// An owned LEGENDARY piece pins only its fixed +5 roll (the +5 side of a Tuning
+// Mod). Exotic armor accepts any directional tuning, so its +5 side stays free.
 // The -5 sources, the armor mods, and every roll of a farmed piece stay free.
 // This checks whether the solution's exact totals are still reachable given
 // the pinned +5 rolls, by counting how the +5/+10 mods and the free +5 sides
@@ -373,8 +375,11 @@ export function assignmentCanReachExact(solution, chosen) {
     }
     numShift++;
     const item = chosen[index];
-    const pinnedTo = item ? getItemTuningTo(item) : null;
-    if (item && pinnedTo) pinned[pinnedTo]++;
+    // Exotic armor accepts any directional tuning, so its +5 side is free to
+    // re-roll and never pins a stat. Only a legendary piece's rolled +5 is
+    // fixed and pins that stat.
+    const pinnedTo = item && !item.exotic ? getItemTuningTo(item) : null;
+    if (pinnedTo) pinned[pinnedTo]++;
     else freeCount++;
   }
   // Nothing pinned: the stored solution itself is the exact witness.

@@ -31,6 +31,11 @@ import {
 import {
   createBalancedTargetPlan,
 } from "./core/budget.mjs";
+import {
+  createTargetConstraints,
+  preferConstraintSatisfyingSolutions,
+  satisfiesTargetConstraints,
+} from "./core/target-constraints.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
 import { buildRepository } from "./core/build-repository.mjs";
 import {
@@ -117,6 +122,8 @@ let lastNumPlus3 = 0;
 let allSolutions = [];
 let currentSolutionIdx = 0;
 let lastExoticSettings = null;
+let lastSolverTarget = null;
+let lastSolverConstraints = null;
 let showAllSolutions = false;
 
 // Per-stat priority (1=high, 2=mid, 3=low; 0 = none, key omitted) and fuzzy
@@ -785,26 +792,39 @@ function hasFuzzyOrPriority() {
 // minimums/maximums are expressed in the armor-needed domain (target minus
 // Fragment bonus), matching the adjTarget the solver already receives.
 function buildUserConstraints(fragments) {
-  const priorityLevels = {};
-  const minimums = {};
-  const maximums = {};
+  const targetValues = {};
+  const maximumValues = {};
   for (const stat of STATS) {
-    const level = statPriority[stat] || 0;
-    if (level > 0) priorityLevels[stat] = level;
-    const mode = statFuzzyMode[stat] || '=';
-    if (mode === '=') continue;
     const value = getVal('target_' + stat);
     const frag = fragments[stat] || 0;
-    if (mode === '>=') {
-      minimums[stat] = Math.max(0, value - frag);
-    } else if (mode === '<=') {
-      maximums[stat] = Math.max(0, value - frag);
-    } else if (mode === 'range') {
-      minimums[stat] = Math.max(0, value - frag);
-      maximums[stat] = Math.max(0, getVal('targetMax_' + stat) - frag);
-    }
+    targetValues[stat] = Math.max(0, value - frag);
+    maximumValues[stat] = Math.max(
+      0,
+      getVal('targetMax_' + stat) - frag,
+    );
   }
-  return { priorityLevels, minimums, maximums };
+  return createTargetConstraints({
+    modes: statFuzzyMode,
+    priorityLevels: statPriority,
+    targetValues,
+    maximumValues,
+  });
+}
+
+function hasNonExactTargetRules() {
+  return STATS.some(stat => (statFuzzyMode[stat] || '=') !== '=');
+}
+
+function solutionSatisfiesCurrentTargetRules(solution) {
+  if (!solution) return false;
+  if (!lastSolverTarget || !lastSolverConstraints?.targetRules) {
+    return solution.score === 0;
+  }
+  return satisfiesTargetConstraints(
+    solution.totals,
+    lastSolverTarget,
+    lastSolverConstraints,
+  );
 }
 
 async function calculateExoticRanges(exoticConfig, numPlus5, numPlus10, numPlus3, fragments) {
@@ -1395,7 +1415,9 @@ async function solve() {
 
   try {
     const solverConstraints = buildUserConstraints(fragments);
-    allSolutions = await solveLoadoutAsync({
+    lastSolverTarget = { ...adjTarget };
+    lastSolverConstraints = solverConstraints;
+    const solvedSolutions = await solveLoadoutAsync({
       target: adjTarget,
       numPlus5,
       numPlus10,
@@ -1403,6 +1425,11 @@ async function solve() {
       constraints: solverConstraints,
       exoticSettings,
     });
+    allSolutions = preferConstraintSatisfyingSolutions(
+      solvedSolutions,
+      adjTarget,
+      solverConstraints,
+    );
     currentSolutionIdx = 0;
 
     if (!allSolutions[0]) {
@@ -1423,10 +1450,17 @@ async function solve() {
 
     // Count +3 pieces in best result
     const plus3Count = bestResult.tuningAssignments.filter(t => t.mode === '+3').length;
+    const targetRulesSatisfied = satisfiesTargetConstraints(
+      bestResult.totals,
+      adjTarget,
+      solverConstraints,
+    );
 
     // Post-solve analysis
-    if (bestResult.score === 0) {
-      msgs.innerHTML += `<div class="msg info">${icon('check')}${isOnlyPlus5Tuning()
+    if (targetRulesSatisfied) {
+      msgs.innerHTML += `<div class="msg info">${icon('check')}${hasNonExactTargetRules()
+        ? l('找到满足全部属性规则的配装！','找到滿足全部屬性規則的配裝！','Found a loadout that satisfies every stat rule.')
+        : isOnlyPlus5Tuning()
         ? l('找到完美配装！全部护甲使用+5/-5调整。','找到完美配裝！全部防具使用+5/-5調整。','Perfect loadout found. Every piece uses +5/-5 Tuning.')
         : l(`找到完美配装！${plus3Count}件使用+3模式。`,`找到完美配裝！${plus3Count}件使用+3模式。`,`Perfect loadout found. ${plus3Count} piece(s) use +3 mode.`)}</div>`;
     } else if (exoticSettings) {
@@ -1438,8 +1472,8 @@ async function solve() {
           : l(`${STAT_LABELS[stat]}达到目标<strong>${target}</strong>`,`${STAT_LABELS[stat]}達成目標<strong>${target}</strong>`,`${STAT_LABELS[stat]} reaches <strong>${target}</strong>`);
       });
       msgs.innerHTML += `<div class="msg info">${icon('check')}${limitLines.join(l('；','；','; ')) || l('已找到固定异域职业物品框架下的最佳方案。','已找到固定異域職業物品原型下的最佳方案。','Best loadout for the fixed Exotic Class Item archetype found.')}</div>`;
-    } else if (bestResult.score >= 100) {
-      msgs.innerHTML += `<div class="msg warn">${icon('warn')}${l('最优解与目标有偏差，当前约束下可能无法精确达成。','最佳解與目標有偏差，目前限制下可能無法精確達成。','The best result differs from the targets; an exact result may be impossible under the current constraints.')}</div>`;
+    } else {
+      msgs.innerHTML += `<div class="msg warn">${icon('warn')}${l('当前未找到满足全部属性规则的方案，以下显示最接近的结果。','目前未找到滿足全部屬性規則的方案，以下顯示最接近的結果。','No loadout satisfying every stat rule was found; the closest result is shown below.')}</div>`;
     }
 
     displayAllResults(bestResult, targets, fragments);
@@ -1612,6 +1646,10 @@ async function refineWithPriorities() {
     const prevResult = allSolutions[currentSolutionIdx];
     allSolutions = newSolutions;
     currentSolutionIdx = 0;
+    // The legacy refinement card has its own priority/cap semantics rather than
+    // the main per-stat target rules, so keep its historical score-based labels.
+    lastSolverTarget = null;
+    lastSolverConstraints = null;
 
     // Full refresh (comparison, pieces, refine card, nav)
     displayAllResults(newResult, lastTargets, lastFragments);
@@ -2006,8 +2044,8 @@ function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
 // SOLUTION NAV
 // ============================================================
 
-// Warning shown when no loadout hits every target exactly. Extracted because
-// renderSolutionNav needs it on two different paths.
+// Warning shown when no loadout satisfies every active target rule. Extracted
+// because renderSolutionNav needs it on two different paths.
 function appendImperfectWarning() {
   const msgDiv = document.getElementById('messages');
   if (msgDiv.dataset.imperfectShown === '1') return;
@@ -2015,7 +2053,14 @@ function appendImperfectWarning() {
 
   const adjSum = STATS.reduce((s, st) => s + Math.max(0, (lastTargets[st] || 0) - (lastFragments[st] || 0)), 0);
   const budget = 450 + lastNumPlus3 * 3 + lastNumPlus5 * 5 + lastNumPlus10 * 10;
-  const advice = adjSum !== budget
+  const hasFuzzyRules = hasNonExactTargetRules();
+  const advice = hasFuzzyRules
+    ? l(
+        '尝试调整属性规则、目标值或调整模组数量。',
+        '嘗試調整屬性規則、目標值或調整模組數量。',
+        'Try adjusting stat rules, target values, or modifier counts.'
+      )
+    : adjSum !== budget
     ? l(
         `目标总和与预算不一致（差${Math.abs(budget - adjSum)}点），请先调整目标使总和等于预算。`,
         `目標總和與預算不一致（差${Math.abs(budget - adjSum)}點），請先調整目標使總和等於預算。`,
@@ -2027,11 +2072,21 @@ function appendImperfectWarning() {
         'Try changing the number of +3 Tuning pieces or adjusting target stats.'
       );
 
-  msgDiv.insertAdjacentHTML('beforeend', `<div class="msg warn">${icon('warn')}${l(
-      '没有配装能精确达成全部目标。以下方案<strong>按符合程度排序</strong>（越靠前越接近目标）。',
-      '沒有配裝能精確達成全部目標。以下方案<strong>按符合程度排序</strong>（越前越接近目標）。',
-      'No loadout reaches every target exactly. The solutions below are <strong>sorted by fit</strong> (closer to the top is closer to target).'
-    )}<br>${icon('hint')} ${advice}</div>`);
+  const warning = hasFuzzyRules
+    ? l(
+        '没有配装满足全部属性规则。以下方案<strong>按符合程度排序</strong>（越靠前越接近规则）。',
+        '沒有配裝滿足全部屬性規則。以下方案<strong>按符合程度排序</strong>（越前越接近規則）。',
+        'No loadout satisfies every stat rule. The solutions below are <strong>sorted by fit</strong>.'
+      )
+    : l(
+        '没有配装能精确达成全部目标。以下方案<strong>按符合程度排序</strong>（越靠前越接近目标）。',
+        '沒有配裝能精確達成全部目標。以下方案<strong>按符合程度排序</strong>（越前越接近目標）。',
+        'No loadout reaches every target exactly. The solutions below are <strong>sorted by fit</strong> (closer to the top is closer to target).'
+      );
+  msgDiv.insertAdjacentHTML(
+    'beforeend',
+    `<div class="msg warn">${icon('warn')}${warning}<br>${icon('hint')} ${advice}</div>`,
+  );
 }
 
 function toggleAllSolutions() {
@@ -2042,14 +2097,14 @@ function toggleAllSolutions() {
 function renderSolutionNav() {
   const navBar = document.getElementById('solutionNav');
 
-  // Filter: if any perfect solutions exist, only show those
-  const perfectSolutions = allSolutions.filter(s => s.score === 0);
+  // Filter: if any solutions satisfy every target rule, only show those.
+  const perfectSolutions = allSolutions.filter(solutionSatisfiesCurrentTargetRules);
   const rankedSolutions = perfectSolutions.length > 0 ? perfectSolutions : allSolutions;
   const hasPerfect = perfectSolutions.length > 0;
 
   if (allSolutions.length <= 1 && !hasPerfect) {
     navBar.style.display = 'none';
-    if (allSolutions.length > 0 && allSolutions[0].score > 0 && !lastExoticSettings) {
+    if (allSolutions.length > 0 && !lastExoticSettings) {
       appendImperfectWarning();
     }
     return;
@@ -2060,17 +2115,30 @@ function renderSolutionNav() {
   const showSolutions = truncated ? rankedSolutions.slice(0, SOLUTION_PREVIEW_COUNT) : rankedSolutions;
 
   navBar.style.display = 'block';
+  const hasFuzzyRules = hasNonExactTargetRules();
   const title = hasPerfect
-    ? l(
-        `共 ${total} 种精确达成方案，按易刷程度排序`,
-        `共 ${total} 種精確達成方案，按取得難度排序`,
-        `${total} exact solutions, sorted by farmability`
-      )
-    : l(
-        `无精确方案，${total} 种近似方案，按符合程度排序`,
-        `無精確方案，${total} 種近似方案，按符合程度排序`,
-        `No exact solution; ${total} approximate solutions sorted by fit`
-      );
+    ? hasFuzzyRules
+      ? l(
+          `共 ${total} 种满足全部规则的方案，按易刷程度排序`,
+          `共 ${total} 種滿足全部規則的方案，按取得難度排序`,
+          `${total} solutions satisfy every rule, sorted by farmability`,
+        )
+      : l(
+          `共 ${total} 种精确达成方案，按易刷程度排序`,
+          `共 ${total} 種精確達成方案，按取得難度排序`,
+          `${total} exact solutions, sorted by farmability`,
+        )
+    : hasFuzzyRules
+      ? l(
+          `无完全满足方案，${total} 种近似方案，按符合程度排序`,
+          `無完全滿足方案，${total} 種近似方案，按符合程度排序`,
+          `No fully satisfying solution; ${total} approximate solutions sorted by fit`,
+        )
+      : l(
+          `无精确方案，${total} 种近似方案，按符合程度排序`,
+          `無精確方案，${total} 種近似方案，按符合程度排序`,
+          `No exact solution; ${total} approximate solutions sorted by fit`,
+        );
   const shownNote = truncated
     ? l(
         `　显示最优 ${showSolutions.length} 种`,
@@ -2087,7 +2155,9 @@ function renderSolutionNav() {
     const sol = showSolutions[si];
     const key = displayArchetypeKey(sol.config, sol.exoticIndex);
     const active = sol === allSolutions[currentSolutionIdx];
-    const badge = sol.score === 0 ? icon('check', { size: 'sm' }) : '';
+    const badge = solutionSatisfiesCurrentTargetRules(sol)
+      ? icon('check', { size: 'sm' })
+      : '';
     navHTML += `<button role="listitem" aria-pressed="${active}" onclick="switchSolution(${allSolutions.indexOf(sol)})"
       style="padding:8px 14px;border-radius:8px;border:2px solid ${active?'var(--accent)':'var(--border)'};background:${active?'rgba(244,181,61,0.12)':'var(--bg)'};color:${active?'#fff':'var(--text)'};cursor:pointer;font-size:13px;font-family:inherit;font-weight:${active?'700':'400'};transition:all 0.15s;text-align:left;">
       <span style="color:${active?'var(--accent)':'var(--text-dim)'};">#${si+1}</span> ${badge} <span style="color:var(--archetype);">${key}</span>
@@ -5307,6 +5377,17 @@ function loadBuild(build) {
     lastNumPlus10 = build.numPlus10;
     lastNumPlus3 = build.onlyPlus5Tuning || !build.n3Enabled ? 0 : build.numPlus3;
     lastExoticSettings = getExoticSettings();
+    const armorMinPerStat = lastNumPlus3 * 6;
+    lastSolverTarget = Object.fromEntries(STATS.map(stat => {
+      let raw = build.targets[stat] - (build.fragments[stat] || 0);
+      if (build.targets[stat] === 0 || raw < 0) raw = 0;
+      const finalMin = Math.max(
+        0,
+        armorMinPerStat + (build.fragments[stat] || 0),
+      );
+      return [stat, build.targets[stat] < finalMin ? finalMin : raw];
+    }));
+    lastSolverConstraints = buildUserConstraints(build.fragments);
     displayAllResults(build.result, build.targets, build.fragments);
   }
 }
