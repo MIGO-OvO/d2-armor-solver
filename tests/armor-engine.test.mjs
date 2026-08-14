@@ -39,3 +39,38 @@ test("solver returns a reproducible candidate through the engine interface", () 
     500,
   );
 });
+
+test("three hard minimums stay within the interactive solving budget", () => {
+  const target = {
+    health: 0,
+    melee: 100,
+    grenade: 100,
+    super: 100,
+    class: 100,
+    weapons: 100,
+  };
+  const startedAt = performance.now();
+  const solutions = solveLoadout({
+    target,
+    numPlus5: 0,
+    numPlus10: 5,
+    numPlus3: 0,
+    constraints: {
+      minimums: {
+        melee: 100,
+        grenade: 100,
+        super: 100,
+      },
+    },
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.ok(solutions.length > 0);
+  assert.ok(solutions[0].totals.melee >= 100);
+  assert.ok(solutions[0].totals.grenade >= 100);
+  assert.ok(solutions[0].totals.super >= 100);
+  assert.ok(
+    elapsedMs < 4_000,
+    `three-minimum solve took ${Math.round(elapsedMs)}ms`,
+  );
+});

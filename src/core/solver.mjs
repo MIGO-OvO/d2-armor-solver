@@ -228,7 +228,8 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
 // let the evaluator choose modes and both tuning sides freely, since armor being
 // farmed can roll anything.
 export function evaluateConfig(
-  baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints, fixedTuningTargets = null
+  baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints,
+  fixedTuningTargets = null, runtimeOptions = {}
 ) {
   const allocateModifiers = !fixedTuningTargets && numPlus5 + numPlus10 <= 2
     ? chooseBestModifierAllocation
@@ -328,7 +329,7 @@ export function evaluateConfig(
     || (constraints?.priorityOrder?.length || 0) > 0
     || Object.values(constraints?.priorityLevels || {}).some(value => value > 0)
     || Object.values(constraints?.maximums || {}).some(value => value !== undefined);
-  if (bestOverall && bestOverall.score > 0 &&
+  if (!runtimeOptions.skipTuningRefinement && bestOverall && bestOverall.score > 0 &&
       (bestOverall.score < 10000 || hasHardTargetConstraint)) {
     let improved = true;
     while (improved) {
@@ -550,10 +551,74 @@ export function farmabilityScore(config, exoticIndex = null) {
 // SOLVER
 // ============================================================
 
+const REFINEMENT_CANDIDATE_LIMIT = 192;
+const LOCAL_SEARCH_CANDIDATE_LIMIT = 12;
+
 export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, exoticSettings = null, runtimeOptions = {}) {
   const solutionMap = new Map();
   const fixedExotic = exoticSettings?.config || null;
   const purpleCount = fixedExotic ? 4 : 5;
+  const stagedCandidates = [];
+
+  function storeSolution(bestConfig, bestResult) {
+    const exoticIndex = fixedExotic ? 0 : null;
+    const key = archetypeKey(bestConfig, exoticIndex);
+    const existing = solutionMap.get(key);
+    if (existing && compareScoreRanks(bestResult.rank, existing.rank) >= 0) return;
+    solutionMap.set(key, {
+      config: [...bestConfig],
+      tuningAssignments: bestResult.tuningAssignments,
+      modAssignments: bestResult.modAssignments,
+      totals: bestResult.totals,
+      rank: [...bestResult.rank],
+      score: bestResult.score,
+      exoticIndex,
+      exoticSelection: exoticSettings ? {
+        classId: exoticSettings.classId,
+        classLabel: exoticSettings.classLabel,
+        primaryPerkId: exoticSettings.primaryPerkId,
+        primaryPerkName: exoticSettings.primaryPerkName,
+        secondaryPerkId: exoticSettings.secondaryPerkId,
+        secondaryPerkName: exoticSettings.secondaryPerkName,
+      } : null,
+    });
+  }
+
+  function refineAndStore(archIndices, config, initialResult, localSearch) {
+    let bestConfig = [...config];
+    let bestResult = initialResult || evaluateConfig(
+      bestConfig, target, numPlus5, numPlus10, numPlus3, constraints
+    );
+
+    // Quick local search over tertiary choices (try swapping one piece's tertiary).
+    if (localSearch && !bestResult.rank.every(value => value === 0)) {
+      let improved = true;
+      while (improved) {
+        improved = false;
+        for (let i = 0; i < purpleCount; i++) {
+          const configIndex = i + (fixedExotic ? 1 : 0);
+          const archIdx = archIndices[i];
+          for (let t = 0; t < 4; t++) {
+            const alt = BASE_CONFIGS[archIdx * 4 + t];
+            if (alt === bestConfig[configIndex]) continue;
+            const trial = [...bestConfig];
+            trial[configIndex] = alt;
+            const result = evaluateConfig(
+              trial, target, numPlus5, numPlus10, numPlus3, constraints
+            );
+            if (compareScoreRanks(result.rank, bestResult.rank) < 0) {
+              bestConfig = trial;
+              bestResult = result;
+              improved = true;
+              break;
+            }
+          }
+          if (improved) break;
+        }
+      }
+    }
+    storeSolution(bestConfig, bestResult);
+  }
 
   function evaluateArchetypeSet(archIndices) {
         // Greedy tertiary assignment. In exotic mode slot 0 is the locked exotic.
@@ -592,54 +657,15 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
           for (const s of STATS) partialTotals[s] += bestPiece.baseStats[s];
         }
 
-        // Quick local search over tertiary choices (try swapping one piece's tertiary)
-        let bestConfig = [...config];
-        let bestResult = evaluateConfig(bestConfig, target, numPlus5, numPlus10, numPlus3, constraints);
-        if (!runtimeOptions.fastMode) {
-          let improved = true;
-          while (improved) {
-            improved = false;
-            for (let i = 0; i < purpleCount; i++) {
-              const configIndex = i + (fixedExotic ? 1 : 0);
-              const archIdx = archIndices[i];
-              for (let t = 0; t < 4; t++) {
-                const alt = BASE_CONFIGS[archIdx * 4 + t];
-                if (alt === bestConfig[configIndex]) continue;
-                const trial = [...bestConfig];
-                trial[configIndex] = alt;
-                const r = evaluateConfig(trial, target, numPlus5, numPlus10, numPlus3, constraints);
-                if (compareScoreRanks(r.rank, bestResult.rank) < 0) {
-                  bestConfig = trial; bestResult = r; improved = true; break;
-                }
-              }
-              if (improved) break;
-            }
-          }
-        }
-
-        // Dedup and store
-        const exoticIndex = fixedExotic ? 0 : null;
-        const key = archetypeKey(bestConfig, exoticIndex);
-        const existing = solutionMap.get(key);
-        if (!existing || compareScoreRanks(bestResult.rank, existing.rank) < 0) {
-          solutionMap.set(key, {
-            config: [...bestConfig],
-            tuningAssignments: bestResult.tuningAssignments,
-            modAssignments: bestResult.modAssignments,
-            totals: bestResult.totals,
-            rank: [...bestResult.rank],
-            score: bestResult.score,
-            exoticIndex,
-            exoticSelection: exoticSettings ? {
-              classId: exoticSettings.classId,
-              classLabel: exoticSettings.classLabel,
-              primaryPerkId: exoticSettings.primaryPerkId,
-              primaryPerkName: exoticSettings.primaryPerkName,
-              secondaryPerkId: exoticSettings.secondaryPerkId,
-              secondaryPerkName: exoticSettings.secondaryPerkName,
-            } : null,
-          });
-        }
+        const coarseResult = evaluateConfig(
+          config, target, numPlus5, numPlus10, numPlus3, constraints, null,
+          { skipTuningRefinement: true }
+        );
+        stagedCandidates.push({
+          archIndices: [...archIndices],
+          config,
+          coarseResult,
+        });
   }
 
   // Enumerate multisets with repetition: 4368 normal, 1365 with one fixed exotic.
@@ -655,6 +681,38 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
     }
   }
   enumerate(0, 0, []);
+
+  stagedCandidates.sort((left, right) => {
+    const rankOrder = compareScoreRanks(
+      left.coarseResult.rank, right.coarseResult.rank
+    );
+    if (rankOrder !== 0) return rankOrder;
+    const farmabilityOrder = farmabilityScore(left.config, fixedExotic ? 0 : null)
+      - farmabilityScore(right.config, fixedExotic ? 0 : null);
+    if (farmabilityOrder !== 0) return farmabilityOrder;
+    return left.coarseResult.score - right.coarseResult.score;
+  });
+  // Preserve every coarse archetype result. Expensive Tuning refinement and
+  // tertiary swaps are only useful near the top of the structural ranking.
+  for (const candidate of stagedCandidates) {
+    storeSolution(candidate.config, candidate.coarseResult);
+  }
+  const finalists = stagedCandidates.slice(0, REFINEMENT_CANDIDATE_LIMIT);
+  for (let index = 0; index < finalists.length; index++) {
+    const candidate = finalists[index];
+    const isAlreadyPerfect = candidate.coarseResult.rank.every(
+      value => value === 0
+    );
+    const result = isAlreadyPerfect ? candidate.coarseResult : evaluateConfig(
+        candidate.config, target, numPlus5, numPlus10, numPlus3, constraints
+      );
+    refineAndStore(
+      candidate.archIndices,
+      candidate.config,
+      result,
+      !runtimeOptions.fastMode && index < LOCAL_SEARCH_CANDIDATE_LIMIT
+    );
+  }
 
   const solutions = [...solutionMap.values()];
   solutions.sort((a, b) => {
