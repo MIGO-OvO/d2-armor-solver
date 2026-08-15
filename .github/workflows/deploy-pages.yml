@@ -17,10 +17,14 @@ concurrency:
 
 jobs:
   deploy:
+    # Pages are published on push to main/develop (and manual dispatch).
+    # Skip on release: refs/tags/* can never satisfy the github-pages
+    # environment branch policy, so the job only ever fails there.
     if: >-
-      github.event_name != 'push' ||
-      github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/develop'
+      github.event_name != 'release' &&
+      (github.event_name != 'push' ||
+       github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/develop')
     timeout-minutes: 25
     environment:
       name: github-pages
@@ -175,5 +179,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: d2-armor-solver-offline.zip
+          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
