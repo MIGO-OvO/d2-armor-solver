@@ -32,7 +32,7 @@
 
 完全离线的独立构建，无需 Node、npm 或服务器：
 
-1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.4.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.5.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
 2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
 
 离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
@@ -46,7 +46,12 @@
 
 ## Changelog / 更新日志
 
-### v2.0.4（最新版）
+### v2.0.5（最新版）
+
+- 修复属性“至多 / 区间上限”规则：当目标总和低于预算、必须把溢出点数分配到别处时，被限制的属性不再被当作“差额最小”的倾倒目标，上限约束严格生效。
+- 修复 2+2 双套装约束：两个套装选择器改为各自的选项，“另一个套装”的选择在重新渲染后保持不变，可以正常选择第二个套装效果。
+
+### v2.0.4
 
 - 修复目标属性规则执行：优先级与模糊约束（精确 / 至少 / 至多 / 区间）严格生效，替换规划优先把可刷护甲分配给必须达标属性，且不会为减少替换件数而破坏必须达标约束。
 - 修复调整模组匹配：传说护甲的 `+5` 调整必须与方案一致，不一致时降级为待刷；异域护甲的 `+5` 方向仍可自由选择。

@@ -32,7 +32,7 @@ Development build: [https://migo-ovo.github.io/d2-armor-solver/dev/app/](https:/
 
 A standalone build that runs fully offline, no Node, npm, or server required:
 
-1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.4.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
+1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.5.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
 2. Unzip it and open `index.html` in a browser over the `file://` protocol.
 
 The offline package matches the online version, with one difference: it doesn't inject Bungie secrets at build time, so the login entry is hidden. DIM CSV import, solving, and saving builds all run fully offline; the DIM Loadout export link is just a URL, so opening it still needs a network connection.
@@ -46,7 +46,12 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 ## Changelog
 
-### v2.0.4 (latest)
+### v2.0.5 (latest)
+
+- Fixed the "at most / range upper bound" stat rule: when the target total is below the budget and surplus must be spilled somewhere, the capped stat is no longer treated as the cheapest squared-difference dump — the cap is strictly enforced.
+- Fixed the 2+2 dual-set requirement: the two set pickers now build their own options, so the "second set" choice survives re-renders and can actually be selected.
+
+### v2.0.4
 
 - Fixed target rule enforcement: priority and fuzzy constraints (exact / at least / at most / range) now apply strictly, and replacement planning allocates farmable armor to must-meet stats first, never breaking a must-meet constraint to reduce swap count.
 - Fixed tuning roll matching: a Legendary piece's `+5` roll must match the plan, otherwise it's downgraded to farm; an Exotic's `+5` direction stays freely selectable.
