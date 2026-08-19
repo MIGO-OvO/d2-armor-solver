@@ -111,6 +111,43 @@ test("maximum and range bounds participate in rule satisfaction", () => {
   );
 });
 
+test("at-most cap stays hard even when surplus budget must be spilled", () => {
+  // Total target (320) is well under the 500 armor budget, so ~180 surplus
+  // points must land somewhere. The solver used to spill them straight into
+  // the very stat capped with 至多, because a squared distance to the target
+  // cost the same as a squared distance to the cap. The cap must dominate.
+  const target = {
+    health: 20,
+    melee: 20,
+    grenade: 40,
+    super: 100,
+    class: 40,
+    weapons: 100,
+  };
+  const constraints = createTargetConstraints({
+    modes: { melee: "<=" },
+    targetValues: target,
+  });
+
+  const [solution] = solveLoadout({
+    target,
+    numPlus5: 0,
+    numPlus10: 5,
+    numPlus3: 0,
+    constraints,
+  });
+
+  assert.ok(
+    solution.totals.melee <= constraints.maximums.melee,
+    "the at-most cap must be enforced even though the surplus is dumped elsewhere",
+  );
+  assert.equal(
+    satisfiesTargetConstraints(solution.totals, target, constraints),
+    false,
+    "the exact stats can no longer all be met once the surplus has to go somewhere, but the cap itself must hold",
+  );
+});
+
 test("valid fuzzy solutions outrank score-zero classification", () => {
   const target = {
     health: 0,

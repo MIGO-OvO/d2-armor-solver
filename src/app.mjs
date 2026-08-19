@@ -3841,14 +3841,23 @@ function renderSetEffects() {
   const pieceSetHashes = [...counts.keys()].map(set => set.hash);
   const available = [...new Set([...inventorySetHashes, ...pieceSetHashes])]
     .sort((a, b) => getSetName(getArmorSetByHash(a)).localeCompare(getSetName(getArmorSetByHash(b))));
-  const setOptions = available.map(hash => {
+  // Build each picker from its own options so only the set that is actually
+  // selected gets marked. Sharing one options list (marking both a and b
+  // selected) made the browser show the first-selected option in BOTH selects,
+  // silently resetting the second set on every re-render.
+  const makeSetOptions = selectedHash => available.map(hash => {
     const set = getArmorSetByHash(hash);
-    const isSelected = setRequirement.type !== "none"
-      && (Number(setRequirement.setHash) === hash
-        || Number(setRequirement.a) === hash
-        || Number(setRequirement.b) === hash);
+    const isSelected = Number(selectedHash) === hash;
     return `<option value="${hash}" ${isSelected ? "selected" : ""}>${escapeHtml(getSetName(set))}</option>`;
   }).join("");
+  const firstSetHash = setRequirement.type === "set"
+    ? setRequirement.setHash
+    : setRequirement.type === "split"
+      ? setRequirement.a
+      : null;
+  const secondSetHash = setRequirement.type === "split" ? setRequirement.b : null;
+  const setOptions = makeSetOptions(firstSetHash);
+  const secondSetOptions = makeSetOptions(secondSetHash);
   const mode = setRequirement.type === "set" ? `set${setRequirement.count}` : setRequirement.type;
   const noSets = available.length === 0;
   const setRequirementDescription = calculatorMode === "solve"
@@ -3885,7 +3894,7 @@ function renderSetEffects() {
         </label>
         <label class="set-req-set" id="setReqBLabel" ${mode === "split" ? "" : "hidden"}>
           <span>${l("另一个套装", "另一個套裝", "Second set")}</span>
-          <select id="setReqB" onchange="updateSetRequirementPicks()">${setOptions}</select>
+          <select id="setReqB" onchange="updateSetRequirementPicks()">${secondSetOptions}</select>
         </label>
       </div>
     </div>
@@ -3908,14 +3917,6 @@ function renderSetEffects() {
     </div>` : ""}
     <div class="set-requirement-state" id="setRequirementState" aria-live="polite"></div>
   `;
-  if (mode === "split") {
-    const aSelect = document.getElementById("setReqA");
-    const bSelect = document.getElementById("setReqB");
-    if (aSelect && bSelect && bSelect.value === aSelect.value && bSelect.options.length > 1) {
-      const alternate = [...bSelect.options].findIndex(option => option.value !== aSelect.value);
-      if (alternate >= 0) bSelect.selectedIndex = alternate;
-    }
-  }
   syncUpgradeLocks();
 }
 

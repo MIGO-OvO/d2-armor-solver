@@ -428,8 +428,13 @@ export function singlePenalty(actual, target, isPriority, le100, force0, priorit
 // Structural score used for every internal optimization decision. Keeping hard
 // constraints and priority tiers in separate tuple fields avoids the precision
 // loss caused by encoding lexicographic order with 1e18/1e12 multipliers.
-// Tuple layout: [hard, p1, p2, p3, soft] — hard constraints dominate, then each
-// priority level in turn, then unranked fit and soft caps (≤maximum, ≤100, →0).
+// Tuple layout: [bounds, exact, p1, p2, p3, soft] — hard bounds (at-least /
+// at-most caps) dominate exact-target matching, which dominates each priority
+// tier in turn, then unranked fit and the legacy soft caps (≤100, force →0).
+// Bounds must outrank exact: when surplus budget has to be spilled somewhere,
+// the "至多/区间上限/必须达标" caps must not be treated as just one more
+// squared difference to the target, or the solver happily dumps the surplus
+// into the very stat the user asked to cap.
 function singleStatScoreRank(stat, actual, target, constraints) {
   const priorities = constraints?.priorities || {};
   const le100 = constraints?.le100 || {};
@@ -444,26 +449,31 @@ function singleStatScoreRank(stat, actual, target, constraints) {
     : difference * difference;
   if (priorities[stat]) fitPenalty *= 50;
   const level = priorityLevels[stat] || 0;
-  let hardPenalty = 0;
   const tier = [0, 0, 0];
   let softPenalty = 0;
   if (level >= 1 && level <= 3) tier[level - 1] = fitPenalty;
   else softPenalty = fitPenalty;
+
+  let hardBounds = 0;
   const minimum = minimums[stat] || 0;
   if (minimum > 0 && actual < minimum) {
-    hardPenalty += (minimum - actual) ** 2;
+    hardBounds += (minimum - actual) ** 2;
   }
-  if (exact[stat] && actual !== target) hardPenalty += difference ** 2;
   const maximum = maximums[stat];
   if (maximum !== undefined && actual > maximum) {
-    hardPenalty += (actual - maximum) ** 2;
+    hardBounds += (actual - maximum) ** 2;
   }
   if (le100[stat] && actual > 100) {
-    softPenalty += (actual - 100) ** 2 * 500;
+    hardBounds += (actual - 100) ** 2;
   }
-  if (force0[stat] && actual > 0) softPenalty += actual ** 2 * 500;
+
+  let hardExact = 0;
+  if (exact[stat] && actual !== target) hardExact += difference ** 2;
+  if (force0[stat] && actual > 0) hardExact += actual * actual;
+
   return [
-    hardPenalty,
+    hardBounds,
+    hardExact,
     tier[0],
     tier[1],
     tier[2],
@@ -472,7 +482,7 @@ function singleStatScoreRank(stat, actual, target, constraints) {
 }
 
 export function scoreStatsRank(actual, target, constraints) {
-  const total = [0, 0, 0, 0, 0];
+  const total = [0, 0, 0, 0, 0, 0];
   for (const stat of STATS) {
     const rank = singleStatScoreRank(
       stat, actual[stat], target[stat], constraints
