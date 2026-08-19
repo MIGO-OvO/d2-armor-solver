@@ -807,6 +807,29 @@ async function checkSetRequirementSnapshot(browser) {
       0,
       "a current loadout with only three matching pieces must not be offered",
     );
+
+    // Regression: choosing a second set in 2+2 (split) mode must persist. The
+    // two pickers used to share one options list where both sets were marked
+    // "selected", so the browser showed the first-selected set in both selects
+    // and every re-render silently reset the second set.
+    const setValues = await page
+      .locator("#setReqA option")
+      .evaluateAll(options => options.map(option => option.value));
+    assert.ok(setValues.length >= 2, "expected at least two sets in the picker");
+    const [firstSet, secondSet] = setValues;
+    await page.locator("#setReqMode").selectOption("split");
+    await page.locator("#setReqA").selectOption(firstSet);
+    await page.locator("#setReqB").selectOption(secondSet);
+    assert.equal(
+      await page.locator("#setReqA").inputValue(),
+      firstSet,
+      "the first 2+2 set must keep its value",
+    );
+    assert.equal(
+      await page.locator("#setReqB").inputValue(),
+      secondSet,
+      "the second 2+2 set must keep the value the user picked",
+    );
   } finally {
     await context.close();
   }
