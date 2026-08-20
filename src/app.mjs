@@ -811,6 +811,36 @@ function buildUserConstraints(fragments) {
   });
 }
 
+// Build the constraints for the "优化现有配装" path. Unlike the from-scratch
+// solver, the upgrade optimizer does not treat the whole six-stat target as an
+// exact match by default — it optimizes reach ≥ target and lets the must-meet
+// checkboxes act as floors. So only the explicitly cycled fuzzy rules ("至多 /
+// 至少 / 区间 / 精确") are forwarded, expressed in the armor-needed domain.
+function buildUpgradeFuzzyConstraints(fragments) {
+  const minimums = {};
+  const maximums = {};
+  const exact = {};
+  for (const stat of STATS) {
+    const mode = statFuzzyMode[stat];
+    if (!mode) continue;
+    const target = getVal('target_' + stat);
+    const frag = fragments[stat] || 0;
+    const lower = Math.max(0, target - frag);
+    const upper = Math.max(0, getVal('targetMax_' + stat) - frag);
+    if (mode === '>=') {
+      minimums[stat] = lower;
+    } else if (mode === '<=') {
+      maximums[stat] = lower;
+    } else if (mode === 'range') {
+      minimums[stat] = lower;
+      maximums[stat] = upper;
+    } else if (mode === '=') {
+      exact[stat] = true;
+    }
+  }
+  return { minimums, maximums, exact };
+}
+
 function hasNonExactTargetRules() {
   return STATS.some(stat => (statFuzzyMode[stat] || '=') !== '=');
 }
@@ -4756,6 +4786,7 @@ async function solveInventoryRequirement({
   fragments = getUpgradeFragments(),
   requiredStats = getUpgradeRequiredStats(),
   onlyPlus5Tuning = document.getElementById('upgradeOnlyPlus5')?.checked === true,
+  constraints = {},
 } = {}) {
   const button = document.getElementById("btnUpgradeAnalyze");
   const loading = document.getElementById("loading");
@@ -4796,6 +4827,7 @@ async function solveInventoryRequirement({
       currentPieces: upgradeBuildState,
       requiredStats,
       onlyPlus5Tuning,
+      userConstraints: constraints,
     });
     if (solveRevision !== inventorySolveRevision ||
         !sameSetRequirement(requirementSnapshot, setRequirement)) {
@@ -5201,6 +5233,7 @@ async function analyzeArmorUpgrades() {
   const messages = document.getElementById('messages');
   const targets = getUpgradeTargets();
   const fragments = getUpgradeFragments();
+  const constraints = buildUpgradeFuzzyConstraints(fragments);
   const requiredStats = getUpgradeRequiredStats();
   const reassignModifiers = document.getElementById('upgradeReassignModifiers')?.checked !== false;
   const onlyPlus5Tuning = document.getElementById('upgradeOnlyPlus5')?.checked === true;
@@ -5211,7 +5244,7 @@ async function analyzeArmorUpgrades() {
   let inventoryMessage = '';
   if (importedInventory.length > 0) {
     inventoryMessage = await solveInventoryRequirement({
-      targets, fragments, requiredStats, onlyPlus5Tuning,
+      targets, fragments, requiredStats, onlyPlus5Tuning, constraints,
     });
     if (inventoryMessage === null) return;
   }
@@ -5244,6 +5277,7 @@ async function analyzeArmorUpgrades() {
         reassignModifiers,
         requiredStats,
         onlyPlus5Tuning,
+        constraints,
       });
       renderUpgradeAnalysis(analysis, true);
       messages.innerHTML = inventoryMessage + `<div class="msg info">${icon('check')}${analysis.baseline.metrics.allReached

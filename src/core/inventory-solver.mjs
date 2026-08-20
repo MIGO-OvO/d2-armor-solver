@@ -27,6 +27,7 @@ export function solveInventoryLoadout({
   requiredStats = [],
   onlyPlus5Tuning = false,
   maxResults = 12,
+  userConstraints = {},
 }) {
   if (!setRequirement) return null;
   const normalizedRequiredStats = [...new Set(requiredStats)]
@@ -43,7 +44,7 @@ export function solveInventoryLoadout({
   ]));
   const evaluate = pieces => evaluateUpgradePieces(
     pieces, targets, fragments, reassignModifiers, normalizedRequiredStats,
-    onlyPlus5Tuning
+    onlyPlus5Tuning, userConstraints
   );
   const lockedPiecesBySlot = new Map(
     (Array.isArray(currentPieces) ? currentPieces : [])

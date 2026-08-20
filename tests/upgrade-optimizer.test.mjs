@@ -578,3 +578,68 @@ test("exotic class item identity distinguishes same-frame rolls with different p
     "perk-unknown rolls still match on the stat frame"
   );
 });
+
+test("at-most caps apply to the optimize-existing-loadout evaluation", () => {
+  const baseStats = {
+    health: 70, melee: 70, grenade: 130, super: 70, class: 80, weapons: 80,
+  };
+  const pieces = ["helmet", "arms", "chest", "legs", "classItem"].map((slot, index) => {
+    const piece = createDefaultUpgradePiece(index);
+    return normalizeUpgradePiece(
+      { ...piece, slot, baseStats: { ...baseStats } },
+      index,
+    );
+  });
+  const targets = {
+    health: 70, melee: 70, grenade: 100, super: 70, class: 80, weapons: 80,
+  };
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+
+  // Without a rule the same five pieces are "fully reached" and kept as-is.
+  const plain = evaluateUpgradePieces(pieces, targets, fragments, false, [], false);
+  assert.equal(plain.metrics.allReached, true);
+  assert.equal(plain.metrics.constraintBoundaryViolations, 0);
+
+  // With "至多 grenade 100" the leftover grenade (130) becomes a hard cap
+  // violation, so the baseline is no longer reported as "keep your armor".
+  const constraints = { maximums: { grenade: 100 } };
+  const capped = evaluateUpgradePieces(pieces, targets, fragments, false, [], false, constraints);
+  assert.equal(capped.metrics.constraintBoundaryViolations, 1);
+  assert.equal(capped.metrics.allReached, false);
+
+  // The replacement analysis must find a plan that respects the cap.
+  const analysis = analyzeUpgradeCandidates(
+    pieces, targets, fragments, true, [], false, constraints,
+  );
+  assert.ok(analysis.plan, "a cap-respecting replacement plan should be found");
+  assert.equal(analysis.plan.metrics.constraintBoundaryViolations, 0);
+  assert.ok(
+    analysis.plan.evaluation.finalTotals.grenade <= 100,
+    "the recommended plan must keep grenade at or below the at-most cap",
+  );
+});
+
+test("at-most metric accounting returns to the final domain for fragments", () => {
+  const targets = Object.fromEntries(STATS.map(stat => [stat, 50]));
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 20]));
+  // Armor-needed cap of 30 + 20 fragment bonus = final cap of 50.
+  const constraints = { maximums: { weapons: 30 } };
+  const atCap = {
+    ...targets, weapons: 50,
+  };
+  const overCap = {
+    ...targets, weapons: 55,
+  };
+  assert.equal(
+    getUpgradeMetrics(atCap, targets, 0, [], null, constraints, fragments)
+      .constraintBoundaryViolations,
+    0,
+    "exactly at the fragment-adjusted cap is not a violation",
+  );
+  assert.equal(
+    getUpgradeMetrics(overCap, targets, 0, [], null, constraints, fragments)
+      .constraintBoundaryViolations,
+    1,
+    "past the fragment-adjusted cap is a violation",
+  );
+});

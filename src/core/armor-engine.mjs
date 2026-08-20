@@ -48,6 +48,7 @@ export function analyzeUpgrade({
   reassignModifiers,
   requiredStats = [],
   onlyPlus5Tuning = false,
+  constraints = {},
 }) {
   return analyzeUpgradeCandidates(
     pieces,
@@ -56,6 +57,7 @@ export function analyzeUpgrade({
     reassignModifiers,
     requiredStats,
     onlyPlus5Tuning,
+    constraints,
   );
 }
 
