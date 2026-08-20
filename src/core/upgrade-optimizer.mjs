@@ -229,14 +229,25 @@ function normalizeRequiredStats(requiredStats = []) {
   return [...new Set(requiredStats)].filter(stat => STATS.includes(stat));
 }
 
-function getUpgradeEvaluationConstraints(armorTarget, requiredStats) {
-  return {
-    minimums: Object.fromEntries(requiredStats.map(stat => [stat, armorTarget[stat]])),
-  };
+// @param armorTarget  armor-needed stat amounts (target minus Fragments)
+// @param requiredStats must-meet stat ids (their floors always stay on)
+// @param userConstraints optional per-stat fuzzy rules ("至多/至少/区间/精确")
+//                        already expressed in the armor-needed domain
+function getUpgradeEvaluationConstraints(armorTarget, requiredStats, userConstraints = {}) {
+  const minimums = { ...(userConstraints.minimums || {}) };
+  const maximums = { ...(userConstraints.maximums || {}) };
+  const exact = { ...(userConstraints.exact || {}) };
+  // Must-meet floors always stay in effect and win over any fuzzy minimum set
+  // for the same stat.
+  for (const stat of requiredStats) {
+    minimums[stat] = Math.max(minimums[stat] || 0, armorTarget[stat]);
+  }
+  return { minimums, maximums, exact };
 }
 
 export function getUpgradeMetrics(
-  finalTotals, targets, score = 0, requiredStats = [], scoreRank = null
+  finalTotals, targets, score = 0, requiredStats = [], scoreRank = null,
+  constraints = {}, fragments = {},
 ) {
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   const deficits = STATS.map(stat => Math.max(0, targets[stat] - finalTotals[stat]));
@@ -247,8 +258,23 @@ export function getUpgradeMetrics(
     Math.max(0, targets[stat] - finalTotals[stat]));
   const requiredReachedCount = normalizedRequiredStats.filter(stat =>
     finalTotals[stat] >= targets[stat]).length;
+  // Cap/floor rules ("至多/至少/区间") are compared before every reach metric:
+  // a loadout that breaches a user-set cap is never reported as "keep current"
+  // or picked over one that respects it. Constraints are in the armor-needed
+  // domain, so add the fragment bonus back to evaluate the final totals.
+  const constraintBoundaryViolations = STATS.filter(stat => {
+    const floor = constraints.minimums?.[stat] || 0;
+    const ceiling = constraints.maximums?.[stat];
+    const fragment = fragments[stat] || 0;
+    return (ceiling !== undefined && finalTotals[stat] > ceiling + fragment)
+      || (floor > 0 && finalTotals[stat] < floor + fragment);
+  }).length;
+  const constraintExactViolations = STATS.filter(stat =>
+    constraints.exact?.[stat] && finalTotals[stat] !== targets[stat]).length;
   return {
-    allReached: reachedCount === STATS.length,
+    allReached: reachedCount === STATS.length
+      && constraintBoundaryViolations === 0
+      && constraintExactViolations === 0,
     shortfall: deficits.reduce((sum, value) => sum + value, 0),
     maxShortfall: Math.max(...deficits),
     reachedCount,
@@ -260,12 +286,20 @@ export function getUpgradeMetrics(
     requiredReachedCount,
     requiredShortfall: requiredDeficits.reduce((sum, value) => sum + value, 0),
     requiredMaxShortfall: requiredDeficits.length > 0 ? Math.max(...requiredDeficits) : 0,
+    constraintBoundaryViolations,
+    constraintExactViolations,
     scoreRank: Array.isArray(scoreRank) ? [...scoreRank] : null,
     score,
   };
 }
 
 export function compareUpgradeMetrics(left, right) {
+  const boundaryOrder = (left.constraintBoundaryViolations || 0)
+    - (right.constraintBoundaryViolations || 0);
+  if (boundaryOrder !== 0) return boundaryOrder;
+  const exactOrder = (left.constraintExactViolations || 0)
+    - (right.constraintExactViolations || 0);
+  if (exactOrder !== 0) return exactOrder;
   if (left.allReached !== right.allReached) return left.allReached ? -1 : 1;
   const hasRequiredStats = Math.max(left.requiredCount || 0, right.requiredCount || 0) > 0;
   if (hasRequiredStats) {
@@ -295,7 +329,7 @@ export function compareUpgradeMetrics(left, right) {
 }
 
 export function evaluateUpgradePieces(
-  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false
+  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}
 ) {
   if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
@@ -304,7 +338,7 @@ export function evaluateUpgradePieces(
     stat,
     Math.max(0, targets[stat] - (fragments[stat] || 0))
   ]));
-  const constraints = getUpgradeEvaluationConstraints(armorTarget, normalizedRequiredStats);
+  const constraints = getUpgradeEvaluationConstraints(armorTarget, normalizedRequiredStats, userConstraints);
   const manualArmorTotals = getManualUpgradeArmorTotals(pieces);
   const manualEvaluation = {
     totals: manualArmorTotals,
@@ -335,11 +369,11 @@ export function evaluateUpgradePieces(
     const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
     const manualMetrics = getUpgradeMetrics(
       manualFinal, targets, manualEvaluation.score, normalizedRequiredStats,
-      manualEvaluation.rank
+      manualEvaluation.rank, userConstraints, fragments
     );
     const automaticMetrics = getUpgradeMetrics(
       automaticFinal, targets, automaticEvaluation.score, normalizedRequiredStats,
-      automaticEvaluation.rank
+      automaticEvaluation.rank, userConstraints, fragments
     );
     if (compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) evaluation = automaticEvaluation;
   }
@@ -350,13 +384,14 @@ export function evaluateUpgradePieces(
     finalTotals,
     metrics: getUpgradeMetrics(
       finalTotals, targets, evaluation.score, normalizedRequiredStats,
-      evaluation.rank
+      evaluation.rank, userConstraints, fragments
     ),
   };
 }
 
-function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuning = false) {
+function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuning = false, userConstraints = {}) {
   const cache = new Map();
+  const constraintsKey = JSON.stringify(userConstraints);
   return (pieces, reassignModifiers) => {
     const key = pieces.map(piece => [
       piece.archetypeId,
@@ -367,11 +402,11 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
       piece.armorModSize,
       piece.armorModStat,
       ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
-    ].join(':')).join('|') + '#' + Number(reassignModifiers) + '#' + Number(onlyPlus5Tuning);
+    ].join(':')).join('|') + '#' + Number(reassignModifiers) + '#' + Number(onlyPlus5Tuning) + '#' + constraintsKey;
     const cached = cache.get(key);
     if (cached) return cached;
     const evaluation = evaluateUpgradePieces(
-      pieces, targets, fragments, reassignModifiers, requiredStats, onlyPlus5Tuning
+      pieces, targets, fragments, reassignModifiers, requiredStats, onlyPlus5Tuning, userConstraints
     );
     cache.set(key, evaluation);
     return evaluation;
@@ -388,13 +423,14 @@ const fullTargetSearchCache = new Map();
 const MAX_FULL_TARGET_CACHE_ENTRIES = 12;
 
 function getFullTargetSearchKey(
-  pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning
+  pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning, userConstraints = {}
 ) {
   return [
     ...STATS.map(stat => targets[stat] || 0),
     ...STATS.map(stat => fragments[stat] || 0),
     Number(reassignModifiers),
     Number(onlyPlus5Tuning),
+    JSON.stringify(userConstraints),
     ...pieces.flatMap(piece => [
       piece.archetypeId,
       piece.tertiary,
@@ -932,7 +968,7 @@ function getSingleSwapSeeds(pieces, rankings) {
 }
 
 export function analyzeUpgradeCandidates(
-  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false
+  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}
 ) {
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   // "Only +5/-5" applies to every plan this analysis proposes: the owned +3
@@ -948,10 +984,10 @@ export function analyzeUpgradeCandidates(
   pieces = projectPiecesToFullMasterwork(enteredPieces);
   if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
   const evaluatePieces = createUpgradeEvaluator(
-    targets, fragments, normalizedRequiredStats, onlyPlus5Tuning
+    targets, fragments, normalizedRequiredStats, onlyPlus5Tuning, userConstraints
   );
   const enteredBaseline = onlyPlus5Tuning
-    ? evaluateUpgradePieces(enteredPieces, targets, fragments, false, normalizedRequiredStats)
+    ? evaluateUpgradePieces(enteredPieces, targets, fragments, false, normalizedRequiredStats, false, userConstraints)
     : evaluatePieces(enteredPieces, false);
   const baseline = evaluatePieces(pieces, reassignModifiers);
   let rankings = [];
@@ -963,13 +999,13 @@ export function analyzeUpgradeCandidates(
     // fallback search.
     const allStatsRequired = normalizedRequiredStats.length === STATS.length;
     const fullTargetCacheKey = getFullTargetSearchKey(
-      pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning
+      pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning, userConstraints
     );
     let fullTargetSearch = fullTargetSearchCache.get(fullTargetCacheKey);
     if (!fullTargetSearch) {
       const fullTargetEvaluator = allStatsRequired
         ? evaluatePieces
-        : createUpgradeEvaluator(targets, fragments, STATS, onlyPlus5Tuning);
+        : createUpgradeEvaluator(targets, fragments, STATS, onlyPlus5Tuning, userConstraints);
       const fullTargetBaseline = allStatsRequired
         ? baseline
         : fullTargetEvaluator(pieces, reassignModifiers);
