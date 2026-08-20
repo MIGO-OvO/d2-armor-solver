@@ -54,6 +54,7 @@ import {
   getUpgradeModifierBudget,
   normalizeUpgradePiece,
   resolveCurrentLoadoutTotals,
+  satisfiesUpgradeStatRule,
 } from "./core/upgrade-optimizer.mjs";
 import {
   detectEquippedClass,
@@ -4459,18 +4460,55 @@ function formatUpgradePieceSummary(piece) {
   return `${formatUpgradeConfigSummary(config)} · ${roll}`;
 }
 
+// Rule-aware "how far from target" copy for a stat that is NOT satisfied.
+// 至多/区间 exceeding the cap is "over the cap"; being below an 至少 floor is
+// "short"; 精确 is the absolute distance. Returns '' when the stat is met.
+function upgradeStatShortText(stat, actual, targets, constraints = {}, fragments = {}) {
+  const ceiling = constraints.maximums?.[stat];
+  const floor = constraints.minimums?.[stat] || 0;
+  const exact = Boolean(constraints.exact?.[stat]);
+  const target = targets[stat] || 0;
+  const fragment = fragments[stat] || 0;
+  if (exact) {
+    const distance = actual - target;
+    return distance === 0
+      ? ''
+      : l(`${distance > 0 ? '超' : '差'} ${Math.abs(distance)}`, `${distance > 0 ? '超' : '差'} ${Math.abs(distance)}`, `${distance > 0 ? 'over' : 'short'} ${Math.abs(distance)}`);
+  }
+  if (ceiling !== undefined) {
+    const cap = ceiling + fragment;
+    if (actual > cap) return l(`超上限 ${actual - cap}`, `超上限 ${actual - cap}`, `over cap ${actual - cap}`);
+    return floor > 0 && actual < floor + fragment
+      ? l(`差 ${floor + fragment - actual}`, `差 ${floor + fragment - actual}`, `${floor + fragment - actual} short`)
+      : '';
+  }
+  if (floor > 0) {
+    const lower = floor + fragment;
+    return actual < lower
+      ? l(`差 ${lower - actual}`, `差 ${lower - actual}`, `${lower - actual} short`)
+      : '';
+  }
+  return actual < target
+    ? l(`差 ${target - actual}`, `差 ${target - actual}`, `${target - actual} short`)
+    : '';
+}
+
 function buildUpgradeStatComparison(analysis, afterTotals) {
+  const constraints = analysis.constraints || {};
+  const fragments = analysis.fragments || {};
+  const targets = analysis.targets || {};
   return `<div class="upgrade-stat-comparison">${STATS.map(stat => {
     const before = (analysis.enteredBaseline || analysis.baseline).finalTotals[stat];
     const after = afterTotals[stat];
     const delta = after - before;
-    const target = analysis.targets[stat];
+    const target = targets[stat];
     const isRequired = analysis.requiredStats?.includes(stat) === true;
-    const targetReached = after >= target;
+    const targetReached = satisfiesUpgradeStatRule(stat, afterTotals, targets, constraints, fragments);
+    const shortText = targetReached ? '' : upgradeStatShortText(stat, after, targets, constraints, fragments);
     const deltaClass = targetReached ? 'is-target-met' : 'is-shortfall';
     const targetStatus = targetReached
       ? l('达标','達標','met')
-      : l(`差 ${target - after}`, `差 ${target - after}`, `${target - after} short`);
+      : shortText;
     return `<div class="upgrade-stat ${isRequired ? 'is-required' : ''}">
       <div class="upgrade-stat-label" style="color:${STAT_COLORS[stat]}"><span>${icon(stat)}${STAT_LABELS[stat]}</span>${isRequired
         ? `<em>${l('必须达标','必須達標','Must meet')}</em>` : ''}</div>
@@ -4731,6 +4769,7 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
 let lastInventoryResult = null;
 let lastInventoryTargets = null;
 let lastInventoryRequiredStats = [];
+let lastInventoryConstraints = {};
 let selectedInventoryResultIndex = 0;
 let inventorySolveRevision = 0;
 
@@ -4739,6 +4778,7 @@ function clearInventoryResults() {
   lastInventoryResult = null;
   lastInventoryTargets = null;
   lastInventoryRequiredStats = [];
+  lastInventoryConstraints = {};
   selectedInventoryResultIndex = 0;
   const el = document.getElementById("inventoryResults");
   if (el) {
@@ -4835,6 +4875,7 @@ async function solveInventoryRequirement({
     }
     lastInventoryTargets = targets;
     lastInventoryRequiredStats = requiredStats;
+    lastInventoryConstraints = constraints;
     renderInventoryResults(result);
     if (result?.results?.length) {
       return `<div class="msg info">${icon("check")}${requirementSnapshot.type === "none"
@@ -4943,7 +4984,10 @@ function getDisplayedFinalTotals(entry) {
 function getInventoryResultSummary(entry) {
   const targets = lastInventoryTargets || {};
   const finalTotals = getDisplayedFinalTotals(entry);
-  const metCount = STATS.filter(stat => (finalTotals[stat] || 0) >= (targets[stat] || 0)).length;
+  const constraints = lastInventoryConstraints || {};
+  const fragments = getUpgradeFragments();
+  const metCount = STATS.filter(stat =>
+    satisfiesUpgradeStatRule(stat, finalTotals, targets, constraints, fragments)).length;
   const requiredCount = entry.metrics.requiredCount || lastInventoryRequiredStats.length;
   const requiredReachedCount = entry.metrics.requiredReachedCount || 0;
   const statusMet = requiredCount > 0 ? entry.metrics.requiredAllReached : entry.metrics.allReached;
@@ -5046,14 +5090,17 @@ function renderInventoryResultDetail(entry, index) {
       ${STATS.map(stat => {
         const actual = finalTotals[stat] || 0;
         const target = targets[stat] || 0;
-        const met = actual >= target;
+        const constraints = lastInventoryConstraints || {};
+        const fragments = getUpgradeFragments();
+        const met = satisfiesUpgradeStatRule(stat, finalTotals, targets, constraints, fragments);
+        const shortText = met ? '' : upgradeStatShortText(stat, actual, targets, constraints, fragments);
         const isRequired = lastInventoryRequiredStats.includes(stat);
         return `<div class="inventory-result-stat ${met ? "is-met" : "is-short"} ${isRequired ? 'is-required' : ''}" role="listitem">
           <span style="color:${STAT_COLORS[stat]}">${icon(stat)}${STAT_LABELS[stat]}</span>
           <strong>${actual}</strong>
           <small>${isRequired ? `${l('必须达标','必須達標','Must meet')} · ` : ''}${l("目标", "目標", "Target")} ${target}${met
             ? ` · ${l("达标", "達標", "met")}`
-            : ` · ${l(`差 ${target - actual}`, `差 ${target - actual}`, `${target - actual} short`)}`}</small>
+            : ` · ${shortText}`}</small>
         </div>`;
       }).join("")}
     </div>

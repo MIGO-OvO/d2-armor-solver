@@ -590,8 +590,10 @@ test("at-most caps apply to the optimize-existing-loadout evaluation", () => {
       index,
     );
   });
+  // Balanced six-stat target (sum = 500, the exact budget): reaching every
+  // other stat forces any surplus out of the capped stat.
   const targets = {
-    health: 70, melee: 70, grenade: 100, super: 70, class: 80, weapons: 80,
+    health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100,
   };
   const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
 
@@ -600,23 +602,46 @@ test("at-most caps apply to the optimize-existing-loadout evaluation", () => {
   assert.equal(plain.metrics.allReached, true);
   assert.equal(plain.metrics.constraintBoundaryViolations, 0);
 
-  // With "至多 grenade 100" the leftover grenade (130) becomes a hard cap
-  // violation, so the baseline is no longer reported as "keep your armor".
+  // With "至多 grenade 100" the leftover grenade becomes a hard cap violation,
+  // so the baseline is no longer reported as "keep your armor".
   const constraints = { maximums: { grenade: 100 } };
   const capped = evaluateUpgradePieces(pieces, targets, fragments, false, [], false, constraints);
   assert.equal(capped.metrics.constraintBoundaryViolations, 1);
   assert.equal(capped.metrics.allReached, false);
 
-  // The replacement analysis must find a plan that respects the cap.
+  // The replacement analysis must find a plan that respects the cap and does
+  // NOT treat the cap as a value to reach: surplus flows to other targets
+  // instead of being parked exactly at the cap.
   const analysis = analyzeUpgradeCandidates(
     pieces, targets, fragments, true, [], false, constraints,
   );
   assert.ok(analysis.plan, "a cap-respecting replacement plan should be found");
   assert.equal(analysis.plan.metrics.constraintBoundaryViolations, 0);
   assert.ok(
-    analysis.plan.evaluation.finalTotals.grenade <= 100,
-    "the recommended plan must keep grenade at or below the at-most cap",
+    analysis.plan.evaluation.finalTotals.grenade < 100,
+    "the recommended plan must keep grenade below the at-most cap instead of pinning it to the cap",
   );
+});
+
+test("at-most stats below their cap count as met with no shortfall", () => {
+  const targets = Object.fromEntries(STATS.map(stat => [stat, 50]));
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 10]));
+  const constraints = { maximums: { weapons: 40 } }; // +10 fragments => final cap 50
+  const belowCap = { ...targets, weapons: 45 };
+  const aboveCap = { ...targets, weapons: 55 };
+
+  const below = getUpgradeMetrics(belowCap, targets, 0, [], null, constraints, fragments);
+  assert.equal(below.reachedCount, STATS.length, "a capped stat below its cap is met");
+  assert.equal(below.shortfall, 0, "being below an at-most cap is not a shortfall");
+  assert.equal(below.excess, 0, "being below an at-most cap is not an excess");
+  assert.equal(below.constraintBoundaryViolations, 0);
+  assert.equal(below.allReached, true);
+
+  const over = getUpgradeMetrics(aboveCap, targets, 0, [], null, constraints, fragments);
+  assert.equal(over.reachedCount, STATS.length - 1, "exceeding the at-most cap is NOT met");
+  assert.equal(over.excess, 5, "the amount over the fragment-adjusted cap is the excess");
+  assert.equal(over.constraintBoundaryViolations, 1);
+  assert.equal(over.allReached, false);
 });
 
 test("at-most metric accounting returns to the final domain for fragments", () => {
