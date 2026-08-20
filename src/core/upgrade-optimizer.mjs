@@ -238,11 +238,34 @@ function getUpgradeEvaluationConstraints(armorTarget, requiredStats, userConstra
   const maximums = { ...(userConstraints.maximums || {}) };
   const exact = { ...(userConstraints.exact || {}) };
   // Must-meet floors always stay in effect and win over any fuzzy minimum set
-  // for the same stat.
+  // for the same stat — EXCEPT for a stat carrying a user cap (至多/区间 upper
+  // bound): that cap is a ceiling, not a value to reach, so the all-six-stats
+  // pre-check must never pin it to its cap via a mandatory floor.
   for (const stat of requiredStats) {
+    if (maximums[stat] !== undefined) continue;
     minimums[stat] = Math.max(minimums[stat] || 0, armorTarget[stat]);
   }
   return { minimums, maximums, exact };
+}
+
+// Per-stat target satisfaction for the upgrade path. Rules change what counts
+// as "达标": 至多/区间 are ceilings (below is satisfied, above is a violation),
+// 至少 keeps the >= floor, and 精确 demands an exact match. Constraints are in
+// the armor-needed domain, so the fragment bonus is added back here. Mirrors
+// getUpgradeMetrics and the UI's per-stat badges so they can never disagree.
+export function satisfiesUpgradeStatRule(stat, finalTotals, targets, constraints = {}, fragments = {}) {
+  const value = finalTotals[stat];
+  const ceiling = constraints.maximums?.[stat];
+  const floor = constraints.minimums?.[stat] || 0;
+  const exact = Boolean(constraints.exact?.[stat]);
+  const fragment = fragments[stat] || 0;
+  if (exact) return value === targets[stat];
+  if (ceiling !== undefined && floor > 0) {
+    return value >= floor + fragment && value <= ceiling + fragment;
+  }
+  if (ceiling !== undefined) return value <= ceiling + fragment;
+  if (floor > 0) return value >= floor + fragment;
+  return value >= targets[stat];
 }
 
 export function getUpgradeMetrics(
@@ -250,9 +273,31 @@ export function getUpgradeMetrics(
   constraints = {}, fragments = {},
 ) {
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
-  const deficits = STATS.map(stat => Math.max(0, targets[stat] - finalTotals[stat]));
-  const excesses = STATS.map(stat => Math.max(0, finalTotals[stat] - targets[stat]));
-  const reachedCount = STATS.filter(stat => finalTotals[stat] >= targets[stat]).length;
+  // Deficit is rule-aware: an at-most stat below its cap is not "short" at all
+  // (the cap is a ceiling, not a value to reach), so the optimizer never pushes
+  // it up to the cap and the surplus stays available for other stats.
+  const deficits = STATS.map(stat => {
+    const final = finalTotals[stat];
+    const ceiling = constraints.maximums?.[stat];
+    const floor = constraints.minimums?.[stat] || 0;
+    const exact = Boolean(constraints.exact?.[stat]);
+    const fragment = fragments[stat] || 0;
+    if (exact) return Math.abs(final - targets[stat]);
+    if (ceiling !== undefined && floor <= 0) return 0;
+    if (floor > 0) return Math.max(0, floor + fragment - final);
+    return Math.max(0, targets[stat] - final);
+  });
+  const excesses = STATS.map(stat => {
+    const final = finalTotals[stat];
+    const ceiling = constraints.maximums?.[stat];
+    const exact = Boolean(constraints.exact?.[stat]);
+    const fragment = fragments[stat] || 0;
+    if (exact) return Math.abs(final - targets[stat]);
+    if (ceiling !== undefined) return Math.max(0, final - (ceiling + fragment));
+    return Math.max(0, final - targets[stat]);
+  });
+  const reachedCount = STATS.filter(stat =>
+    satisfiesUpgradeStatRule(stat, finalTotals, targets, constraints, fragments)).length;
   const exactCount = STATS.filter(stat => finalTotals[stat] === targets[stat]).length;
   const requiredDeficits = normalizedRequiredStats.map(stat =>
     Math.max(0, targets[stat] - finalTotals[stat]));
@@ -338,6 +383,14 @@ export function evaluateUpgradePieces(
     stat,
     Math.max(0, targets[stat] - (fragments[stat] || 0))
   ]));
+  // 至多/区间 values are CEILINGS, not goals to reach: score them against
+  // their floor (0 for a pure at-most) so mods/tuning never park surplus in a
+  // capped stat — the points flow to other targets instead.
+  const scoringTarget = Object.fromEntries(STATS.map(stat => {
+    const ceiling = userConstraints.maximums?.[stat];
+    if (ceiling === undefined) return [stat, armorTarget[stat]];
+    return [stat, userConstraints.minimums?.[stat] || 0];
+  }));
   const constraints = getUpgradeEvaluationConstraints(armorTarget, normalizedRequiredStats, userConstraints);
   const manualArmorTotals = getManualUpgradeArmorTotals(pieces);
   const manualEvaluation = {
@@ -351,8 +404,8 @@ export function evaluateUpgradePieces(
       index,
       piece.armorModSize > 0 ? { size:piece.armorModSize, stat:piece.armorModStat } : null
     ])),
-    rank: scoreStatsRank(manualArmorTotals, armorTarget, constraints),
-    score: scoreStats(manualArmorTotals, armorTarget, constraints),
+    rank: scoreStatsRank(manualArmorTotals, scoringTarget, constraints),
+    score: scoreStats(manualArmorTotals, scoringTarget, constraints),
   };
   let evaluation = manualEvaluation;
   if (reassignModifiers) {
@@ -362,7 +415,7 @@ export function evaluateUpgradePieces(
     const fixedTuningTargets = pieces.map(piece =>
       piece.tuningMode === 'plus3' ? null : piece.tuningTo);
     const automaticEvaluation = evaluateConfig(
-      configs, armorTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, constraints,
+      configs, scoringTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, constraints,
       fixedTuningTargets
     );
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
@@ -1069,6 +1122,7 @@ export function analyzeUpgradeCandidates(
     targets: { ...targets },
     fragments: { ...fragments },
     requiredStats: normalizedRequiredStats,
+    constraints: { ...userConstraints },
     reassignModifiers,
     projectedMasterworkIndices,
     enteredBaseline,
