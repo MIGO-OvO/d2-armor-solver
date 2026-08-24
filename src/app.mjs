@@ -815,8 +815,7 @@ function buildUserConstraints(fragments) {
 // Use the same default-exact rules as the from-scratch solver. Required-stat
 // checkboxes still provide fallback ordering when no complete plan exists.
 function buildUpgradeFuzzyConstraints(fragments) {
-  const { minimums, maximums, exact } = buildUserConstraints(fragments);
-  return { minimums, maximums, exact };
+  return buildUserConstraints(fragments);
 }
 
 function hasNonExactTargetRules() {
