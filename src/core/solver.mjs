@@ -221,12 +221,9 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
   return best || { from: STATS.find(s => s !== fixedTo), to: fixedTo || STATS[1] };
 }
 
-// fixedTuningTargets describes armor you already own: entry i is the stat piece
-// i's tuning mod rolled on its +5 side, or null when that piece runs a +3 mod.
-// Both the +5 stat and the mode come with the piece, so only the -5 source and
-// the armor mods get re-picked. Pass null — as the from-scratch solver does — to
-// let the evaluator choose modes and both tuning sides freely, since armor being
-// farmed can roll anything.
+// fixedTuningTargets describes armor you already own: a stat id pins a
+// Legendary piece's rolled +5 side, null marks +3 mode, and undefined keeps a
+// shift piece's +5 side free (Exotic armor). Pass null for fully farmed armor.
 export function evaluateConfig(
   baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints,
   fixedTuningTargets = null, runtimeOptions = {}
@@ -264,7 +261,9 @@ export function evaluateConfig(
   const masks = [];
   if (fixedTuningTargets) {
     let fixedMask = 0;
-    for (let i = 0; i < 5; i++) if (!fixedTuningTargets[i]) fixedMask |= (1 << i);
+    for (let i = 0; i < 5; i++) {
+      if (fixedTuningTargets[i] === null) fixedMask |= (1 << i);
+    }
     masks.push(fixedMask);
   } else {
     for (let m = 0; m < 32; m++) {
@@ -291,8 +290,11 @@ export function evaluateConfig(
     const hitsRemaining = { ...forcedFromHits };
     for (let i = 0; i < 5; i++) {
       if (tuningAssignments[i] !== null) continue;
+      const fixedTo = STATS.includes(fixedTuningTargets?.[i])
+        ? fixedTuningTargets[i]
+        : null;
       const t = applySingleTuning(
-        totals, target, constraints, hitsRemaining, fixedTuningTargets?.[i] || null
+        totals, target, constraints, hitsRemaining, fixedTo
       );
       tuningAssignments[i] = { mode: '+5-5', from: t.from, to: t.to };
       totals[t.from] -= 5;
@@ -342,7 +344,9 @@ export function evaluateConfig(
         const currentTo = bestOverall.tuningAssignments[i].to;
         // With a pinned +5 (owned armor) only the -5 source can be retried;
         // otherwise both sides of the shift must remain searchable.
-        const pinnedTo = fixedTuningTargets?.[i] || null;
+        const pinnedTo = STATS.includes(fixedTuningTargets?.[i])
+          ? fixedTuningTargets[i]
+          : null;
         const variants = pinnedTo
           ? STATS
             .filter(stat => stat !== pinnedTo)

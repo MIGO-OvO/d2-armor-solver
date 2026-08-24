@@ -98,7 +98,7 @@ test("owned-armor loadouts never equip more than one Exotic armor piece", () => 
   ));
 });
 
-test("large-inventory beam search keeps legal alternatives when Exotics score highest", () => {
+test("large-inventory search keeps legal alternatives when Exotics score highest", () => {
   const items = SLOTS.flatMap((slot, slotIndex) => {
     const legendaries = Array.from({ length: 6 }, (_, itemIndex) =>
       makeItem(`Legendary ${slot} ${itemIndex}`, slot, null, {
@@ -130,6 +130,55 @@ test("large-inventory beam search keeps legal alternatives when Exotics score hi
   assert.ok(result.results.every(entry =>
     entry.pieces.filter(piece => piece.exotic).length <= 1
   ));
+});
+
+test("large inventories keep an exact combination that looks bad in an early slot", () => {
+  const exactPiece = { weapons: 0, health: 0, class: 0, grenade: 0, super: 0, melee: 0 };
+  const supportingPiece = {
+    weapons: 15, health: 15, class: 15, grenade: 15, super: 15, melee: 15,
+  };
+  const temptingDecoy = {
+    weapons: 12, health: 12, class: 12, grenade: 12, super: 12, melee: 12,
+  };
+  const items = [
+    ...Array.from({ length: 25 }, (_, index) =>
+      makeItem(`Helmet decoy ${index}`, "helmet", SET_A, temptingDecoy, index + 1)),
+    makeItem("Exact helmet", "helmet", SET_A, exactPiece, 99),
+    ...Array.from({ length: 16 }, (_, index) =>
+      makeItem(`Arms ${index}`, "arms", SET_A, supportingPiece, index + 1)),
+    ...Array.from({ length: 10 }, (_, index) =>
+      makeItem(`Chest ${index}`, "chest", SET_A, supportingPiece, index + 1)),
+    makeItem("Legs", "legs", SET_A, supportingPiece, 1),
+    makeItem("Class item", "classItem", SET_A, supportingPiece, 1),
+  ].map(item => ({
+    ...item,
+    tuningMode: "shift",
+    tuningStat: null,
+    tuningTo: null,
+    tuningUnknown: true,
+    armorModSize: 0,
+    armorModStat: "health",
+    masterworkTier: 5,
+    effectiveBaseStats: { ...item.baseStats },
+    optimizationBaseStats: { ...item.baseStats },
+  }));
+  const targets = Object.fromEntries(Object.keys(zero).map(stat => [stat, 60]));
+  const exact = Object.fromEntries(Object.keys(zero).map(stat => [stat, true]));
+
+  const result = solveInventoryLoadout({
+    items,
+    targets,
+    fragments: zero,
+    setRequirement: { type: "set", setHash: SET_A, count: 4 },
+    reassignModifiers: false,
+    userConstraints: { exact },
+  });
+
+  assert.equal(result.results[0].metrics.allReached, true);
+  assert.equal(
+    result.results[0].pieces.find(piece => piece.slot === "helmet").itemName,
+    "Exact helmet",
+  );
 });
 
 test("4-piece requirement allows other armor while requiring at least four set pieces", () => {

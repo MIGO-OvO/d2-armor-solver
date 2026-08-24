@@ -1,5 +1,6 @@
 import { STATS } from "./armor-model.mjs";
 import {
+  applyManualUpgradeModifiers,
   compareUpgradeMetrics,
   createUpgradePieceFromItem,
   evaluateUpgradePieces,
@@ -7,11 +8,9 @@ import {
 } from "./upgrade-optimizer.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
-const MAX_FREE_CANDIDATES = 24;
-const MAX_LOCAL_CANDIDATES = 12;
 const MAX_ASSIGNMENTS = 200;
 const EXACT_COMBINATION_LIMIT = 4096;
-const INVENTORY_BEAM_WIDTH = 64;
+const INVENTORY_BEAM_WIDTH = 128;
 
 // Build a five-piece loadout from the imported inventory that satisfies the
 // set-bonus requirement (or none) and comes as close as possible to the stat
@@ -49,7 +48,7 @@ export function solveInventoryLoadout({
   const lockedPiecesBySlot = new Map(
     (Array.isArray(currentPieces) ? currentPieces : [])
       .filter(piece => piece?.locked && SLOT_ORDER.includes(piece.slot))
-      .map(piece => [piece.slot, { ...piece }]),
+      .map(piece => [piece.slot, projectInventoryPiece(piece)]),
   );
   const keyOf = pieces => pieces
     .map(piece => `${piece.slot}:${getPieceInstanceKey(piece)}`)
@@ -84,49 +83,15 @@ export function solveInventoryLoadout({
       continue;
     }
     const beamPieces = searchAssignmentBeam(
-      bySlot,
-      constrainedAssignment,
-      armorTarget,
-      lockedPiecesBySlot,
-      normalizedRequiredStats,
+      bySlot, constrainedAssignment, lockedPiecesBySlot, setRequirement,
+      armorTarget, normalizedRequiredStats, reassignModifiers, onlyPlus5Tuning,
     );
-    if (beamPieces.length > 0) {
-      const evaluatedBeam = beamPieces.map(pieces => ({
-        pieces,
-        evaluation: evaluate(pieces),
-      })).sort((left, right) =>
-        compareUpgradeMetrics(left.evaluation.metrics, right.evaluation.metrics));
-      for (const entry of evaluatedBeam) {
-        if (!isLegalArmorLoadout(entry.pieces)) continue;
-        if (!satisfiesRequirement(entry.pieces, setRequirement)) continue;
-        push(entry.pieces, entry.evaluation);
-        examined++;
-      }
-      const searchableSlots = SLOT_ORDER.filter(slot => !lockedPiecesBySlot.has(slot));
-      for (const entry of evaluatedBeam.slice(0, 4)) {
-        examined += localSearch(
-          entry.pieces, searchableSlots, bySlot, constrainedAssignment.fixed,
-          armorTarget, normalizedRequiredStats, evaluate, push
-        );
-      }
-      continue;
+    for (const pieces of beamPieces) {
+      if (!isLegalArmorLoadout(pieces)) continue;
+      if (!satisfiesRequirement(pieces, setRequirement)) continue;
+      push(pieces, evaluate(pieces));
+      examined++;
     }
-    const filled = greedyFill(
-      bySlot, constrainedAssignment, armorTarget, lockedPiecesBySlot,
-      normalizedRequiredStats
-    );
-    if (!filled) continue;
-    // A locked piece may occupy a slot selected by the set assignment. Reject
-    // that assignment unless the resulting five real pieces still satisfy it.
-    if (!isLegalArmorLoadout(filled.pieces)
-      || !satisfiesRequirement(filled.pieces, setRequirement)) continue;
-    push(filled.pieces, evaluate(filled.pieces));
-    examined++;
-    const searchableSlots = SLOT_ORDER.filter(slot => !lockedPiecesBySlot.has(slot));
-    examined += localSearch(
-      filled.pieces, searchableSlots, bySlot, constrainedAssignment.fixed,
-      armorTarget, normalizedRequiredStats, evaluate, push
-    );
   }
 
   const currentKey = Array.isArray(currentPieces)
@@ -184,7 +149,7 @@ function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot
     if (slotIndex === SLOT_ORDER.length) {
       loadouts.push(chosen.map((candidate, index) => candidate.piece
         ? { ...candidate.piece }
-        : createUpgradePieceFromItem(candidate.item, index)));
+        : createInventorySearchPiece(candidate.item, index)));
       return;
     }
     for (const candidate of candidatesBySlot[slotIndex]) {
@@ -200,64 +165,251 @@ function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot
   return loadouts;
 }
 
+function projectInventoryPiece(piece) {
+  return piece?.optimizationBaseStats
+    ? { ...piece, baseStats: { ...piece.optimizationBaseStats } }
+    : { ...piece };
+}
+
+function createInventorySearchPiece(item, slotIndex) {
+  return projectInventoryPiece(createUpgradePieceFromItem(item, slotIndex));
+}
+
+function getRequirementCoverage(piece, requirement) {
+  if (requirement.type === "set") {
+    return [Number(piece.setHash) === Number(requirement.setHash) ? 1 : 0, 0];
+  }
+  if (requirement.type === "split") {
+    return [
+      Number(piece.setHash) === Number(requirement.a) ? 1 : 0,
+      Number(piece.setHash) === Number(requirement.b) ? 1 : 0,
+    ];
+  }
+  return [0, 0];
+}
+
+function getEvaluationContribution(piece, reassignModifiers, onlyPlus5Tuning) {
+  const config = getUpgradeConfig(piece);
+  if (!reassignModifiers) {
+    return {
+      stats: applyManualUpgradeModifiers(config, piece),
+      descriptor: "",
+    };
+  }
+
+  const tuningMode = onlyPlus5Tuning && piece.tuningMode === "plus3"
+    ? "shift"
+    : piece.tuningMode;
+  const tuning = tuningMode === "plus3"
+    ? `+3:${[...(config.masterworkStats || [])].sort().join(",")}`
+    : `shift:${piece.exotic ? "free" : piece.tuningTo || "unknown"}`;
+  return {
+    stats: config.baseStats,
+    descriptor: `${tuning}:mod${piece.armorModSize || 0}`,
+  };
+}
+
+function getStateKey(state, includeCoverage = true) {
+  const stats = STATS.map(stat => state.stats[stat]).join(",");
+  // Modifier budgets and rolled tuning destinations affect the five-piece
+  // total as a multiset; their armor-slot order does not. Canonicalizing that
+  // multiset avoids retaining equivalent permutations in large inventories.
+  const descriptors = [...state.descriptors].sort().join("|");
+  const coverage = includeCoverage ? `|${state.coverageA}|${state.coverageB}` : "";
+  return `${stats}#${descriptors}#${state.exoticCount}${coverage}`;
+}
+
+function getCapabilityBounds(piece, reassignModifiers, onlyPlus5Tuning) {
+  const config = getUpgradeConfig(piece);
+  if (!reassignModifiers) {
+    const stats = applyManualUpgradeModifiers(config, piece);
+    return { minimums: stats, maximums: stats };
+  }
+
+  const minimums = { ...config.baseStats };
+  const maximums = { ...config.baseStats };
+  const tuningMode = onlyPlus5Tuning && piece.tuningMode === "plus3"
+    ? "shift"
+    : piece.tuningMode;
+  if (tuningMode === "plus3") {
+    for (const stat of config.masterworkStats || []) {
+      minimums[stat] += 1;
+      maximums[stat] += 1;
+    }
+  } else if (piece.exotic) {
+    for (const stat of STATS) {
+      minimums[stat] -= 5;
+      maximums[stat] += 5;
+    }
+  } else if (STATS.includes(piece.tuningTo)) {
+    minimums[piece.tuningTo] += 5;
+    maximums[piece.tuningTo] += 5;
+    for (const stat of STATS) {
+      if (stat !== piece.tuningTo) minimums[stat] -= 5;
+    }
+  }
+  for (const stat of STATS) maximums[stat] += piece.armorModSize || 0;
+  return { minimums, maximums };
+}
+
+function getOptimisticScore(state, remainingBounds, armorTarget, requiredStats) {
+  const requiredSet = new Set(requiredStats);
+  let lowerBound = 0;
+  let midpointDistance = 0;
+  for (const stat of STATS) {
+    const minimum = state.minimums[stat] + remainingBounds.minimums[stat];
+    const maximum = state.maximums[stat] + remainingBounds.maximums[stat];
+    const target = armorTarget[stat];
+    const gap = target < minimum
+      ? minimum - target
+      : target > maximum
+        ? target - maximum
+        : 0;
+    const weight = requiredSet.has(stat) ? 1e6 : 1;
+    lowerBound += gap * gap * weight;
+    const midpoint = (minimum + maximum) / 2;
+    midpointDistance += (midpoint - target) ** 2 * weight;
+  }
+  return [lowerBound, midpointDistance];
+}
+
+function compareBeamStates(left, right) {
+  return left.score[0] - right.score[0] || left.score[1] - right.score[1];
+}
+
+// Large inventories keep a broad, target-aware frontier. Unlike the previous
+// prefix-ratio beam, the score includes every unfilled slot's reachable range,
+// so a piece is not discarded merely because it looks weak before its support
+// pieces are added. Evaluation-equivalent identities are still collapsed.
 function searchAssignmentBeam(
-  bySlot, assignment, armorTarget, lockedPiecesBySlot, requiredStats
+  bySlot, assignment, lockedPiecesBySlot, requirement, armorTarget,
+  requiredStats, reassignModifiers, onlyPlus5Tuning,
 ) {
-  let states = [{
-    chosen: [],
-    partial: Object.fromEntries(STATS.map(stat => [stat, 0])),
-    score: 0,
-    exoticCount: 0,
-  }];
-  for (let slotIndex = 0; slotIndex < SLOT_ORDER.length; slotIndex++) {
-    const slot = SLOT_ORDER[slotIndex];
+  const candidatesBySlot = [];
+  for (const slot of SLOT_ORDER) {
+    const slotIndex = SLOT_ORDER.indexOf(slot);
     const lockedPiece = lockedPiecesBySlot.get(slot);
     const requiredSetHash = assignment.fixed.get(slot);
-    const next = [];
-    for (const state of states) {
-      if (lockedPiece) {
-        const exoticCount = state.exoticCount + Number(Boolean(lockedPiece.exotic));
-        if (exoticCount > 1) continue;
-        const baseStats = getUpgradeConfig(lockedPiece).baseStats;
-        const partial = { ...state.partial };
-        for (const stat of STATS) partial[stat] += baseStats?.[stat] || 0;
-        next.push({
-          chosen: [...state.chosen, { piece: { ...lockedPiece } }],
-          partial,
-          score: fitScore(null, partial, slotIndex + 1, armorTarget, requiredStats),
-          exoticCount,
-        });
-        continue;
-      }
-      const items = requiredSetHash
+    const rawCandidates = lockedPiece
+      ? [{ ...lockedPiece }]
+      : (requiredSetHash
         ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
-        : bySlot.get(slot);
-      const candidates = rankSlotCandidates(
-        items.filter(item => !item.exotic || state.exoticCount === 0),
-        state.partial, slotIndex + 1, armorTarget, requiredStats
+        : bySlot.get(slot)
+      ).map(item => createInventorySearchPiece(item, slotIndex));
+    if (rawCandidates.length === 0) return [];
+
+    const compressed = new Map();
+    for (const piece of rawCandidates) {
+      const contribution = getEvaluationContribution(
+        piece, reassignModifiers, onlyPlus5Tuning
       );
-      for (const item of candidates) {
-        const exoticCount = state.exoticCount + Number(Boolean(item.exotic));
-        if (exoticCount > 1) continue;
-        const partial = { ...state.partial };
-        const itemStats = getItemStats(item);
-        for (const stat of STATS) partial[stat] += itemStats[stat] || 0;
-        next.push({
-          chosen: [...state.chosen, { item }],
-          partial,
-          score: fitScore(null, partial, slotIndex + 1, armorTarget, requiredStats),
-          exoticCount,
-        });
+      const bounds = getCapabilityBounds(piece, reassignModifiers, onlyPlus5Tuning);
+      const coverage = getRequirementCoverage(piece, requirement);
+      const key = [
+        ...STATS.map(stat => contribution.stats[stat]),
+        contribution.descriptor,
+        Number(Boolean(piece.exotic)),
+        ...coverage,
+      ].join(":");
+      if (!compressed.has(key)) {
+        compressed.set(key, { piece, contribution, coverage, bounds });
       }
     }
-    next.sort((left, right) => left.score - right.score);
-    states = next.slice(0, INVENTORY_BEAM_WIDTH);
-    if (states.length === 0) return [];
+    candidatesBySlot.push({ slotIndex, candidates: [...compressed.values()] });
   }
-  return states.map(state => state.chosen.map((candidate, index) =>
-    candidate.piece
-      ? { ...candidate.piece }
-      : createUpgradePieceFromItem(candidate.item, index)));
+
+  // Fewer distinct candidates first keeps intermediate state maps small; the
+  // piece array remains in canonical slot order for the evaluator and UI.
+  candidatesBySlot.sort((left, right) =>
+    left.candidates.length - right.candidates.length
+  );
+  const remainingBounds = Array.from(
+    { length: candidatesBySlot.length + 1 },
+    () => ({
+      minimums: Object.fromEntries(STATS.map(stat => [stat, 0])),
+      maximums: Object.fromEntries(STATS.map(stat => [stat, 0])),
+    }),
+  );
+  for (let index = candidatesBySlot.length - 1; index >= 0; index--) {
+    const candidates = candidatesBySlot[index].candidates;
+    for (const stat of STATS) {
+      remainingBounds[index].minimums[stat] = remainingBounds[index + 1].minimums[stat]
+        + Math.min(...candidates.map(candidate => candidate.bounds.minimums[stat]));
+      remainingBounds[index].maximums[stat] = remainingBounds[index + 1].maximums[stat]
+        + Math.max(...candidates.map(candidate => candidate.bounds.maximums[stat]));
+    }
+  }
+  let states = new Map([["start", {
+    pieces: Array(SLOT_ORDER.length),
+    stats: Object.fromEntries(STATS.map(stat => [stat, 0])),
+    minimums: Object.fromEntries(STATS.map(stat => [stat, 0])),
+    maximums: Object.fromEntries(STATS.map(stat => [stat, 0])),
+    descriptors: Array(SLOT_ORDER.length).fill(""),
+    exoticCount: 0,
+    coverageA: 0,
+    coverageB: 0,
+  }]]);
+
+  for (let candidateIndex = 0; candidateIndex < candidatesBySlot.length; candidateIndex++) {
+    const { slotIndex, candidates } = candidatesBySlot[candidateIndex];
+    const next = new Map();
+    for (const state of states.values()) {
+      for (const candidate of candidates) {
+        const exoticCount = state.exoticCount + Number(Boolean(candidate.piece.exotic));
+        if (exoticCount > 1) continue;
+        const pieces = [...state.pieces];
+        pieces[slotIndex] = candidate.piece;
+        const descriptors = [...state.descriptors];
+        descriptors[slotIndex] = candidate.contribution.descriptor;
+        const nextState = {
+          pieces,
+          descriptors,
+          exoticCount,
+          coverageA: Math.min(
+            state.coverageA + candidate.coverage[0],
+            requirement.type === "set" ? requirement.count : 2,
+          ),
+          coverageB: Math.min(
+            state.coverageB + candidate.coverage[1],
+            requirement.type === "split" ? 2 : 0,
+          ),
+          stats: Object.fromEntries(STATS.map(stat => [
+            stat,
+            state.stats[stat] + candidate.contribution.stats[stat],
+          ])),
+          minimums: Object.fromEntries(STATS.map(stat => [
+            stat,
+            state.minimums[stat] + candidate.bounds.minimums[stat],
+          ])),
+          maximums: Object.fromEntries(STATS.map(stat => [
+            stat,
+            state.maximums[stat] + candidate.bounds.maximums[stat],
+          ])),
+        };
+        nextState.score = getOptimisticScore(
+          nextState, remainingBounds[candidateIndex + 1], armorTarget, requiredStats,
+        );
+        const key = getStateKey(nextState);
+        const previous = next.get(key);
+        if (!previous || compareBeamStates(nextState, previous) < 0) {
+          next.set(key, nextState);
+        }
+      }
+    }
+    states = new Map(
+      [...next.entries()]
+        .sort((left, right) => compareBeamStates(left[1], right[1]))
+        .slice(0, INVENTORY_BEAM_WIDTH),
+    );
+    if (states.size === 0) return [];
+  }
+
+  const loadouts = [];
+  for (const state of states.values()) {
+    if (!satisfiesRequirement(state.pieces, requirement)) continue;
+    loadouts.push(state.pieces);
+  }
+  return loadouts;
 }
 
 function combinations(items, count) {
@@ -333,144 +485,11 @@ function enumerateSplitAssignments(bySlot, aHash, bHash) {
   return out;
 }
 
-function fitScore(baseStats, partial, completed, armorTarget, requiredStats = []) {
-  const requiredSet = new Set(requiredStats);
-  let score = 0;
-  for (const stat of STATS) {
-    const actual = partial[stat] + (baseStats?.[stat] || 0);
-    const expected = armorTarget[stat] * (completed / 5);
-    const diff = actual - expected;
-    const requiredWeight = requiredSet.has(stat) ? 1e6 : 1;
-    score += (diff < 0 ? diff * diff * 3 : diff * diff) * requiredWeight;
-  }
-  return score;
-}
-
-function getItemStats(item) {
-  return item?.optimizationBaseStats || item?.effectiveBaseStats || item?.baseStats || {};
-}
-
 function getPieceInstanceKey(piece) {
   if (piece?.sourceId) return `id:${piece.sourceId}`;
   if (piece?.id) return `id:${piece.id}`;
   const stats = STATS.map(stat => piece?.baseStats?.[stat] || 0).join(",");
   return `hash:${piece?.hash || 0}:${stats}`;
-}
-
-function rankSlotCandidates(items, partial, completed, armorTarget, requiredStats = []) {
-  return [...items]
-    .sort((a, b) =>
-      fitScore(getItemStats(a), partial, completed, armorTarget, requiredStats) -
-      fitScore(getItemStats(b), partial, completed, armorTarget, requiredStats)
-    )
-    .slice(0, MAX_FREE_CANDIDATES);
-}
-
-// Fill the free slots one at a time with the owned piece that best fits the
-// remaining target ratio. Returns null when any slot has no candidate.
-function greedyFill(
-  bySlot, assignment, armorTarget, lockedPiecesBySlot = new Map(), requiredStats = []
-) {
-  const fixed = [];
-  const partial = Object.fromEntries(STATS.map(stat => [stat, 0]));
-  let exoticCount = 0;
-  for (const slot of SLOT_ORDER) {
-    const lockedPiece = lockedPiecesBySlot.get(slot);
-    if (lockedPiece) {
-      exoticCount += Number(Boolean(lockedPiece.exotic));
-      if (exoticCount > 1) return null;
-      fixed.push({ slot, piece: { ...lockedPiece } });
-      const baseStats = getUpgradeConfig(lockedPiece).baseStats;
-      for (const stat of STATS) partial[stat] += baseStats?.[stat] || 0;
-      continue;
-    }
-    const requiredSetHash = assignment.fixed.get(slot);
-    if (!requiredSetHash) continue;
-    const item = rankSlotCandidates(
-      bySlot.get(slot).filter(candidate =>
-        candidate.setHash === requiredSetHash
-        && (!candidate.exotic || exoticCount === 0)
-      ),
-      partial,
-      fixed.length + 1,
-      armorTarget,
-      requiredStats,
-    )[0];
-    if (!item) return null;
-    exoticCount += Number(Boolean(item.exotic));
-    fixed.push({ slot, item });
-    const itemStats = getItemStats(item);
-    for (const stat of STATS) partial[stat] += itemStats[stat] || 0;
-  }
-
-  const chosen = [...fixed];
-  let completed = fixed.length;
-  for (const slot of assignment.free) {
-    const candidates = rankSlotCandidates(
-      bySlot.get(slot).filter(candidate => !candidate.exotic || exoticCount === 0),
-      partial, completed + 1, armorTarget, requiredStats
-    );
-    const item = candidates[0];
-    if (!item) return null;
-    exoticCount += Number(Boolean(item.exotic));
-    chosen.push({ slot, item });
-    const itemStats = getItemStats(item);
-    for (const stat of STATS) partial[stat] += itemStats[stat] || 0;
-    completed++;
-  }
-  const pieces = chosen
-    .map(({ slot, item, piece }) => piece
-      ? { ...piece }
-      : createUpgradePieceFromItem(item, SLOT_ORDER.indexOf(slot)))
-    .sort((a, b) => SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot));
-  return { pieces };
-}
-
-// Swap each free slot with nearby candidates while the score improves.
-function localSearch(
-  initialPieces, searchableSlots, bySlot, fixedSets, armorTarget, requiredStats, evaluate, push
-) {
-  let bestPieces = [...initialPieces];
-  let best = evaluate(bestPieces);
-  let examined = 0;
-  for (let pass = 0; pass < 2; pass++) {
-    let improved = false;
-    for (const slot of searchableSlots) {
-      const index = bestPieces.findIndex(piece => piece.slot === slot);
-      if (index < 0) continue;
-      const requiredSetHash = fixedSets.get(slot);
-      const slotItems = requiredSetHash
-        ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
-        : bySlot.get(slot);
-      const otherExoticCount = bestPieces.filter((piece, pieceIndex) =>
-        pieceIndex !== index && piece.exotic
-      ).length;
-      const candidates = rankSlotCandidates(
-        slotItems.filter(item => !item.exotic || otherExoticCount === 0),
-        {}, 5, armorTarget, requiredStats,
-      )
-        .slice(0, MAX_LOCAL_CANDIDATES);
-      for (const item of candidates) {
-        if (getPieceInstanceKey(bestPieces[index]) === getPieceInstanceKey(item)) continue;
-        const trial = bestPieces.map((piece, i) =>
-          i === index
-            ? createUpgradePieceFromItem(item, SLOT_ORDER.indexOf(slot))
-            : piece
-        );
-        if (!isLegalArmorLoadout(trial)) continue;
-        const trialEvaluation = evaluate(trial);
-        examined++;
-        if (compareUpgradeMetrics(trialEvaluation.metrics, best.metrics) < 0) {
-          bestPieces = trial;
-          best = trialEvaluation;
-          improved = true;
-          push(trial, trialEvaluation);
-        }
-      }
-    }
-    if (!improved) break;
-  }
-  return examined;
 }
 
 function isLegalArmorLoadout(pieces) {
