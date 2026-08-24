@@ -32,7 +32,7 @@
 
 完全离线的独立构建，无需 Node、npm 或服务器：
 
-1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.6.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.7.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
 2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
 
 离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
@@ -46,7 +46,12 @@
 
 ## Changelog / 更新日志
 
-### v2.0.6（最新版）
+### v2.0.7（最新版）
+
+- 优化真实库存搜索：按目标属性质量优先排序，扩大并改进大库存候选搜索，避免因为早期局部评分或“少刷几件”而错过精确可达的配装。
+- 统一“优化现有配装”与从零配装的精确规则；当快速替换搜索找不到精确方案时，由完整求解器提供可行方案，同时保留传说护甲固定 `+5` 与异域护甲自由调整的正确语义。
+
+### v2.0.6
 
 - 修复“优化现有配装”的属性规则：至多 / 至少 / 区间 / 精确与从零配装一致生效。上限类规则按“上限”语义判定达标（≤上限即达标、低不欠点、超过显示超上限而非达标），搜索不再把上限当目标把属性顶到上限，库存“无需刷取”结果的达标标记与指标保持一致。
 

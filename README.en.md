@@ -32,7 +32,7 @@ Development build: [https://migo-ovo.github.io/d2-armor-solver/dev/app/](https:/
 
 A standalone build that runs fully offline, no Node, npm, or server required:
 
-1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.6.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
+1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.7.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
 2. Unzip it and open `index.html` in a browser over the `file://` protocol.
 
 The offline package matches the online version, with one difference: it doesn't inject Bungie secrets at build time, so the login entry is hidden. DIM CSV import, solving, and saving builds all run fully offline; the DIM Loadout export link is just a URL, so opening it still needs a network connection.
@@ -46,7 +46,12 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 ## Changelog
 
-### v2.0.6 (latest)
+### v2.0.7 (latest)
+
+- Improved real-inventory search to rank target quality first and keep a broader, target-aware frontier for large inventories, so an exact build is not discarded by an early local score or by saving one more owned piece.
+- Aligned exact rules between the existing-loadout and from-scratch paths. When the fast replacement search misses an exact build, the complete solver now supplies a feasible plan while preserving fixed Legendary `+5` rolls and freely selectable Exotic tuning.
+
+### v2.0.6
 
 - Fixed stat rules in the "optimize existing loadout" path to match the from-scratch solver: at most / at least / range / exact now all take effect. Ceiling rules judge normality as a ceiling (at or below the cap is met with no shortfall, exceeding shows "over cap" instead of "met"), the search no longer parks a capped stat at its cap, and the "no farming" inventory results share the same rule-aware met markers.
 
