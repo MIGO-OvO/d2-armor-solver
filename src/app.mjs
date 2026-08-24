@@ -812,33 +812,10 @@ function buildUserConstraints(fragments) {
   });
 }
 
-// Build the constraints for the "优化现有配装" path. Unlike the from-scratch
-// solver, the upgrade optimizer does not treat the whole six-stat target as an
-// exact match by default — it optimizes reach ≥ target and lets the must-meet
-// checkboxes act as floors. So only the explicitly cycled fuzzy rules ("至多 /
-// 至少 / 区间 / 精确") are forwarded, expressed in the armor-needed domain.
+// Use the same default-exact rules as the from-scratch solver. Required-stat
+// checkboxes still provide fallback ordering when no complete plan exists.
 function buildUpgradeFuzzyConstraints(fragments) {
-  const minimums = {};
-  const maximums = {};
-  const exact = {};
-  for (const stat of STATS) {
-    const mode = statFuzzyMode[stat];
-    if (!mode) continue;
-    const target = getVal('target_' + stat);
-    const frag = fragments[stat] || 0;
-    const lower = Math.max(0, target - frag);
-    const upper = Math.max(0, getVal('targetMax_' + stat) - frag);
-    if (mode === '>=') {
-      minimums[stat] = lower;
-    } else if (mode === '<=') {
-      maximums[stat] = lower;
-    } else if (mode === 'range') {
-      minimums[stat] = lower;
-      maximums[stat] = upper;
-    } else if (mode === '=') {
-      exact[stat] = true;
-    }
-  }
+  const { minimums, maximums, exact } = buildUserConstraints(fragments);
   return { minimums, maximums, exact };
 }
 

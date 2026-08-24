@@ -410,10 +410,10 @@ export function evaluateUpgradePieces(
   let evaluation = manualEvaluation;
   if (reassignModifiers) {
     const budget = getUpgradeModifierBudget(pieces);
-    // Both the tuning mode and the +5 stat come with each owned piece, so they
-    // stay pinned; only the -5 source and the armor mods get re-picked.
+    // Legendary +5 destinations are rolled onto the instance and stay pinned.
+    // Exotic armor can freely select both sides of its directional tuning.
     const fixedTuningTargets = pieces.map(piece =>
-      piece.tuningMode === 'plus3' ? null : piece.tuningTo);
+      piece.tuningMode === 'plus3' ? null : piece.exotic ? undefined : piece.tuningTo);
     const automaticEvaluation = evaluateConfig(
       configs, scoringTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, constraints,
       fixedTuningTargets

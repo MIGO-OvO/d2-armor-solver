@@ -1,5 +1,5 @@
 import { ARCHETYPES, STATS } from "./armor-model.mjs";
-import { farmabilityScore } from "./solver.mjs";
+import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -454,6 +454,8 @@ function repairChosenForExactness(solution, chosen, setRequirement) {
 function comparePlans(left, right) {
   // Plans whose owned pieces can actually reach the exact totals rank first.
   if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
+  const targetOrder = compareScoreRanks(left.solution?.rank, right.solution?.rank);
+  if (targetOrder !== 0) return targetOrder;
   if (left.farmCount !== right.farmCount) return left.farmCount - right.farmCount;
   if (left.fixedExoticDistance !== right.fixedExoticDistance) {
     return left.fixedExoticDistance - right.fixedExoticDistance;

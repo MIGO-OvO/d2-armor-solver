@@ -322,6 +322,46 @@ test("a known fixed tuning stat becomes the piece's tuning destination", () => {
   assert.equal(piece.tuningTo, "health");
 });
 
+test("Exotic tuning stays free while Legendary +5 destinations stay fixed", () => {
+  const config = BASE_CONFIGS.find(entry =>
+    entry.archetype === "突围者" && entry.tertiary === "melee");
+  const pieces = Array.from({ length: 5 }, (_, index) => normalizeUpgradePiece({
+    archetypeId: "Siegebreaker",
+    tertiary: "melee",
+    tuningMode: "shift",
+    tuningFrom: "health",
+    tuningTo: index === 0 ? "class" : "weapons",
+    armorModSize: 0,
+    armorModStat: "health",
+    baseStats: { ...config.baseStats },
+    exotic: index === 0,
+  }, index));
+  const target = Object.fromEntries(STATS.map(stat => [
+    stat,
+    pieces.reduce((sum, piece) => sum + piece.baseStats[stat], 0),
+  ]));
+  target.health -= 25;
+  target.melee += 5;
+  target.weapons += 20;
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const constraints = { exact: Object.fromEntries(STATS.map(stat => [stat, true])) };
+
+  const exoticResult = evaluateUpgradePieces(
+    pieces, target, fragments, true, [], false, constraints
+  );
+  assert.equal(exoticResult.metrics.allReached, true);
+  assert.equal(exoticResult.tuningAssignments[0].to, "melee",
+    "the Exotic may choose a +5 destination different from its installed value");
+
+  const legendaryResult = evaluateUpgradePieces(
+    pieces.map((piece, index) => ({ ...piece, exotic: false, locked: index === 0 })),
+    target, fragments, true, [], false, constraints
+  );
+  assert.equal(legendaryResult.metrics.allReached, false,
+    "the same +5 destination remains fixed on Legendary armor");
+  assert.equal(legendaryResult.tuningAssignments[0].to, "class");
+});
+
 // "Only +5/-5" restricts every proposed plan and candidate, while the entered
 // baseline keeps reporting the +3 pieces the player actually has equipped.
 test("only +5/-5 analysis never proposes +3 pieces but keeps the real baseline", () => {
