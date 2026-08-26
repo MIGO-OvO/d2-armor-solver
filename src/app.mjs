@@ -97,9 +97,14 @@ import {
 import {
   getActiveSetBonuses,
   getArmorSetByHash,
+  getSetBonusText,
+  getSetCategoryName,
+  getSetMeta,
   getSetName,
   getSetPieceCounts,
+  listArmorSets,
 } from "./core/armor-sets.mjs";
+import { ARMOR_SET_CATEGORY_ORDER } from "./core/armor-sets.data.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
@@ -3833,30 +3838,131 @@ function getClassLabel(classId) {
 // SET BONUSES (2pc / 4pc) AND REQUIREMENT FILTER
 // ============================================================
 
+// Language key for trilingual data fields (armor-sets.data.mjs shape).
+const SET_LANGUAGE_KEY = { "zh-chs": "zh", "zh-cht": "zhCht", en: "en" };
+
+// Group every cataloged set by activity category in the canonical order
+// (scripts/armor-sets-meta.json); categories missing from the order go last.
+function orderSetsByCategory(sets, language) {
+  const key = SET_LANGUAGE_KEY[language] || "zh";
+  const byCategory = new Map();
+  for (const set of sets) {
+    const categoryZh = set?.category?.zh || "";
+    if (!byCategory.has(categoryZh)) byCategory.set(categoryZh, []);
+    byCategory.get(categoryZh).push(set);
+  }
+  const groups = [];
+  const known = new Set();
+  for (const category of ARMOR_SET_CATEGORY_ORDER || []) {
+    const categoryZh = category?.zh || "";
+    known.add(categoryZh);
+    const list = byCategory.get(categoryZh);
+    if (!list?.length) continue;
+    list.sort((a, b) => getSetName(a, language).localeCompare(getSetName(b, language)));
+    groups.push({
+      label: category?.[key] || categoryZh || l("其他", "其他", "Other"),
+      sets: list,
+    });
+  }
+  const unknown = [...byCategory.entries()].filter(([categoryZh]) => !known.has(categoryZh));
+  for (const [categoryZh, list] of unknown) {
+    list.sort((a, b) => getSetName(a, language).localeCompare(getSetName(b, language)));
+    groups.push({ label: categoryZh || l("其他", "其他", "Other"), sets: list });
+  }
+  return groups;
+}
+
+// 2pc/4pc bonus preview for the set(s) currently required by the constraint,
+// with category / acquisition source / class naming notes from the metadata.
+function renderSetRequirementPreview(language, ownedSetCounts) {
+  const previewSets = [];
+  if (setRequirement.type === "set" && setRequirement.setHash) {
+    previewSets.push(getArmorSetByHash(setRequirement.setHash));
+  } else if (setRequirement.type === "split") {
+    previewSets.push(getArmorSetByHash(setRequirement.a));
+    previewSets.push(getArmorSetByHash(setRequirement.b));
+  }
+  if (previewSets.length === 0) return "";
+  const key = SET_LANGUAGE_KEY[language] || "zh";
+  const isZh = language !== "en";
+  return `<div class="set-requirement-preview">${previewSets.filter(Boolean).map(set => {
+    const meta = getSetMeta(set);
+    const owned = ownedSetCounts.get(set.hash) || 0;
+    const head = `
+      <div class="set-preview-head">
+        <strong>${escapeHtml(getSetName(set, language))}</strong>
+        ${meta.groupId ? `<span class="set-preview-id">${escapeHtml(meta.groupId)}</span>` : ""}
+        ${owned > 0 ? `<span class="set-preview-owned">${l("已拥有", "已擁有", "owned")} ${owned} ${l("件", "件", "pc")}</span>` : ""}
+      </div>`;
+    const badges = [];
+    if (meta.category) badges.push(escapeHtml(getSetCategoryName(set, language)));
+    if (isZh && meta.source) badges.push(escapeHtml(meta.source));
+    const badgesHtml = badges.length
+      ? `<div class="set-preview-badges">${badges.map(text => `<span>${text}</span>`).join("")}</div>`
+      : "";
+    const bonusesHtml = set.bonuses.map(bonus => {
+      const text = getSetBonusText(bonus, language);
+      return `<div class="set-preview-bonus">
+        <div class="set-preview-tier">${bonus.count} ${l("件套", "件套", "pc")}</div>
+        <div class="set-preview-name">${escapeHtml(text.name)}</div>
+        <p class="set-preview-desc">${escapeHtml(text.desc)}</p>
+      </div>`;
+    }).join("");
+    const notesHtml = isZh && meta.classNotes?.length ? `
+      <details class="set-preview-notes">
+        <summary>${l("职业命名差异", "職業命名差異", "Class naming notes")}</summary>
+        ${meta.classNotes.map(note => `
+          <div class="set-preview-note">
+            <strong>${escapeHtml(note.class?.[key] || note.class?.zh || "")}</strong>
+            <span>${escapeHtml(note.family?.[key] || note.family?.zh || "")}</span>
+            <p>${escapeHtml(note.note || "")}</p>
+          </div>`).join("")}
+      </details>` : "";
+    return `<div class="set-preview-card">${head}${badgesHtml}${bonusesHtml}${notesHtml}</div>`;
+  }).join("")}</div>`;
+}
+
 function renderSetEffects() {
   const el = document.getElementById("upgradeSetEffects");
   if (!el) return;
+  const language = getPageLanguage();
   // Scratch mode has no current five-piece loadout. Do not leak the last
   // upgrade draft's active bonuses into the shared set picker.
   const currentHashes = calculatorMode === "upgrade"
     ? (upgradeBuildState || []).map(piece => piece?.hash).filter(Boolean)
     : [];
-  const hashes = currentHashes;
-  const counts = getSetPieceCounts(hashes);
-  const active = getActiveSetBonuses(hashes, getPageLanguage());
-  const inventorySetHashes = [...new Set(importedInventory.map(item => item.setHash).filter(Boolean))];
-  const pieceSetHashes = [...counts.keys()].map(set => set.hash);
-  const available = [...new Set([...inventorySetHashes, ...pieceSetHashes])]
-    .sort((a, b) => getSetName(getArmorSetByHash(a)).localeCompare(getSetName(getArmorSetByHash(b))));
+  const active = getActiveSetBonuses(currentHashes, language);
+  // Owned pieces per set from the imported list, for the picker labels.
+  const ownedSetCounts = new Map();
+  for (const item of importedInventory) {
+    if (item?.setHash) {
+      ownedSetCounts.set(item.setHash, (ownedSetCounts.get(item.setHash) || 0) + 1);
+    }
+  }
+  // The whole 56-set catalog is selectable (grouped by activity category),
+  // not just sets that appear in the inventory: a scratch plan can target any
+  // set, and a requirement whose pieces are missing marks what to farm.
+  const groups = orderSetsByCategory(listArmorSets(), language);
+  const noSets = groups.length === 0;
   // Build each picker from its own options so only the set that is actually
   // selected gets marked. Sharing one options list (marking both a and b
   // selected) made the browser show the first-selected option in BOTH selects,
-  // silently resetting the second set on every re-render.
-  const makeSetOptions = selectedHash => available.map(hash => {
-    const set = getArmorSetByHash(hash);
-    const isSelected = Number(selectedHash) === hash;
-    return `<option value="${hash}" ${isSelected ? "selected" : ""}>${escapeHtml(getSetName(set))}</option>`;
-  }).join("");
+  // silently resetting the second set on every re-render. The second picker
+  // excludes the first one's set (a 2+2 split must use two different sets).
+  const makeSetOptions = (selectedHash, excludeHash = 0) => {
+    let html = "";
+    for (const group of groups) {
+      html += `<optgroup label="${escapeHtml(group.label)}">`;
+      for (const set of group.sets) {
+        if (excludeHash && set.hash === Number(excludeHash)) continue;
+        const owned = ownedSetCounts.get(set.hash) || 0;
+        const isSelected = Number(selectedHash) === set.hash;
+        html += `<option value="${set.hash}" ${isSelected ? "selected" : ""}>${escapeHtml(getSetName(set, language))}${owned > 0 ? ` · ${l("已拥有", "已擁有", "owned")} ${owned}` : ""}</option>`;
+      }
+      html += "</optgroup>";
+    }
+    return html;
+  };
   const firstSetHash = setRequirement.type === "set"
     ? setRequirement.setHash
     : setRequirement.type === "split"
@@ -3864,9 +3970,8 @@ function renderSetEffects() {
       : null;
   const secondSetHash = setRequirement.type === "split" ? setRequirement.b : null;
   const setOptions = makeSetOptions(firstSetHash);
-  const secondSetOptions = makeSetOptions(secondSetHash);
+  const secondSetOptions = makeSetOptions(secondSetHash, firstSetHash);
   const mode = setRequirement.type === "set" ? `set${setRequirement.count}` : setRequirement.type;
-  const noSets = available.length === 0;
   const setRequirementDescription = calculatorMode === "solve"
     ? l(
       "可选。用于给从零配装规划指定套装；已有件会优先覆盖要求，缺失件会标出应刷的套装。",
@@ -3905,6 +4010,7 @@ function renderSetEffects() {
         </label>
       </div>
     </div>
+    ${renderSetRequirementPreview(language, ownedSetCounts)}
     ${calculatorMode === "upgrade" ? `<div class="set-active-list">${active.length === 0
       ? `<div class="set-active-empty">${l(
         "当前五件护甲没有激活任何套装效果（2 件或 4 件）。",

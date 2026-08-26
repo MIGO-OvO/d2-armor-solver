@@ -1,5 +1,7 @@
 # Destiny 2 Armor Solver v2
 
+[English](README.en.md) · [简体中文](README.md)
+
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -10,17 +12,17 @@
 
 ## Overview / 项目概览
 
-面向《命运 2》Armor 3.0 的六维属性配装求解器。它既能从理论框架计算目标是否可达，也能导入 DIM 护甲清单，从玩家已经拥有的装备中寻找最佳组合、保留套装约束，并列出仍需刷取的护甲。
+面向《命运 2》Armor 3.0 的六维属性配装求解器。可以只算理论框架，看目标属性是否可达；也可以导入 DIM 护甲清单，或者登录 Bungie 直接读取库存，从已有装备里挑出最佳组合、守住套装约束，并列出还需刷取的护甲。
 
-项目是完全静态的浏览器应用：根路径提供在线 / 离线双入口门户，求解器位于 `app/` 子路径。无需项目账号、无需后端，目标属性、DIM 清单和保存的方案都只保留在当前浏览器中。
+纯静态的浏览器应用，不需要注册本项目账号，也不需要后端。根路径是门户，提供在线和离线两个入口；求解器在 `app/` 子路径。目标属性、DIM 清单和保存的方案都只存在当前浏览器里。登录 Bungie 只是用来读取真实库存；方案完全由已有装备组成时，可以直接一键装备到游戏里。
 
 ## Live Site / 在线使用
 
-门户：**[https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)**
+门户：[https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)
 
-直接进入求解器：**[https://migo-ovo.github.io/d2-armor-solver/app/](https://migo-ovo.github.io/d2-armor-solver/app/)**
+直接进入求解器：[https://migo-ovo.github.io/d2-armor-solver/app/](https://migo-ovo.github.io/d2-armor-solver/app/)
 
-开发测试版：**[https://migo-ovo.github.io/d2-armor-solver/dev/app/](https://migo-ovo.github.io/d2-armor-solver/dev/app/)**
+开发测试版：[https://migo-ovo.github.io/d2-armor-solver/dev/app/](https://migo-ovo.github.io/d2-armor-solver/dev/app/)
 
 > `main` 对应稳定版，`develop` 对应开发测试版。两个在线版本共用语言偏好，但草稿、已保存方案和 Bungie 登录状态使用独立存储键，不会互相覆盖；其他部署来源之间也不会自动迁移浏览器数据。
 
@@ -30,27 +32,71 @@
 
 完全离线的独立构建，无需 Node、npm 或服务器：
 
-1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.7.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
 2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
 
-离线包与在线版功能对等，仅一处差异：构建时**不注入 Bungie secrets**，因此 Bungie OAuth 登录入口被隐藏。DIM CSV 导入、求解和保存方案均可完全离线运行；DIM Loadout 导出链接本身只是 URL，打开时仍需联网。
+离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
 
 浏览器支持：
 
 - Chrome / Edge 完全支持。
 - Firefox 通过 `file://` 打开时 `localStorage` 不可用，草稿和已保存方案不会在刷新后保留，应用其余功能不受影响。
 
-离线构建使用主线程引擎（`__OFFLINE_MODE__` 下不会启动 Web Worker），重型库存求解时界面可能短暂无响应，属预期行为。数据 100% 留在本机，与在线版一致；由于不访问任何 CDN，隐私保障反而更强。
+离线构建走主线程（`__OFFLINE_MODE__` 下不会启动 Web Worker），重型库存求解时界面可能短暂卡住，属预期行为。数据 100% 留在本机，和在线版一样；离线版不访问任何 CDN。
 
-## v2.0.0 主要更新
+## Changelog / 更新日志
 
-v2 是一次围绕“真实库存配装”的主版本升级：
+### v2.0.7（最新版）
+
+- 优化真实库存搜索：按目标属性质量优先排序，扩大并改进大库存候选搜索，避免因为早期局部评分或“少刷几件”而错过精确可达的配装。
+- 统一“优化现有配装”与从零配装的精确规则；当快速替换搜索找不到精确方案时，由完整求解器提供可行方案，同时保留传说护甲固定 `+5` 与异域护甲自由调整的正确语义。
+
+### v2.0.6
+
+- 修复“优化现有配装”的属性规则：至多 / 至少 / 区间 / 精确与从零配装一致生效。上限类规则按“上限”语义判定达标（≤上限即达标、低不欠点、超过显示超上限而非达标），搜索不再把上限当目标把属性顶到上限，库存“无需刷取”结果的达标标记与指标保持一致。
+
+### v2.0.5
+
+- 修复属性“至多 / 区间上限”规则：当目标总和低于预算、必须把溢出点数分配到别处时，被限制的属性不再被当作“差额最小”的倾倒目标，上限约束严格生效。
+- 修复 2+2 双套装约束：两个套装选择器改为各自的选项，“另一个套装”的选择在重新渲染后保持不变，可以正常选择第二个套装效果。
+
+### v2.0.4
+
+- 修复目标属性规则执行：优先级与模糊约束（精确 / 至少 / 至多 / 区间）严格生效，替换规划优先把可刷护甲分配给必须达标属性，且不会为减少替换件数而破坏必须达标约束。
+- 修复调整模组匹配：传说护甲的 `+5` 调整必须与方案一致，不一致时降级为待刷；异域护甲的 `+5` 方向仍可自由选择。
+- 修复 Bungie 一键装备：角色栏位已满时自动把非方案装备移开；逐件装备失败按单件记录而非整体中止，逐插槽写入失败软处理；应用后回读档案校验实际插槽。
+
+### v2.0.3
+
+- 新增门户首页，求解器迁移到 `app/` 子路径；根路径门户提供在线 / 离线双入口与三语切换。
+- 新增 Bungie OAuth 登录与真实库存：跨平台存档解析、护甲目录预生成与库存去重，完全由已有实例组成的方案可一键装备到游戏。
+- 从零配装为六维目标新增优先级（高 / 中 / 低）与模糊约束（精确 / 至少 / 至多 / 区间），按优先级顺序最大化可达值并兼顾其余属性。
+- 重构属性模式控件：符号徽章改为带标签的优先级 / 规则控件，库存同步移出账号菜单并每 10 秒自动刷新。
+- 修复 Bungie 库存的模组重复计数、实际总属性与 DIM 导出对齐、跳过模组、单异域约束与保险库栏位恢复等问题。
+
+### v2.0.2 算法优化
+
+- 优化已有配装替换规划：必须达标属性满足后，优先选择更少替换件的方案。
+- 规划种子保留已有护甲，确保精确替换组合能被找到。
+- 新增“仅 +5/-5 调整”选项。
+
+### v2.0.1 优化版
+
+- 更名“命运2 T5配装求解器·优化版”，更新页脚署名（Ver 2.0.1）。
+- 修复 DIM 导入：无调整 / 属性模组的裸护甲正确解析固定 +5 属性。
+- 异域职业物品按固定 `30/25/20` 框架（框架 + 第三属性）识别。
+- 规划匹配不再因 +5 属性差异拒绝已有件；以整组可行性判定（固定 +5、自由 -5、自由模组）决定匹配，不可行件降级为待刷。
+
+### v2.0.0 库存规划
+
+v2 围绕“真实库存配装”做了大幅升级：
 
 - 支持导入 DIM Armor CSV，识别职业、栏位、Tier、异域、当前穿戴、基础属性、套装和大师等级。
 - 从 DIM 显示属性中推断已安装的 `+3` / `+5/-5` 调整与 `+5` / `+10` 属性模组。
 - 新增已有护甲求解：优先使用库存中的精确匹配件，并明确显示仍需刷取的栏位、框架和调整方向。
 - 支持普通异域固定、异域职业物品，以及同名异域多件之间的最接近属性比较。
 - 支持指定套装 `4 件套`、`2 件套` 和 `2+2` 双套装约束；内置 56 组 Bungie Manifest 套装数据。
+- 套装选择器覆盖全部 56 组效果组，按活动分类（世界/遗落区域、先锋/千谋百计、熔炉/PvP、地城、突袭）分组，标注清单中已拥有的件数，并预览所选套装的 2 件 / 4 件效果与获取来源。
 - 已有护甲方案可导出为 DIM 配装链接，并携带护甲实例、属性模组和调整模组设置。
 - “优化现有配装”支持必须达标属性、真实护甲分布、固定件和按收益排序的替换计划。
 - 重做 DIM 导入、库存结果和替换规划界面，完善桌面端、390px 窄屏、键盘焦点和状态反馈。
@@ -63,6 +109,7 @@ v2 是一次围绕“真实库存配装”的主版本升级：
 ### 从零配装
 
 - 设置生命、近战、手雷、超能、职业和武器六维目标。
+- 为每个属性设置优先级（高 / 中 / 低）与模糊约束（精确 / 至少 / 至多 / 区间），求解器按优先级顺序最大化可达值并兼顾其余属性。
 - 应用碎片属性变化、`+5` / `+10` 属性模组和 `+3` / `+5/-5` 调整。
 - 可锁定目标，或限定方案只使用 `+5/-5` 调整。
 - 枚举五件护甲框架，显示目标差值、理论可达范围和刷取需求。
@@ -234,6 +281,7 @@ npm run deploy
 ## 数据来源、隐私与免责声明
 
 - 护甲套装、物品哈希和模组数据来自 Bungie Manifest；生成后的静态数据随版本发布。
+- 套装数据由 `scripts/fetch-armor-set-data.mjs` 从官方 Manifest（`DestinyEquipableItemSetDefinition` + `DestinySandboxPerkDefinition`，简中/繁中/英文）生成，并合并 `scripts/armor-sets-meta.json` 中人工整理的活动分类、获取来源与职业命名差异（2026-08-26 清单审计口径，light.gg / GamesRef 交叉核对）。
 - Destiny、Destiny 2、相关名称、商标和游戏美术资源归 Bungie 及其权利人所有。
 - 本项目与 Bungie、Destiny Item Manager 没有隶属或官方认可关系。
 - 应用运行时不会把目标、清单或配装发送到项目服务器。
@@ -244,13 +292,13 @@ npm run deploy
 Bungie 登录（OAuth）用于获取真实库存，需要部署侧预先配置。注册与配置由仓库维护者手动完成，步骤如下：
 
 1. 打开 [bungie.net/en/Application](https://www.bungie.net/en/Application) 创建 Bungie 应用：
-   - 客户端类型选择 **Confidential**。
+   - 客户端类型选择 `Confidential`。
    - Redirect URL 注册 `https://migo-ovo.github.io/d2-armor-solver/app/` 与 `http://localhost:5173/app/`。
    - Origin 注册 `https://migo-ovo.github.io` 与 `http://localhost:5173`。Origin 只包含协议、主机和端口，不包含 `/d2-armor-solver/app/` 路径；浏览器发起请求时的 Origin 必须与登记值一致（不支持通配符），否则 Bungie 会以 CORS 拒绝。
    - 从旧版升级时，必须把原先指向仓库根路径的 Redirect URL 改为上述 `app/` 子路径，否则 OAuth 回调会落到门户而无法完成登录。
-2. 从应用页面取得三件套：**API Key**、**OAuth Client ID**、**OAuth Client Secret**。
+2. 从应用页面取得三件套：`API Key`、`OAuth Client ID`、`OAuth Client Secret`。
 3. 在应用后台启用 `MoveEquipDestinyItems` 权限；未启用时库存读取仍可成功，但转移、穿戴和写入模组会返回权限错误。修改权限后让玩家重新登录。
-4. 在 GitHub 仓库 → **Settings → Secrets and variables → Actions** 添加稳定版 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
+4. 在 GitHub 仓库 → `Settings → Secrets and variables → Actions` 添加稳定版 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
 5. 开发测试版复用上述 Bungie 应用与 GitHub Secrets。Bungie 仍回调已登记的稳定路径 `/app/`；组合发布产物会识别带 `develop.` 前缀的 OAuth state，并立即把授权码与 state 原样转发到 `/dev/app/`，再由开发版完成原有 state 校验。稳定版 state 不会被转发。
 6. Cloudflare 部署默认不启用 Bungie 登录（该来源未在门户注册）。构建未配置对应 secrets 时仍然成功，登录与“装备到游戏”入口自动隐藏；离线构建会强制清空这些配置。
 

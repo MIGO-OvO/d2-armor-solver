@@ -33,6 +33,27 @@ export function getSetBonusText(bonus, language = 'zh-chs') {
   return { name: text?.name || '', desc: text?.desc || '' };
 }
 
+// Hand-curated metadata merged from scripts/armor-sets-meta.json:
+// activity category (trilingual), effect-group id, acquisition source (zh)
+// and per-class armor-family naming notes (sets whose item names diverge from
+// the effect-group name). All optional: sets without meta keep working.
+export function getSetCategoryName(set, language = 'zh-chs') {
+  const key = DATA_LANGUAGE_BY_PAGE_LANGUAGE[language] || 'zh';
+  const category = set?.category;
+  if (!category) return '';
+  return category[key] || category.zh || category.en || '';
+}
+
+export function getSetMeta(set) {
+  if (!set) return null;
+  return {
+    category: set.category || null,
+    groupId: set.groupId || '',
+    source: set.source || '',
+    classNotes: set.classNotes || [],
+  };
+}
+
 // Count owned pieces per set for a list of item hashes (sets absent are skipped).
 export function getSetPieceCounts(itemHashes) {
   const counts = new Map();
