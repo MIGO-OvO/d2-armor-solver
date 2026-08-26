@@ -668,6 +668,9 @@ async function checkUpgradeTargetSync(browser) {
       element.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await page.locator("#setReqMode").selectOption("set4");
+    // The set picker now lists the whole 56-set catalog, so pick the set this
+    // fixture actually owns instead of relying on the first option.
+    await page.locator("#setReqA").selectOption("741162535");
     await page.evaluate(() => window.analyzeArmorUpgrades());
     assert.equal(
       await page.locator("#upgradeResults").isHidden(),
@@ -787,7 +790,9 @@ async function checkSetRequirementSnapshot(browser) {
 
     const staleSolve = page.evaluate(() => window.analyzeArmorUpgrades());
     await page.waitForTimeout(25);
-    await page.evaluate(() => window.updateSetRequirementMode("set4"));
+    // The set picker lists the full catalog now; select the fixture's set.
+    await page.locator("#setReqMode").selectOption("set4");
+    await page.locator("#setReqA").selectOption("741162535");
     await staleSolve;
     assert.equal(
       await page.locator("#inventoryResults").isHidden(),

@@ -96,6 +96,7 @@ v2 was a major upgrade around real-inventory builds:
 - New owned-armor solving: prefer exact matches from inventory and show which slots, frames, and tuning directions still need farming.
 - Support fixed normal Exotics, Exotic Class Items, and closest-stat comparison between multiple copies of the same Exotic.
 - Support `4-piece`, `2-piece`, and `2+2` set constraints, with 56 built-in Bungie Manifest sets.
+- The set picker lists the full 56-set catalog grouped by activity category (World / Lost Sectors, Vanguard / Gambit, Crucible / PvP, Dungeon, Raid), marks owned piece counts, and previews the selected set's 2pc / 4pc perks and acquisition source.
 - Export owned-armor builds as DIM loadout links carrying armor instances, stat mods, and tuning mods.
 - "Optimize current build" supports must-meet stats, real armor distribution, pinned pieces, and replacement plans sorted by benefit.
 - Reworked the DIM import, inventory results, and replacement-planning UI for desktop, 390px narrow screens, keyboard focus, and status feedback.

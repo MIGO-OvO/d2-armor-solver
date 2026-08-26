@@ -935,6 +935,104 @@ input[type="checkbox"]:focus-visible {
 .set-requirement-ok .icon { color: var(--success); }
 .set-requirement-error { color: var(--health); }
 
+.set-requirement-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-control);
+  margin-top: var(--space-control);
+}
+.set-preview-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: var(--space-control);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-quiet);
+}
+.set-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-control-tight);
+}
+.set-preview-head strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: .875rem;
+  overflow-wrap: anywhere;
+}
+.set-preview-id {
+  color: var(--text-dim);
+  font-size: .6875rem;
+  letter-spacing: .04em;
+}
+.set-preview-owned {
+  margin-left: auto;
+  color: var(--success);
+  font-size: .75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.set-preview-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.set-preview-badges span {
+  padding: 1px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: .6875rem;
+  overflow-wrap: anywhere;
+}
+.set-preview-bonus {
+  display: grid;
+  gap: 2px;
+}
+.set-preview-tier {
+  color: var(--accent-strong);
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.set-preview-name {
+  color: var(--accent);
+  font-size: .8125rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.set-preview-desc {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: .8125rem;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+.set-preview-notes summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: .75rem;
+  user-select: none;
+}
+.set-preview-notes summary:hover { color: var(--text); }
+.set-preview-note {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--space-control-tight);
+  padding-left: var(--space-control-tight);
+  border-left: 2px solid var(--border-subtle);
+}
+.set-preview-note strong { color: var(--text); font-size: .8125rem; }
+.set-preview-note span { color: var(--text-dim); font-size: .75rem; overflow-wrap: anywhere; }
+.set-preview-note p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: .75rem;
+  line-height: 1.6;
+}
+
 .inventory-results {
   display: grid;
   gap: var(--space-section);
