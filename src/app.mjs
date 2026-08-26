@@ -4067,63 +4067,6 @@ function updateSetRequirementPicks() {
   updateSetRequirementMode(document.getElementById("setReqMode")?.value || "none");
 }
 
-// Whether the CURRENT five pieces already satisfy the chosen set requirement,
-// and (informational) how many of each required set they carry. This no longer
-// locks pieces — the requirement is enforced by the inventory solve, which may
-// swap any non-fixed piece for a better set roll from the imported list.
-function resolveSetRequirement() {
-  const pieces = upgradeBuildState || [];
-  const requirement = setRequirement;
-  if (!requirement || requirement.type === "none") return { ok: true };
-
-  const bySet = new Map();
-  pieces.forEach(piece => {
-    if (piece?.setHash) {
-      if (!bySet.has(piece.setHash)) bySet.set(piece.setHash, []);
-      bySet.get(piece.setHash).push(piece);
-    }
-  });
-
-  if (requirement.type === "set") {
-    const count = (bySet.get(Number(requirement.setHash)) || []).length;
-    if (count < requirement.count) {
-      return {
-        ok: false,
-        error: l(
-          `“${getSetName(getArmorSetByHash(requirement.setHash))}”目前只有 ${count} 件，需要 ${requirement.count} 件才能满足要求。`,
-          `「${getSetName(getArmorSetByHash(requirement.setHash))}」目前只有 ${count} 件，需要 ${requirement.count} 件才能滿足要求。`,
-          `“${getSetName(getArmorSetByHash(requirement.setHash))}” currently has only ${count} piece(s) here; ${requirement.count} are required.`
-        ),
-      };
-    }
-    return { ok: true };
-  }
-
-  const aCount = (bySet.get(Number(requirement.a)) || []).length;
-  const bCount = (bySet.get(Number(requirement.b)) || []).length;
-  if (aCount < 2) {
-    return {
-      ok: false,
-      error: l(
-        `“${getSetName(getArmorSetByHash(requirement.a))}”不足 2 件。`,
-        `「${getSetName(getArmorSetByHash(requirement.a))}」不足 2 件。`,
-        `“${getSetName(getArmorSetByHash(requirement.a))}” needs at least 2 pieces.`
-      ),
-    };
-  }
-  if (bCount < 2) {
-    return {
-      ok: false,
-      error: l(
-        `“${getSetName(getArmorSetByHash(requirement.b))}”不足 2 件。`,
-        `「${getSetName(getArmorSetByHash(requirement.b))}」不足 2 件。`,
-        `“${getSetName(getArmorSetByHash(requirement.b))}” needs at least 2 pieces.`
-      ),
-    };
-  }
-  return { ok: true };
-}
-
 function syncUpgradeLocks() {
   // Only Exotic armor (unique, cannot be farmed) and pieces the player locked
   // manually stay fixed. A set requirement must NOT lock the current pieces:
@@ -4137,24 +4080,18 @@ function syncUpgradeLocks() {
   });
   const stateEl = document.getElementById("setRequirementState");
   if (!stateEl) return;
-  const result = resolveSetRequirement();
   const requirement = setRequirement;
   if (!requirement || requirement.type === "none") {
     stateEl.innerHTML = "";
     return;
   }
-  if (result.ok) {
-    stateEl.innerHTML = `<div class="set-requirement-ok">${icon("check")}${l(
-      "当前配装已满足所选套装要求。求解会从已导入清单中搜索更接近六维目标的搭配。",
-      "目前配裝已滿足所選套裝要求。求解會從已匯入清單中搜尋更接近六維目標的搭配。",
-      "The current pieces already satisfy the set requirement. Solving will still search the imported list for loadouts closer to your targets."
-    )}</div>`;
-    return;
-  }
-  stateEl.innerHTML = `<div class="set-requirement-ok">${icon("check")}${escapeHtml(result.error)}${l(
-    " 求解时会从清单中搜索满足要求的组合。",
-    " 求解時會從清單中搜尋滿足要求的組合。",
-    " Solving will search the list for a loadout that satisfies it."
+  // The requirement is enforced by the inventory solve, which searches the
+  // imported list for a loadout that satisfies it, so this status line is a
+  // neutral note rather than a count of the current five pieces.
+  stateEl.innerHTML = `<div class="set-requirement-ok">${icon("check")}${l(
+    "求解时会从清单中搜索满足要求的组合。",
+    "求解時會從清單中搜尋滿足要求的組合。",
+    "Solving will search the list for a loadout that satisfies it."
   )}</div>`;
 }
 

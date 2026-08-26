@@ -1,16 +1,16 @@
 {
   "categoryOrder": [
-    { "zh": "世界/遗落区域", "zhCht": "世界/失落區域", "en": "World / Lost Sectors" },
-    { "zh": "先锋/千谋百计", "zhCht": "先鋒/千謀百計", "en": "Vanguard / Gambit" },
+    { "zh": "世界/遗失区域", "zhCht": "世界/失落區域", "en": "World / Lost Sectors" },
+    { "zh": "先锋/智谋", "zhCht": "先鋒/千謀百計", "en": "Vanguard / Gambit" },
     { "zh": "熔炉/PvP", "zhCht": "熔爐競技場/PvP", "en": "Crucible / PvP" },
-    { "zh": "地城", "zhCht": "地城", "en": "Dungeon" },
+    { "zh": "地牢", "zhCht": "地城", "en": "Dungeon" },
     { "zh": "突袭", "zhCht": "突襲", "en": "Raid" }
   ],
   "sets": {
     "Wildwood": {
       "groupId": "W-01",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -20,7 +20,7 @@
     "Exodus Down": {
       "groupId": "W-02",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -30,7 +30,7 @@
     "Reverie Dawn": {
       "groupId": "W-03",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -40,7 +40,7 @@
     "Dreambane": {
       "groupId": "W-04",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -50,7 +50,7 @@
     "Crystocrene": {
       "groupId": "W-05",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -60,7 +60,7 @@
     "Seventh Seraph": {
       "groupId": "W-06",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -70,7 +70,7 @@
     "Veritas": {
       "groupId": "W-07",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -80,7 +80,7 @@
     "Thunderhead": {
       "groupId": "W-08",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -90,7 +90,7 @@
     "First Ascent": {
       "groupId": "W-09",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -100,7 +100,7 @@
     "AION Adapter": {
       "groupId": "W-10",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -110,7 +110,7 @@
     "AION Renewal": {
       "groupId": "W-11",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
@@ -120,27 +120,27 @@
     "Thriving Survivor": {
       "groupId": "W-12",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
-      "source": "宗师无序边疆委托",
+      "source": "宗师无序边界委托",
       "classNotes": []
     },
     "Shrewd Survivor": {
       "groupId": "W-13",
       "category": {
-        "zh": "世界/遗落区域",
+        "zh": "世界/遗失区域",
         "zhCht": "世界/失落區域",
         "en": "World / Lost Sectors"
       },
-      "source": "宗师无序边疆委托",
+      "source": "宗师无序边界委托",
       "classNotes": []
     },
     "Techsec": {
       "groupId": "VG-01",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -150,7 +150,7 @@
     "Smoke Jumper Set": {
       "groupId": "VG-02",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -160,7 +160,7 @@
     "Ferropotent": {
       "groupId": "VG-03",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -170,7 +170,7 @@
     "Luminopotent": {
       "groupId": "VG-04",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -180,7 +180,7 @@
     "Bushido": {
       "groupId": "VG-05",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -190,7 +190,7 @@
     "Swordmaster": {
       "groupId": "VG-06",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -200,7 +200,7 @@
     "Eutechnology": {
       "groupId": "VG-07",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -210,7 +210,7 @@
     "Lustrous": {
       "groupId": "VG-08",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
@@ -220,11 +220,11 @@
     "Cyberserpent Null": {
       "groupId": "VG-09",
       "category": {
-        "zh": "先锋/千谋百计",
+        "zh": "先锋/智谋",
         "zhCht": "先鋒/千謀百計",
         "en": "Vanguard / Gambit"
       },
-      "source": "千谋百计",
+      "source": "智谋",
       "classNotes": []
     },
     "Last Discipline": {
@@ -354,31 +354,31 @@
     "Techeun's Regalia": {
       "groupId": "D-01",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选地城:破碎王座",
+      "source": "精选地牢:破碎王座",
       "classNotes": []
     },
     "Apostate's Blade": {
       "groupId": "D-02",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选地城:异端深渊",
+      "source": "精选地牢:异端深渊",
       "classNotes": []
     },
     "CODA": {
       "groupId": "D-03",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选地城:预言",
+      "source": "精选地牢:预言",
       "classNotes": [
         {
           "class": {
@@ -424,11 +424,11 @@
     "Yearning Echo": {
       "groupId": "D-04",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选或大师地城:贪婪之握",
+      "source": "精选或大师地牢:贪婪之握",
       "classNotes": [
         {
           "class": {
@@ -474,21 +474,21 @@
     "Deep Explorer": {
       "groupId": "D-05",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选或大师地城:二象性",
+      "source": "精选或大师地牢:二象性",
       "classNotes": []
     },
     "TM Custom": {
       "groupId": "D-06",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选或大师地城:守望者尖塔",
+      "source": "精选或大师地牢:守望者尖塔",
       "classNotes": [
         {
           "class": {
@@ -534,51 +534,51 @@
     "Taken King": {
       "groupId": "D-07",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选或大师地城:深渊机灵",
+      "source": "精选或大师地牢:深渊机灵",
       "classNotes": []
     },
     "Dark Age": {
       "groupId": "D-08",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选或大师地城:战争领主的废墟",
+      "source": "精选或大师地牢:战争领主的废墟",
       "classNotes": []
     },
     "Spacewalk": {
       "groupId": "D-09",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选或大师地城:晚星之主",
+      "source": "精选或大师地牢:晚星之主",
       "classNotes": []
     },
     "Flain": {
       "groupId": "D-10",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "精选或大师地城:分离教义",
+      "source": "精选或大师地牢:分离教义",
       "classNotes": []
     },
     "Sage Protector": {
       "groupId": "D-11",
       "category": {
-        "zh": "地城",
+        "zh": "地牢",
         "zhCht": "地城",
         "en": "Dungeon"
       },
-      "source": "平衡之境地城 (启用功绩)",
+      "source": "平衡之境地牢 (启用功绩)",
       "classNotes": []
     },
     "Great Hunt": {
