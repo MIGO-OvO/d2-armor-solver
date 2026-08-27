@@ -317,11 +317,17 @@ async function checkPortal(browser) {
       "the primary offline route should download the latest Release archive",
     );
 
+    await page.locator("#portalLanguage").selectOption("zh-chs");
+    assert.match(await page.locator('[data-i18n="capabilityTwo"]').innerText(), /护甲套装加成.*调整模组/);
+    assert.equal(await page.locator('[data-i18n="statHealth"]').innerText(), "生命值");
     await page.locator("#portalLanguage").selectOption("zh-cht");
     assert.equal(await page.locator(".route--online h3").innerText(), "線上使用");
     assert.equal(await page.locator("html").getAttribute("lang"), "zh-Hant");
+    assert.match(await page.locator('[data-i18n="capabilityTwo"]').innerText(), /防具套裝獎勵.*調校模組/);
+    assert.equal(await page.locator('[data-i18n="statSuper"]').innerText(), "超能力");
     await page.locator("#portalLanguage").selectOption("en");
     assert.equal(await page.locator(".route--online h3").innerText(), "Use online");
+    assert.match(await page.locator('[data-i18n="capabilityTwo"]').innerText(), /Tuning Mods/);
     assert.equal(
       await page.evaluate(() => localStorage.getItem("d2_armor_page_language_v1")),
       "en",
@@ -1040,6 +1046,29 @@ async function checkBungieAuthFlow(browser) {
     await page.waitForFunction(() => /Bungie 登录/.test(
       document.getElementById("bungieLoginButton")?.textContent || "",
     ));
+
+    // Official Armor 3.0 terminology must render from the same contract in
+    // every application locale, including dynamic Archetype controls.
+    await page.evaluate(() => window.setCalculatorMode("upgrade"));
+    for (const [language, skirmisher, tuningMod] of [
+      ["zh-chs", "突击手", "调整模组"],
+      ["zh-cht", "散兵", "調校模組"],
+      ["en", "Skirmisher", "Tuning Mod"],
+    ]) {
+      await page.locator("#pageLanguage").selectOption(language);
+      assert.equal(
+        await page.locator('#upgradeBuildEditor select option[value="Skirmisher"]').first().innerText(),
+        skirmisher,
+        `${language} should render the official Skirmisher name`,
+      );
+      assert.equal(
+        await page.locator("#upgradeBuildEditor .input-group > span", { hasText: tuningMod }).first().innerText(),
+        tuningMod,
+        `${language} should render the official Tuning Mod term`,
+      );
+    }
+    await page.locator("#pageLanguage").selectOption("zh-chs");
+    await page.evaluate(() => window.setCalculatorMode("solve"));
 
     await page.locator("#bungieLoginButton").click();
     await page.waitForLoadState("networkidle");

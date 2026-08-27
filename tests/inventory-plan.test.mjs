@@ -26,7 +26,7 @@ function makeSolution(configs = BASE_CONFIGS.slice(0, 5), exoticIndex = null) {
 function makeItem(solution, index, overrides = {}) {
   const config = solution.config[index];
   const tuning = solution.tuningAssignments[index];
-  const archetypeId = ARCHETYPES.find(archetype => archetype.name === config.archetype).id;
+  const archetypeId = ARCHETYPES.find(archetype => archetype.id === config.archetype).id;
   return {
     id: `item-${index}`,
     hash: 1000 + index,
@@ -260,7 +260,7 @@ function makeOwnedLegendary(solution, index, tuningTo) {
     classId: "hunter",
     tier: "5",
     exotic: false,
-    archetypeId: ARCHETYPES.find(archetype => archetype.name === config.archetype)?.id,
+    archetypeId: ARCHETYPES.find(archetype => archetype.id === config.archetype)?.id,
     tertiary: config.tertiary,
     tuningMode: "shift",
     tuningTo,

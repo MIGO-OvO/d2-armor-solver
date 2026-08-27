@@ -1,5 +1,5 @@
 import {
-  ARCHETYPES, BASE_CONFIGS, STATS,
+  ARCHETYPES, BASE_CONFIGS, STATS, normalizeArchetypeId,
 } from "./armor-model.mjs";
 import { getEffectiveBaseStats, inferArchetypeFromStats } from "./dim-csv.mjs";
 import {
@@ -43,6 +43,9 @@ export function createDefaultUpgradePiece(slotIndex) {
 export function normalizeUpgradePiece(piece, slotIndex) {
   const fallback = createDefaultUpgradePiece(slotIndex);
   const normalized = { ...fallback, ...(piece || {}), slot: UPGRADE_SLOTS[slotIndex].id };
+  normalized.archetypeId = normalizeArchetypeId(
+    normalized.archetypeId ?? normalized.archetype,
+  ) || fallback.archetypeId;
   const archetype = ARCHETYPES.find(item => item.id === normalized.archetypeId) || ARCHETYPES[0];
   normalized.archetypeId = archetype.id;
   const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
@@ -154,15 +157,15 @@ export function createUpgradePieceFromItem(item, slotIndex) {
 export function getUpgradeConfig(piece) {
   const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
   const config = BASE_CONFIGS.find(config =>
-    config.archetype === archetype.name && config.tertiary === piece.tertiary
-  ) || BASE_CONFIGS.find(config => config.archetype === archetype.name);
+    config.archetype === archetype.id && config.tertiary === piece.tertiary
+  ) || BASE_CONFIGS.find(config => config.archetype === archetype.id);
   // Real armor imported from DIM carries its actual rolled stat distribution;
   // otherwise the theoretical T5 archetype layout is used.
   return piece.baseStats ? { ...config, baseStats: piece.baseStats } : config;
 }
 
 export function getArchetypeIdForConfig(config) {
-  return ARCHETYPES.find(item => item.name === config.archetype)?.id || ARCHETYPES[0].id;
+  return normalizeArchetypeId(config.archetype) || ARCHETYPES[0].id;
 }
 
 export function applyManualUpgradeModifiers(config, piece) {

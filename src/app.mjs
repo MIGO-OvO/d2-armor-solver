@@ -19,8 +19,10 @@ import {
   joinLocalized,
   l,
   localeCode,
+  normalizeArchetypeId,
   setStatLabels,
-  t
+  t,
+  term,
 } from "./core/armor-model.mjs";
 import {
   analyzeUpgradeAsync,
@@ -497,12 +499,12 @@ function updateBudget() {
   const baseExplain = n3 > 0
     ? l(
       `每件+3护甲：大师杰作5 + 免费1 = <strong>6点</strong>，${n3}件 × 6 = <strong>${armorBase}点</strong>。`,
-      `每件+3防具：傑作5 + 免費1 = <strong>6點</strong>，${n3}件 × 6 = <strong>${armorBase}點</strong>。`,
+      `每件+3防具：大師之作5 + 免費1 = <strong>6點</strong>，${n3}件 × 6 = <strong>${armorBase}點</strong>。`,
       `Each +3 armor piece: 5 Masterwork + 1 free point = <strong>6</strong>; ${n3} × 6 = <strong>${armorBase}</strong>.`
     )
     : l(
       `未启用+3模式，+5/-5调整可将属性降至0，护甲基础最低<strong>0点</strong>。`,
-      `未啟用+3模式，+5/-5調整可將數值降至0，防具基礎最低<strong>0點</strong>。`,
+      `未啟用+3模式，+5/-5調校可將數值降至0，防具基礎最低<strong>0點</strong>。`,
       `Without +3 mode, +5/-5 Tuning can reduce a stat to 0; the minimum armor base is <strong>0</strong>.`
     );
   const needsAttention = hasBelowMinimum || !slotsOK;
@@ -521,7 +523,7 @@ function updateBudget() {
           ${(() => {
             if (availSlots === 0) return icon('hint') + ' ' + l(
               `全部5件使用+3模式，无-5调整槽可用。所有属性最低为护甲基础${armorBase}点+碎片。`,
-              `全部5件使用+3模式，沒有-5調整欄位可用。所有數值最低為防具基礎${armorBase}點+碎片。`,
+              `全部5件使用+3模式，沒有-5調校欄位可用。所有數值最低為防具基礎${armorBase}點+碎片。`,
               `All five pieces use +3 mode, so no -5 Tuning slot is available. Every stat minimum is ${armorBase} armor points plus Fragments.`
             );
             if (!slotsOK) {
@@ -533,13 +535,13 @@ function updateBudget() {
               ).join('<br>');
               return `<span style="color:var(--health);">${icon('block')} ` + l(
                 `<strong>调整槽不足！</strong>${availSlots}个槽可用，但需${totalNeeded}个：<br>${slotLines}<br>请提高低属性目标或增加+3件数。`,
-                `<strong>調整欄位不足！</strong>${availSlots}個欄位可用，但需${totalNeeded}個：<br>${slotLines}<br>請提高低數值目標或增加+3件數。`,
+                `<strong>調校欄位不足！</strong>${availSlots}個欄位可用，但需${totalNeeded}個：<br>${slotLines}<br>請提高低數值目標或增加+3件數。`,
                 `<strong>Not enough Tuning slots.</strong> ${availSlots} available, ${totalNeeded} required:<br>${slotLines}<br>Raise low targets or use more +3 pieces.`
               ) + '</span>';
             }
             return icon('check') + ' ' + l(
               `调整槽足够（${availSlots}个，已用${totalNeeded}个）。基准为${noTuneBase}点，低于该值的属性由-5调整压低。`,
-              `調整欄位足夠（${availSlots}個，已用${totalNeeded}個）。基準為${noTuneBase}點，低於該值的數值由-5調整壓低。`,
+              `調校欄位足夠（${availSlots}個，已用${totalNeeded}個）。基準為${noTuneBase}點，低於該值的數值由-5調校壓低。`,
               `Tuning slots are sufficient (${totalNeeded} of ${availSlots} used). Baseline: ${noTuneBase}; -5 Tuning lowers stats below it.`
             );
           })()}
@@ -1361,10 +1363,10 @@ async function solve() {
       )
       ).join('<br>');
       msgs.innerHTML += `<div class="msg error">${icon('block')}
-        ${l('<strong>调整槽不足，无法求解：</strong>','<strong>調整欄位不足，無法求解：</strong>','<strong>Not enough Tuning slots:</strong>')}<br>
+        ${l('<strong>调整槽不足，无法求解：</strong>','<strong>調校欄位不足，無法求解：</strong>','<strong>Not enough Tuning slots:</strong>')}<br>
         ${l(
           `只有<strong>${availSlots}</strong>个-5调整槽可用，但低于基准（${noTuneBase}点）的属性共需<strong>${totalSlotsNeeded}</strong>个：`,
-          `只有<strong>${availSlots}</strong>個-5調整欄位可用，但低於基準（${noTuneBase}點）的數值共需<strong>${totalSlotsNeeded}</strong>個：`,
+          `只有<strong>${availSlots}</strong>個-5調校欄位可用，但低於基準（${noTuneBase}點）的數值共需<strong>${totalSlotsNeeded}</strong>個：`,
           `Only <strong>${availSlots}</strong> -5 Tuning slots are available, but stats below baseline ${noTuneBase} require <strong>${totalSlotsNeeded}</strong>:`
         )}<br>
         ${detailList}<br><br>
@@ -1473,7 +1475,7 @@ async function solve() {
       msgs.innerHTML += `<div class="msg info">${icon('check')}${hasNonExactTargetRules()
         ? l('找到满足全部属性规则的配装！','找到滿足全部屬性規則的配裝！','Found a loadout that satisfies every stat rule.')
         : isOnlyPlus5Tuning()
-        ? l('找到完美配装！全部护甲使用+5/-5调整。','找到完美配裝！全部防具使用+5/-5調整。','Perfect loadout found. Every piece uses +5/-5 Tuning.')
+        ? l('找到完美配装！全部护甲使用+5/-5调整。','找到完美配裝！全部防具使用+5/-5調校。','Perfect loadout found. Every piece uses +5/-5 Tuning.')
         : l(`找到完美配装！${plus3Count}件使用+3模式。`,`找到完美配裝！${plus3Count}件使用+3模式。`,`Perfect loadout found. ${plus3Count} piece(s) use +3 mode.`)}</div>`;
     } else if (exoticSettings) {
       const limitLines = exoticSettings.priorityOrder.map(stat => {
@@ -1722,7 +1724,7 @@ function generateExoticRecommendation(result) {
     html += `<div><strong style="color:var(--accent);">${fixedPrefix}</strong>${getArchetypeLabel(exotic.archetype)} · ${t('primaryStat')}${statSep}${STAT_LABELS[exotic.primary]} 30 / ${t('secondaryStat')}${statSep}${STAT_LABELS[exotic.secondary]} 25 / ${t('tertiaryStat')}${statSep}${STAT_LABELS[exotic.tertiary]} 20</div>`;
     html += `<div><strong>${t('legendaryArmor')}：</strong>` +
       Object.entries(purpleFreq).map(([name, count]) => `${getArchetypeLabel(name)} ×${count}`).join(l('，','，',', ')) + '</div>';
-    html += `<div style="color:var(--text-dim);">${l('调整属性已参与自动优化，无需预先指定。','調整數值已參與自動最佳化，無需預先指定。','Tuning is optimized automatically; no stat needs to be preselected.')}</div></div>`;
+    html += `<div style="color:var(--text-dim);">${l('调整属性已参与自动优化，无需预先指定。','調校數值已參與自動最佳化，無需預先指定。','Tuning is optimized automatically; no stat needs to be preselected.')}</div></div>`;
     return html;
   }
 
@@ -1771,13 +1773,13 @@ function renderFarmRequirements(result) {
   const classItemSettings = document.getElementById('useExoticMode')?.checked ? getExoticSettings() : null;
   const rows = missing.map(piece => {
     const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
-    const frame = getArchetypeLabel(piece.archetype);
+    const archetypeLabel = getArchetypeLabel(piece.archetype);
     const setName = piece.farmSetHash ? formatInventoryPlanSet(piece.farmSetHash) : '';
-    let identity = frame;
+    let identity = archetypeLabel;
     if (piece.exotic && piece.slot === 'classItem') {
-      identity = `${getExoticClassItemName(classItemSettings?.classId || importClassFilter || 'hunter')} · ${frame}`;
+      identity = `${getExoticClassItemName(classItemSettings?.classId || importClassFilter || 'hunter')} · ${archetypeLabel}`;
     } else if (piece.exotic && fixedExotic?.slot === piece.slot) {
-      identity = `${escapeHtml(fixedExotic.name)} · ${frame}`;
+      identity = `${escapeHtml(fixedExotic.name)} · ${archetypeLabel}`;
     }
     const detail = [
       `${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]}`,
@@ -1803,7 +1805,7 @@ function renderFarmRequirements(result) {
     <p class="farm-requirements-note">${l(
       '刷取时优先核对框架、第三属性和固定 +5 属性；−5 属性可在装备上自由选择，并按上方建议分配以达到方案总属性。',
       '取得時優先核對原型、第三數值和固定 +5 數值；−5 數值可在裝備上自由選擇，並依上方建議分配以達到方案總數值。',
-      'When farming, prioritize the frame, tertiary stat, and fixed +5 roll. The −5 stat is freely selected and can follow the suggestion above to reach the final totals.'
+      'When farming, prioritize the archetype, tertiary stat, and fixed +5 roll. The −5 stat is freely selected and can follow the suggestion above to reach the final totals.'
     )}</p>
   </section>`;
 }
@@ -1851,7 +1853,7 @@ function displayPieceResults(result, _fragments) {
     </div>`).join('');
   const fixedTuningRows = Object.keys(tuneToCount).length > 0
     ? renderSolutionStatRows(tuneToCount, '+5 ')
-    : `<p class="solution-allocation-empty">${l('本方案没有固定 +5 调整。', '本方案沒有固定 +5 調整。', 'This solution has no fixed +5 Tuning.')}</p>`;
+    : `<p class="solution-allocation-empty">${l('本方案没有固定 +5 调整。', '本方案沒有固定 +5 調校。', 'This solution has no fixed +5 Tuning.')}</p>`;
   const suggestedMinusRows = Object.keys(tuneFromCount).length > 0
     ? renderSolutionStatRows(tuneFromCount, '−5 ')
     : `<p class="solution-allocation-empty">${l('无需分配 −5。', '無需分配 −5。', 'No −5 allocation needed.')}</p>`;
@@ -1864,7 +1866,7 @@ function displayPieceResults(result, _fragments) {
     <section class="solution-detail-section">
       <div class="solution-detail-heading">
         <h3>${l('护甲构成', '防具構成', 'Armor composition')}</h3>
-        <p>${l('框架和第三属性属于装备固定内容，刷取时需要逐件核对。', '原型和第三數值屬於裝備固定內容，取得時需要逐件核對。', 'Frames and tertiary stats are fixed on the item and must be checked per piece.')}</p>
+        <p>${l('框架和第三属性属于装备固定内容，刷取时需要逐件核对。', '原型和第三數值屬於裝備固定內容，取得時需要逐件核對。', 'Archetypes and tertiary stats are fixed on the item and must be checked per piece.')}</p>
       </div>
       ${exoticSummary}
       <div class="solution-archetype-list">${archetypeRows}</div>
@@ -1956,7 +1958,7 @@ function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
     rangeSummary.innerHTML = `<div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">
       ${l(
         `固定异域职业物品框架后，逐件枚举四件传说护甲、调整模组和护甲模组得到真实可达范围（不叠加下方自定义硬约束）：`,
-        `固定異域職業物品原型後，逐件列舉四件傳說防具、調整模組和防具模組得到真實可達範圍（不疊加下方自訂硬性限制）：`,
+        `固定異域職業物品原型後，逐件列舉四件傳說防具、調校模組和防具模組得到真實可達範圍（不疊加下方自訂硬性限制）：`,
         `With the Exotic Class Item archetype fixed, real reachable ranges are enumerated across four Legendary Armor pieces, Tuning Mods, and Armor Mods (custom hard constraints below are not applied):`
       )}
     </div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">${rangeItems}</div>`;
@@ -1987,11 +1989,11 @@ function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
 }
 
 function formatInventoryItemTuning(item) {
-  if (item?.tuningMode === 'plus3') return l('+3调整', '+3調整', '+3 Tuning');
+  if (item?.tuningMode === 'plus3') return l('+3调整', '+3調校', '+3 Tuning');
   const tuningTo = item?.tuningTo || item?.tuningStat;
   return tuningTo
-    ? l(`+5${STAT_LABELS[tuningTo]} 调谐`, `+5${STAT_LABELS[tuningTo]} 調諧`, `+5 ${STAT_LABELS[tuningTo]} Tuning`)
-    : l('调整属性未知', '調整數值未知', 'Unknown Tuning');
+    ? l(`+5${STAT_LABELS[tuningTo]} 调整`, `+5${STAT_LABELS[tuningTo]} 調校`, `+5 ${STAT_LABELS[tuningTo]} Tuning`)
+    : l('调整属性未知', '調校數值未知', 'Unknown Tuning');
 }
 
 function formatInventoryPlanSet(setHash) {
@@ -2069,7 +2071,7 @@ function appendImperfectWarning() {
   const advice = hasFuzzyRules
     ? l(
         '尝试调整属性规则、目标值或调整模组数量。',
-        '嘗試調整屬性規則、目標值或調整模組數量。',
+        '嘗試調整數值規則、目標值或調校模組數量。',
         'Try adjusting stat rules, target values, or modifier counts.'
       )
     : adjSum !== budget
@@ -2080,7 +2082,7 @@ function appendImperfectWarning() {
       )
     : l(
         '尝试<strong>修改调整+3数量</strong>，或<strong>调整六维属性目标</strong>。',
-        '嘗試<strong>修改調整+3數量</strong>，或<strong>調整六維數值目標</strong>。',
+        '嘗試<strong>修改調校+3數量</strong>，或<strong>調整六維數值目標</strong>。',
         'Try changing the number of +3 Tuning pieces or adjusting target stats.'
       );
 
@@ -2203,7 +2205,7 @@ function getManualOwnedDefault(plan) {
     || plan?.pieces?.[0];
   return {
     slot: piece?.slot || 'helmet',
-    archetypeId: ARCHETYPES.find(entry => entry.name === piece?.archetype)?.id || ARCHETYPES[0].id,
+    archetypeId: normalizeArchetypeId(piece?.archetype) || ARCHETYPES[0].id,
     tertiary: piece?.tertiary || STATS[0],
     tuning: piece?.tuningMode === 'plus3' ? '+3' : piece?.tuningTo || '+3',
   };
@@ -2237,7 +2239,7 @@ function renderOwnedArmorMatch(piece) {
 
 function renderManualOwnedItem(item, index) {
   const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === item.slot);
-  const tuning = item.tuningMode === 'plus3' ? l('+3调整', '+3調整', '+3 Tuning') : `+5 ${STAT_LABELS[item.tuningTo]}`;
+  const tuning = item.tuningMode === 'plus3' ? l('+3调整', '+3調校', '+3 Tuning') : `+5 ${STAT_LABELS[item.tuningTo]}`;
   const removeLabel = l(`移除手动护甲 ${index + 1}`, `移除手動防具 ${index + 1}`, `Remove manual armor ${index + 1}`);
   return `<li>
     <span>${getUpgradeSlotLabel(slotIndex)}</span>
@@ -2301,7 +2303,7 @@ function buildOwnedGearSection(_finalTotals, _targets) {
       <label><span>${t('tertiaryStat')}</span><select id="manualOwnedTertiary">
         ${tertiaryOptions.map(stat => `<option value="${stat}" ${stat === defaultPiece.tertiary ? 'selected' : ''}>${STAT_LABELS[stat]}</option>`).join('')}
       </select></label>
-      <label><span>${l('调整', '調整', 'Tuning')}</span><select id="manualOwnedTuning">
+      <label><span>${l('调整', '調校', 'Tuning')}</span><select id="manualOwnedTuning">
         <option value="+3" ${defaultPiece.tuning === '+3' ? 'selected' : ''}>${l('+3模式', '+3模式', '+3 mode')}</option>
         ${STATS.map(stat => `<option value="${stat}" ${stat === defaultPiece.tuning ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
       </select></label>
@@ -2593,8 +2595,8 @@ function renderUpgradeImportPanel() {
       </div>
       <p class="inventory-solve-option-hint" id="inventorySolveOptionHint">${l(
         "先选择职业，再从该职业已有异域中选择部位和名称；同名多件会自动比较框架、第三属性与 +5 调整。",
-        "先選擇職業，再從該職業現有異域中選擇部位和名稱；同名多件會自動比較原型、第三數值與 +5 調整。",
-        "Choose a class, slot, and Exotic name. Multiple owned copies are compared by frame, tertiary, and rolled +5 Tuning."
+        "先選擇職業，再從該職業現有異域中選擇部位和名稱；同名多件會自動比較原型、第三數值與 +5 調校。",
+        "Choose a class, slot, and Exotic name. Multiple owned copies are compared by archetype, tertiary stat, and rolled +5 Tuning Stat."
       )}</p>
       </div>
       <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
@@ -2659,7 +2661,7 @@ function bungieErrorMessage(error) {
   if (error instanceof ApiKeyError) {
     return l(
       "Bungie API key 无效或未获审批，请检查 Bungie 门户的应用设置。",
-      "Bungie API key 無效或未獲審批，請檢查 Bungie 入口網站的应用設定。",
+      "Bungie API key 無效或未獲審批，請檢查 Bungie 入口網站的應用程式設定。",
       "Bungie API key is invalid or not approved. Check your app settings on the Bungie portal.",
     );
   }
@@ -2849,7 +2851,7 @@ function syncBungieTargetCharacter() {
 function formatBungieCharacterLabel(character) {
   const classLabel = getClassLabel(character?.classId);
   const light = Number(character?.light) || 0;
-  return `${classLabel}${light ? l(` · 光等 ${light}`, ` · Power ${light}`, ` · Power ${light}`) : ""}`;
+  return `${classLabel}${light ? ` · ${term("power")} ${light}` : ""}`;
 }
 
 function formatBungieCharacterOption(character, characters) {
@@ -2899,10 +2901,10 @@ function fragmentAdjustmentsMatch(left, right) {
   return STATS.every(stat => (Number(left?.[stat]) || 0) === (Number(right?.[stat]) || 0));
 }
 
-const BUNGIE_WEAPON_BUCKET_LABELS = new Map([
-  [1498876634, ["主武器", "主要武器", "Kinetic weapon"]],
-  [2465295065, ["副武器", "特殊武器", "Energy weapon"]],
-  [953998645, ["重武器", "重型武器", "Power weapon"]],
+const BUNGIE_WEAPON_BUCKET_TERMS = new Map([
+  [1498876634, "kineticWeapon"],
+  [2465295065, "energyWeapon"],
+  [953998645, "powerWeapon"],
 ]);
 
 function getSavedBungieLoadoutSummary(loadout) {
@@ -2931,7 +2933,7 @@ function getSavedBungieLoadoutSummary(loadout) {
   })).sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
   const activeBonuses = getActiveSetBonuses(itemHashes, getPageLanguage());
   const exotic = armor.find(item => item.exotic) || null;
-  const weapons = (loadout?.items || []).filter(item => BUNGIE_WEAPON_BUCKET_LABELS.has(Number(item.bucketHash)));
+  const weapons = (loadout?.items || []).filter(item => BUNGIE_WEAPON_BUCKET_TERMS.has(Number(item.bucketHash)));
   return { armor, pieces, totals, sets, activeBonuses, exotic, weapons };
 }
 
@@ -2945,14 +2947,14 @@ function renderSavedBungieLoadoutStats(totals) {
 
 function formatSavedArmorModifier(item) {
   const tuning = item.tuningMode === "plus3"
-    ? l("+3 调整", "+3 調整", "+3 Tuning")
+    ? l("+3 调整", "+3 調校", "+3 Tuning")
     : item.tuningTo && item.tuningFrom
       ? l(
         `调整 -5${STAT_LABELS[item.tuningFrom]} / +5${STAT_LABELS[item.tuningTo]}`,
-        `調整 -5${STAT_LABELS[item.tuningFrom]} / +5${STAT_LABELS[item.tuningTo]}`,
+        `調校 -5${STAT_LABELS[item.tuningFrom]} / +5${STAT_LABELS[item.tuningTo]}`,
         `Tuning -5 ${STAT_LABELS[item.tuningFrom]} / +5 ${STAT_LABELS[item.tuningTo]}`,
       )
-      : l("调整未知", "調整未知", "Tuning unknown");
+      : l("调整未知", "調校未知", "Tuning unknown");
   const mod = item.armorModSize > 0 && item.armorModStat
     ? l(
       `模组 +${item.armorModSize}${STAT_LABELS[item.armorModStat]}`,
@@ -2966,7 +2968,7 @@ function formatSavedArmorModifier(item) {
 function renderSavedBungieLoadoutDetail(summary, detailId) {
   const setBonusHtml = summary.activeBonuses.length > 0
     ? `<section class="bungie-loadout-detail-section">
-        <h5>${l("已激活套装效果", "已啟用套裝效果", "Active set bonuses")}</h5>
+        <h5>${term("activeArmorSetBonuses")}</h5>
         <ul class="bungie-loadout-bonus-list">${summary.activeBonuses.map(bonus => `
           <li><strong>${escapeHtml(bonus.name)}</strong><span>${escapeHtml(bonus.requiredCount + l(" 件套", " 件套", "-piece"))}</span></li>`).join("")}</ul>
       </section>`
@@ -2975,11 +2977,10 @@ function renderSavedBungieLoadoutDetail(summary, detailId) {
     ? `<section class="bungie-loadout-detail-section">
         <h5>${l("武器", "武器", "Weapons")}</h5>
         <ul class="bungie-loadout-weapon-list">${summary.weapons.map(weapon => {
-          const labels = BUNGIE_WEAPON_BUCKET_LABELS.get(Number(weapon.bucketHash));
-          const label = l(labels[0], labels[1], labels[2]);
-          return `<li><span>${escapeHtml(label)}</span><strong>${weapon.power ? l(`光等 ${weapon.power}`, `Power ${weapon.power}`, `Power ${weapon.power}`) : l("已保存", "已儲存", "Saved")}</strong></li>`;
+          const label = term(BUNGIE_WEAPON_BUCKET_TERMS.get(Number(weapon.bucketHash)));
+          return `<li><span>${escapeHtml(label)}</span><strong>${weapon.power ? `${term("power")} ${weapon.power}` : l("已保存", "已儲存", "Saved")}</strong></li>`;
         }).join("")}</ul>
-        <p class="bungie-loadout-data-note">${l("当前本地物品库未包含武器名称；同步状态和光等来自 Bungie 配装记录。", "目前本機物品庫未包含武器名稱；同步狀態與 Power 來自 Bungie 配裝記錄。", "The local item catalog does not include weapon names; saved state and Power come from Bungie.")}</p>
+        <p class="bungie-loadout-data-note">${l("当前本地物品库未包含武器名称；同步状态和能量来自 Bungie 配装记录。", "目前本機物品庫未包含武器名稱；同步狀態與力量來自 Bungie 配裝記錄。", "The local item catalog does not include weapon names; saved state and Power come from Bungie.")}</p>
       </section>`
     : "";
   return `<div class="bungie-loadout-detail" id="${detailId}">
@@ -3059,7 +3060,7 @@ function getSavedBungieLoadoutsHtml() {
           ${renderSavedBungieLoadoutStats(summary.totals)}
           <div class="bungie-loadout-highlights">
             ${summary.exotic ? `<span class="is-exotic">${escapeHtml(summary.exotic.name)}</span>` : `<span>${l("无异域护甲", "無異域防具", "No Exotic armor")}</span>`}
-            ${setSummary ? `<span>${escapeHtml(setSummary)}</span>` : `<span>${l("无套装效果", "無套裝效果", "No set bonus")}</span>`}
+            ${setSummary ? `<span>${escapeHtml(setSummary)}</span>` : `<span>${l("无护甲套装加成", "無防具套裝獎勵", "No Armor Set Bonus")}</span>`}
           </div>
           ${renderSavedBungieLoadoutDetail(summary, detailId)}
           <footer class="bungie-saved-actions">
@@ -3148,7 +3149,7 @@ function bungiePlanErrorMessage(error) {
     return l("方案中一件护甲的能量不足以安装其属性模组；请升级护甲能量后重试。", "方案中一件防具的能量不足以安裝其數值模組；請升級防具能量後重試。", "An armor piece lacks the energy to hold its stat mod. Upgrade the armor energy first.");
   }
   if (code === "tuningMismatch") {
-    return l("方案为护甲分配的调谐方向与该护甲的固定调谐属性不符。", "方案為防具分配的調諧方向與該防具的固定調諧屬性不符。", "The plan's tuning direction does not match the armor's fixed tuning stat.");
+    return l("方案为护甲分配的调整方向与该护甲的固定调整属性不符。", "方案為防具分配的調校方向與該防具的固定調校數值不符。", "The plan's tuning direction does not match the armor's fixed Tuning Stat.");
   }
   if (code === "multipleExotics") {
     return l("方案包含多件异域护甲；最多只能穿戴一件异域。", "方案包含多件異域防具；最多只能穿戴一件異域。", "This plan includes more than one Exotic armor piece.");
@@ -3185,7 +3186,7 @@ function getInventorySolutionEquipState(entry) {
     return {
       available: false,
       reason: l(
-        "碎片数值不是该目标角色当前副职业的精确配置；当前界面只保存数值总和，无法无歧义反推具体碎片。请填入该角色当前穿戴，或直接应用游戏内已存配装。",
+        "碎片数值不是该目标角色当前分支职业的精确配置；当前界面只保存数值总和，无法无歧义反推具体碎片。请填入该角色当前穿戴，或直接应用游戏内已存配装。",
         "碎片數值不是該目標角色目前副職業的精確配置；目前介面只儲存數值總和，無法無歧義反推具體碎片。請填入該角色目前穿著，或直接套用遊戲內已存配裝。",
         "The Fragment totals do not match this character's exact current subclass. Totals cannot uniquely identify specific Fragments; fill the current loadout or apply an in-game saved loadout.",
       ),
@@ -3321,8 +3322,8 @@ async function equipInventorySolution(index) {
     }
     showBungieEquipMessage(
       l(
-        "五件护甲与全部模组已装备，并经回读核对一致。副职业、星象与碎片保持目标角色当前精确配置。",
-        "五件防具與全部模組已裝備，並經回讀核對一致。副職業、星象與碎片保持目標角色目前精確配置。",
+        "五件护甲与全部模组已装备，并经回读核对一致。分支职业、星相与碎片保持目标角色当前精确配置。",
+        "五件防具與全部模組已裝備，並經回讀核對一致。副職業、相位與碎片保持目標角色目前精確配置。",
         "All five armor pieces and every mod were equipped and confirmed by a verification read-back. The target character's exact subclass, Aspects, and Fragments were preserved.",
       ),
       "info",
@@ -3779,10 +3780,10 @@ function applyEquippedLoadout() {
   saveUpgradeDraft();
   showImportMessage(l(
     fragmentsApplied
-      ? `已按当前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件护甲，并识别了当前星象/碎片的属性调整；六维目标已设为当前六维。`
+      ? `已按当前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件护甲，并识别了当前星相/碎片的属性调整；六维目标已设为当前六维。`
       : `已按当前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件护甲；六维目标已设为当前六维。`,
     fragmentsApplied
-      ? `已依目前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件防具，並辨識了目前星象/碎片的數值調整；六維目標已設為目前六維。`
+      ? `已依目前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件防具，並辨識了目前相位/碎片的數值調整；六維目標已設為目前六維。`
       : `已依目前穿戴（${getClassLabel(importClassFilter)}）填入 ${items.length} 件防具；六維目標已設為目前六維。`,
     fragmentsApplied
       ? `Filled ${items.length} armor pieces from the equipped loadout (${getClassLabel(importClassFilter)}), recognized the current Aspect/Fragment stat adjustments, and set the six-stat targets to the current stats.`
@@ -4013,9 +4014,9 @@ function renderSetEffects() {
     ${renderSetRequirementPreview(language, ownedSetCounts)}
     ${calculatorMode === "upgrade" ? `<div class="set-active-list">${active.length === 0
       ? `<div class="set-active-empty">${l(
-        "当前五件护甲没有激活任何套装效果（2 件或 4 件）。",
-        "目前五件防具沒有啟動任何套裝效果（2 件或 4 件）。",
-        "No set bonus (2pc/4pc) is active with the current five pieces."
+        "当前五件护甲没有激活任何护甲套装加成（2 件或 4 件）。",
+        "目前五件防具沒有啟動任何防具套裝獎勵（2 件或 4 件）。",
+        "No Armor Set Bonus (2pc/4pc) is active with the current five pieces."
       )}</div>`
       : active.map(bonus => `
         <div class="set-active-card">
@@ -4125,10 +4126,10 @@ function renderUpgradeBuildEditor(openIndex = null) {
     const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
     const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
     const tuning = piece.tuningMode === 'plus3'
-      ? l('调整 +3', '調整 +3', 'Tuning +3')
+      ? l('调整 +3', '調校 +3', 'Tuning +3')
       : l(
           `调整 -5${STAT_LABELS[piece.tuningFrom]} / +5${STAT_LABELS[piece.tuningTo]}`,
-          `調整 -5${STAT_LABELS[piece.tuningFrom]} / +5${STAT_LABELS[piece.tuningTo]}`,
+          `調校 -5${STAT_LABELS[piece.tuningFrom]} / +5${STAT_LABELS[piece.tuningTo]}`,
           `Tuning -5 ${STAT_LABELS[piece.tuningFrom]} / +5 ${STAT_LABELS[piece.tuningTo]}`
         );
     const armorMod = piece.armorModSize > 0
@@ -4185,7 +4186,7 @@ function renderUpgradeBuildEditor(openIndex = null) {
         </label>
         ${piece.tuningMode === 'shift' ? `
         <label class="input-group">
-          <span>${l('调整来源（-5，可自选）','調整來源（-5，可自選）','Tuning source (-5, your pick)')}</span>
+          <span>${l('调整来源（-5，可自选）','調校來源（-5，可自選）','Tuning source (-5, your pick)')}</span>
           <select onchange="updateUpgradePiece(${index},'tuningFrom',this.value,true)">
             ${getUpgradeStatOptions(piece.tuningFrom, piece.tuningTo)}
           </select>
@@ -4318,7 +4319,7 @@ function updateUpgradeTargetBudget() {
         : l('刚好用完', '剛好用完', 'Fully allocated'));
   const guidance = l(
     `目标合计 ${targetSum}，碎片修正后需 ${armorNeeded}；基础 450 + 当前调整/模组 ${modifierPoints}`,
-    `目標合計 ${targetSum}，碎片修正後需 ${armorNeeded}；基礎 450 + 目前調整/模組 ${modifierPoints}`,
+    `目標合計 ${targetSum}，碎片修正後需 ${armorNeeded}；基礎 450 + 目前調校/模組 ${modifierPoints}`,
     `Targets total ${targetSum}; ${armorNeeded} needed after Fragments. 450 base + ${modifierPoints} from current tuning/mods.`
   );
 
@@ -4474,8 +4475,8 @@ function formatUpgradeConfigSummary(config) {
 function formatUpgradePieceSummary(piece) {
   const config = getUpgradeConfig(piece);
   const roll = piece.tuningMode === 'plus3'
-    ? l('调谐 +3', '調諧 +3', 'tuning +3')
-    : l(`调谐 +5${STAT_LABELS[piece.tuningTo]}`, `調諧 +5${STAT_LABELS[piece.tuningTo]}`, `tuning +5 ${STAT_LABELS[piece.tuningTo]}`);
+    ? l('调整 +3', '調校 +3', 'Tuning +3')
+    : l(`调整 +5${STAT_LABELS[piece.tuningTo]}`, `調校 +5${STAT_LABELS[piece.tuningTo]}`, `Tuning +5 ${STAT_LABELS[piece.tuningTo]}`);
   return `${formatUpgradeConfigSummary(config)} · ${roll}`;
 }
 
@@ -4566,19 +4567,19 @@ function buildUpgradeBaselineNote(analysis, keepOnly = false) {
   const explanation = projectedCount > 0
     ? (keepOnly
       ? l(
-        `左侧为当前六维；右侧按 ${projectedCount} 件未满大师护甲升满后，再保留五件并重排调谐与模组计算。升级大师不计作刷取新护甲。`,
-        `左側為目前六維；右側按 ${projectedCount} 件未滿傑作防具升滿後，再保留五件並重排調諧與模組計算。升級傑作不計作取得新防具。`,
+        `左侧为当前六维；右侧按 ${projectedCount} 件尚未完成大师杰作的护甲完成大师杰作后，再保留五件并重排调整与模组计算。完成大师杰作不计作刷取新护甲。`,
+        `左側為目前六維；右側按 ${projectedCount} 件尚未完成大師之作的防具完成大師之作後，再保留五件並重排調校與模組計算。完成大師之作不計作取得新防具。`,
         `Left shows current stats. Right projects ${projectedCount} not-yet-fully-masterworked piece(s) to full masterwork, then keeps all five and rearranges tuning/mods. Masterworking is not counted as farming a replacement.`
       )
       : l(
-        `左侧为当前六维；右侧的替换方案按所有保留护甲升满大师后的属性计算。共有 ${projectedCount} 件现有护甲需要升满大师，但不计作刷取替换件。`,
-        `左側為目前六維；右側的替換方案按所有保留防具升滿傑作後的數值計算。共有 ${projectedCount} 件目前防具需要升滿傑作，但不計作取得替換件。`,
+        `左侧为当前六维；右侧的替换方案按所有保留护甲完成大师杰作后的属性计算。共有 ${projectedCount} 件现有护甲需要完成大师杰作，但不计作刷取替换件。`,
+        `左側為目前六維；右側的替換方案按所有保留防具完成大師之作後的數值計算。共有 ${projectedCount} 件目前防具需要完成大師之作，但不計作取得替換件。`,
         `Left shows current stats. The replacement result projects every retained piece to full masterwork. ${projectedCount} current piece(s) need masterworking, but are not counted as farmed replacements.`
       ))
     : (keepOnly
       ? l(
-        '左侧为当前六维，右侧为保留现有护甲、只重排调谐与模组后的六维。',
-        '左側為目前六維，右側為保留目前防具、只重排調諧與模組後的六維。',
+        '左侧为当前六维，右侧为保留现有护甲、只重排调整与模组后的六维。',
+        '左側為目前六維，右側為保留目前防具、只重排調校與模組後的六維。',
         'Left shows current stats; right shows the result after keeping every piece and rearranging only tuning sources and mods.'
       )
       : l(
@@ -4601,8 +4602,8 @@ function buildUpgradePlanFlow(analysis, plan) {
   return `<div class="upgrade-plan-flow">
     <h3>${l('替换顺序','替換順序','Replacement order')}</h3>
     <p class="upgrade-plan-copy">${l(
-      '每一步都要刷到一件新护甲：框架、第三属性和调谐 +5 属性都必须对上（+5 属性是随护甲刷出来的，装上后不能改，只有 -5 来源可选）。刷到后按这一行的调谐和模组配好，六维就是这一步显示的数值。',
-      '每一步都要刷到一件新防具：原型、第三數值和調諧 +5 數值都必須對上（+5 數值是隨防具刷出來的，裝上後不能改，只有 -5 來源可選）。取得後按這一行的調諧和模組配好，六維就是這一步顯示的數值。',
+      '每一步都要刷到一件新护甲：框架、第三属性和调整 +5 属性都必须对上（+5 属性是随护甲刷出来的，装上后不能改，只有 -5 来源可选）。刷到后按这一行的调整和模组配好，六维就是这一步显示的数值。',
+      '每一步都要刷到一件新防具：原型、第三數值和調校 +5 數值都必須對上（+5 數值是隨防具刷出來的，裝上後不能改，只有 -5 來源可選）。取得後按這一行的調校和模組配好，六維就是這一步顯示的數值。',
       'Each step needs a newly farmed piece whose archetype, tertiary stat, and rolled +5 tuning stat all match — the +5 side comes with the armor and cannot be changed, only the -5 source is yours to pick. Set it up as the row shows and you get the stats listed.'
     )}</p>
     <div class="upgrade-plan-steps">${plan.steps.map((step, index) => {
@@ -4622,7 +4623,7 @@ function buildUpgradePlanFlow(analysis, plan) {
           </div>
         </div>
         <div class="upgrade-plan-setup">
-          <span><strong>${l('调谐槽','調諧欄位','Tuning')}</strong>${formatUpgradeTuning(finalTuning)}</span>
+          <span><strong>${term('tuningModSlot')}</strong>${formatUpgradeTuning(finalTuning)}</span>
           <span><strong>${t('armorMod')}</strong>${formatUpgradeArmorMod(finalArmorMod)}</span>
         </div>
         <div class="upgrade-plan-progress ${complete ? 'is-complete' : ''}">
@@ -4638,7 +4639,7 @@ function buildUpgradePlanFlow(analysis, plan) {
 
 function buildUpgradeAssignments(analysis, evaluation, open = false) {
   return `<details class="upgrade-assignment-details" ${open ? 'open' : ''}>
-    <summary>${l('最终调谐与模组配置','最終調諧與模組配置','Final tuning and stat mods')}</summary>
+    <summary>${l('最终调整与模组配置','最終調校與模組配置','Final Tuning and stat mods')}</summary>
     <div class="upgrade-assignment-list">${evaluation.configs.map((config, index) => `
       <div class="upgrade-assignment-row">
         <strong>${getUpgradeSlotLabel(index)}</strong>
@@ -4647,8 +4648,8 @@ function buildUpgradeAssignments(analysis, evaluation, open = false) {
       </div>`).join('')}
     </div>
     <p class="upgrade-empty">${l(
-      '调谐的 +5 属性是护甲刷取时自带的，不能更改；表中只有 -5 来源和护甲模组是你可以自由分配的。',
-      '調諧的 +5 數值是防具取得時自帶的，不能更改；表中只有 -5 來源和防具模組是你可以自由分配的。',
+      '调整的 +5 属性是护甲刷取时自带的，不能更改；表中只有 -5 来源和护甲模组是你可以自由分配的。',
+      '調校的 +5 數值是防具取得時自帶的，不能更改；表中只有 -5 來源和防具模組是你可以自由分配的。',
       'The +5 side of a tuning mod is rolled onto the armor and cannot be changed; only the -5 source and the armor mods above are yours to assign.'
     )}</p>
   </details>`;
@@ -4660,8 +4661,8 @@ function buildUpgradeKeepArmorAlternative(analysis) {
   const shortfall = analysis.baseline.metrics.shortfall;
   return `<details class="upgrade-assignment-details">
     <summary>${l(
-      `备选方案：不刷护甲，保留现有五件重排调谐与模组，还差 ${shortfall} 点`,
-      `備選方案：不刷防具，保留目前五件重排調諧與模組，還差 ${shortfall} 點`,
+      `备选方案：不刷护甲，保留现有五件重排调整与模组，还差 ${shortfall} 点`,
+      `備選方案：不刷防具，保留目前五件重排調校與模組，還差 ${shortfall} 點`,
       `Alternative: no farming — keep all five pieces, rearrange tuning and mods, ${shortfall} points short`
     )}</summary>
     ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
@@ -4692,15 +4693,15 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
         <div class="upgrade-recommendation">${enteredAlreadyReached
           ? l('不用换护甲','不用換防具','Keep all five pieces')
           : (needsMasterwork
-            ? l('升满大师并重配模组','升滿傑作並重配模組','Fully masterwork and rearrange mods')
+            ? l('完成大师杰作并重配模组','完成大師之作並重配模組','Fully Masterwork and rearrange mods')
             : l('只要重配模组','只要重配模組','Just rearrange the mods'))}</div>
         <p class="upgrade-recommendation-copy">${l(
           enteredAlreadyReached
             ? '现在这套已经达标。下面是最后的模组分配，照着核对一遍就行。'
-            : '护甲都可以留下。按下面重新选调谐的 -5 来源、重排属性模组就能达标；调谐的 +5 属性是护甲自带的，这里没有动过。',
+            : '护甲都可以留下。按下面重新选调整的 -5 来源、重排属性模组就能达标；调整的 +5 属性是护甲自带的，这里没有动过。',
           enteredAlreadyReached
             ? '目前這套已經達標。下面是最後的模組分配，照著核對一遍就行。'
-            : '防具都可以留下。按下面重新選調諧的 -5 來源、重排數值模組就能達標；調諧的 +5 數值是防具自帶的，這裡沒有動過。',
+            : '防具都可以留下。按下面重新選調校的 -5 來源、重排數值模組就能達標；調校的 +5 數值是防具自帶的，這裡沒有動過。',
           enteredAlreadyReached
             ? 'This loadout already meets every target. Check the final mod setup below and you are done.'
             : 'You can keep every armor piece. Re-pick each tuning mod\'s -5 source and rearrange the stat mods as shown to meet every target — the rolled +5 stats are untouched.'
@@ -4754,13 +4755,13 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
           : l(`换 ${plan.replacementCount} 件后还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件後還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} and remain ${plan.metrics.shortfall} short`)}</div>
         <p class="upgrade-recommendation-copy">${reached
           ? l(
-            '方案已按优先顺序排好，照着下面执行即可。如果暂时不想刷，也可以先保留现有护甲重排调谐与模组，但还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。',
-            '方案已按優先順序排好，照著下面執行即可。如果暫時不想刷，也可以先保留目前防具重排調諧與模組，但還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。',
+            '方案已按优先顺序排好，照着下面执行即可。如果暂时不想刷，也可以先保留现有护甲重排调整与模组，但还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。',
+            '方案已按優先順序排好，照著下面執行即可。如果暫時不想刷，也可以先保留目前防具重排調校與模組，但還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。',
             'The swaps are already prioritized. Follow the steps below. If you do not want to farm yet, keeping your current armor and rearranging tuning and mods works too, but leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below).'
           )
           : l(
-            '目前没有一套能把六项都补齐。下面这套差得最少，可以先参考；如果不想刷，保留现有护甲重排调谐与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。想完全达标，还得降低目标或放开一件固定护甲。',
-            '目前沒有一套能把六項都補齊。下面這套差得最少，可以先參考；如果不想刷，保留目前防具重排調諧與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。想完全達標，還得降低目標或放開一件固定防具。',
+            '目前没有一套能把六项都补齐。下面这套差得最少，可以先参考；如果不想刷，保留现有护甲重排调整与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。想完全达标，还得降低目标或放开一件固定护甲。',
+            '目前沒有一套能把六項都補齊。下面這套差得最少，可以先參考；如果不想刷，保留目前防具重排調校與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。想完全達標，還得降低目標或放開一件固定防具。',
             'Nothing we found fills all six targets. This is the closest setup; without farming, keeping your current armor and rearranging tuning and mods leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below). To hit everything, lower a target or unlock one fixed piece.'
           )}</p>
       </div>
@@ -5050,8 +5051,8 @@ function renderInventoryBungieEquip(entry, index) {
   if (equipState.hidden) return "";
   const targetOptions = getBungieTargetOptionsHtml();
   const hint = equipState.reason || l(
-    "自检通过。将自动转移并穿戴五件护甲、写入全部模组，并在写入后回读核对；保持目标角色当前的副职业、星象与碎片。请先确保角色在轨道、社交空间或离线。",
-    "自檢通過。將自動轉移並穿著五件防具、寫入全部模組，並在寫入後回讀核對；保持目標角色目前的副職業、星象與碎片。請先確保角色在軌道、社交空間或離線。",
+    "自检通过。将自动转移并穿戴五件护甲、写入全部模组，并在写入后回读核对；保持目标角色当前的分支职业、星相与碎片。请先确保角色在轨道、社交空间或离线。",
+    "自檢通過。將自動轉移並穿著五件防具、寫入全部模組，並在寫入後回讀核對；保持目標角色目前的副職業、相位與碎片。請先確保角色在軌道、社交空間或離線。",
     "Preflight passed. The app will transfer and equip all five armor pieces, insert every mod, then re-read and verify; it preserves the target character's current subclass, Aspects, and Fragments. Make sure the character is in orbit, a social space, or offline.",
   );
   return `<section class="bungie-equip-panel" aria-labelledby="bungieEquipTitle">
@@ -5213,8 +5214,8 @@ function renderDimExportMessage(messages, url, count, modCount, ok, warning = ""
     : '';
   const modNote = modCount > 0
     ? l(
-      `，已包含 ${modCount} 个护甲模组/调谐设置`,
-      `，已包含 ${modCount} 個防具模組/調諧設定`,
+      `，已包含 ${modCount} 个护甲模组/调整设置`,
+      `，已包含 ${modCount} 個防具模組/調校設定`,
       `, includes ${modCount} armor mod/tuning settings`
     )
     : l(
@@ -5243,8 +5244,8 @@ function renderDimExportMessage(messages, url, count, modCount, ok, warning = ""
       <button type="button" class="btn" onclick="copyDimExportLink()">${icon("save")}${l("重新复制链接", "重新複製連結", "Copy link again")}</button>
     </div>
     <p class="dim-export-hint">${l(
-      "打开前请确保浏览器已登录 DIM；或复制链接后，粘贴到 DIM → Loadouts → Import Loadout。模组与调谐（含 -5 来源）已随链接带入，需已拥有对应模组（未拥有的会灰显忽略）；护甲需已满大师。",
-      "開啟前請確保瀏覽器已登入 DIM；或複製連結後，貼上到 DIM → Loadouts → Import Loadout。模組與調諧（含 -5 來源）已隨連結帶入，需已擁有對應模組（未擁有的會灰顯忽略）；防具需已滿傑作。",
+      "打开前请确保浏览器已登录 DIM；或复制链接后，粘贴到 DIM → Loadouts → Import Loadout。模组与调整（含 -5 来源）已随链接带入，需已拥有对应模组（未拥有的会灰显忽略）；护甲需完成大师杰作。",
+      "開啟前請確保瀏覽器已登入 DIM；或複製連結後，貼上到 DIM → Loadouts → Import Loadout。模組與調校（含 -5 來源）已隨連結帶入，需已擁有對應模組（未擁有的會灰顯忽略）；防具需完成大師之作。",
       "Make sure DIM is logged in before opening the link, or paste it into DIM → Loadouts → Import Loadout. Stat mods and the full tuning setup (including the -5 source) are included in the link — you must own them (missing mods are greyed out and ignored); armor must be fully masterworked."
     )}</p>
   </div></div>`;

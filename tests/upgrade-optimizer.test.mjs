@@ -176,7 +176,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
     const config = BASE_CONFIGS.find(c =>
       c.archetype === archName && c.tertiary === tertiary);
     return normalizeUpgradePiece({
-      archetypeId: ARCHETYPES.find(a => a.name === archName)?.id,
+      archetypeId: ARCHETYPES.find(a => a.id === archName)?.id,
       tertiary,
       tuningMode: "shift",
       tuningFrom: tuning.from || "health",
@@ -190,7 +190,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
 
   // Fixture from a known exact from-scratch solution for this target:
   // 突围者/melee + 高能者/melee + 高能者/grenade + 高能者/melee + 高能者/grenade.
-  const archetypes = ["突围者", "高能者", "高能者", "高能者", "高能者"];
+  const archetypes = ["Siegebreaker", "Powerhouse", "Powerhouse", "Powerhouse", "Powerhouse"];
   const tertiaries = ["melee", "melee", "grenade", "melee", "grenade"];
   const tuningTo = ["class", "class", "health", "class", "grenade"];
   const tuningFrom = ["health", "health", "super", "weapons", "health"];
@@ -208,7 +208,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
   // two-piece swap) is the exact fix.
   const broken = pieces.map((piece, index) => index === 1 || index === 3
     ? makePiece(
-      "突围者", piece.tertiary,
+      "Siegebreaker", piece.tertiary,
       { from: piece.tuningFrom, to: piece.tuningTo },
       { size: piece.armorModSize, stat: piece.armorModStat }, index
     )
@@ -249,7 +249,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
 test("upgrade planning uses full-masterwork projections for kept DIM pieces", () => {
   const grenadier = ARCHETYPES.find(archetype => archetype.id === "Grenadier");
   const fullStats = BASE_CONFIGS.find(config =>
-    config.archetype === grenadier.name && config.tertiary === "melee"
+    config.archetype === grenadier.id && config.tertiary === "melee"
   ).baseStats;
   const currentStats = [
     fullStats,
@@ -377,7 +377,7 @@ test("a known fixed tuning stat becomes the piece's tuning destination", () => {
 
 test("Exotic tuning stays free while Legendary +5 destinations stay fixed", () => {
   const config = BASE_CONFIGS.find(entry =>
-    entry.archetype === "突围者" && entry.tertiary === "melee");
+    entry.archetype === "Siegebreaker" && entry.tertiary === "melee");
   const pieces = Array.from({ length: 5 }, (_, index) => normalizeUpgradePiece({
     archetypeId: "Siegebreaker",
     tertiary: "melee",

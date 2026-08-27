@@ -1,4 +1,4 @@
-import { ARCHETYPES, STATS } from "./armor-model.mjs";
+import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
 import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
@@ -13,9 +13,7 @@ const LEGENDARY_SLOTS = INVENTORY_PLAN_SLOTS.slice(0, 4);
 const MAX_MATCH_CANDIDATES = 8;
 
 function archetypeIdForName(name) {
-  // Exotic class item configs carry the archetype ID (e.g. "Brawler") while
-  // legendary configs carry the localized name; accept both.
-  return ARCHETYPES.find(archetype => archetype.name === name || archetype.id === name)?.id || null;
+  return normalizeArchetypeId(name);
 }
 
 function getItemTuningTo(item) {

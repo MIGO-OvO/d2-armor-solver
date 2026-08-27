@@ -1,10 +1,11 @@
 import {
   EXOTIC_LANGUAGE_STORAGE_KEY,
   PAGE_LANGUAGE_STORAGE_KEY,
+  normalizeArchetypeId,
 } from "./armor-model.mjs";
 import { channelStorageKey } from "./build-channel.mjs";
 
-export const BUILD_SCHEMA_VERSION = 1;
+export const BUILD_SCHEMA_VERSION = 2;
 
 export const STORAGE_KEYS = Object.freeze({
   currentDraft: channelStorageKey("d2_armor_current_draft_v1"),
@@ -57,6 +58,50 @@ function writeJson(storage, key, value) {
   return writeText(storage, key, JSON.stringify(value));
 }
 
+// Drafts and saved solutions from early releases used localized Archetype
+// names as identity. Migrate only identity-bearing fields, leaving every
+// other user value untouched. The caller writes the migrated object back to
+// the same localStorage key; no key is removed and no draft is cleared.
+export function migrateStoredArchetypeIds(value) {
+  let changed = false;
+
+  function visit(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const entry of node) visit(entry);
+      return;
+    }
+    for (const [key, entry] of Object.entries(node)) {
+      if ((key === "archetypeId" || key === "archetype") &&
+          (typeof entry === "string" || typeof entry === "number")) {
+        const normalized = normalizeArchetypeId(entry);
+        if (normalized && normalized !== entry) {
+          node[key] = normalized;
+          changed = true;
+        }
+      } else {
+        visit(entry);
+      }
+    }
+  }
+
+  visit(value);
+  if (value && typeof value === "object" && !Array.isArray(value) &&
+      Number(value.schemaVersion || 0) < BUILD_SCHEMA_VERSION) {
+    value.schemaVersion = BUILD_SCHEMA_VERSION;
+    changed = true;
+  }
+  return { value, changed };
+}
+
+function readMigratedJson(storage, key, fallback) {
+  const value = readJson(storage, key, fallback);
+  if (value === fallback) return fallback;
+  const migrated = migrateStoredArchetypeIds(value);
+  if (migrated.changed) writeJson(storage, key, migrated.value);
+  return migrated.value;
+}
+
 function safeLocalStorage() {
   try {
     return globalThis.localStorage;
@@ -82,7 +127,7 @@ export function createBuildRepository(storage) {
     },
 
     readCurrentDraft() {
-      return readJson(storage, STORAGE_KEYS.currentDraft, null);
+      return readMigratedJson(storage, STORAGE_KEYS.currentDraft, null);
     },
 
     writeCurrentDraft(draft) {
@@ -93,7 +138,7 @@ export function createBuildRepository(storage) {
     },
 
     readUpgradeDraft() {
-      return readJson(storage, STORAGE_KEYS.upgradeDraft, null);
+      return readMigratedJson(storage, STORAGE_KEYS.upgradeDraft, null);
     },
 
     writeUpgradeDraft(draft) {
@@ -112,7 +157,7 @@ export function createBuildRepository(storage) {
     },
 
     readSavedBuilds() {
-      const builds = readJson(storage, STORAGE_KEYS.savedBuilds, []);
+      const builds = readMigratedJson(storage, STORAGE_KEYS.savedBuilds, []);
       return Array.isArray(builds) ? builds : [];
     },
 
