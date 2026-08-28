@@ -938,6 +938,49 @@ main,
   }
 }
 
+@media (max-width: 44.999rem) {
+  /* The phone route selector is the first decision point. Preserve the copy,
+     but remove desktop breathing room so both paths stay easy to compare. */
+  .hero {
+    gap: var(--space-6);
+    padding-block: var(--space-8) var(--space-12);
+  }
+
+  .route-selector__head,
+  .route {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .route { gap: var(--space-3); }
+  .route > p { line-height: 1.6; }
+  .route__meta { gap: var(--space-1) var(--space-3); }
+  .route__actions { gap: var(--space-1); }
+}
+
+@media (max-width: 24.375rem) {
+  /* The description already explains the same two browser/storage promises;
+     on 320–390px phones the metadata row is redundant vertical weight. */
+  .route__meta { display: none; }
+}
+
+@media (orientation: landscape) and (max-width: 68rem) and (max-height: 520px) {
+  .site-header {
+    min-height: 4rem;
+    padding-block: var(--space-2);
+  }
+
+  .hero {
+    gap: var(--space-4);
+    padding-block: var(--space-6) var(--space-8);
+  }
+
+  .lab-preview,
+  .trust-grid,
+  .offline-guide {
+    padding-block: var(--space-8);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
