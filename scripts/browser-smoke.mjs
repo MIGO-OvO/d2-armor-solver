@@ -354,6 +354,14 @@ async function checkPortal(browser) {
       "both online and offline routes should be discoverable in the 390px first view: " +
         JSON.stringify(mobileLayout),
     );
+    const mobileRouteActions = await page.locator(".route .action").evaluateAll(elements =>
+      elements.map(element => Math.round(element.getBoundingClientRect().height)),
+    );
+    assert.ok(
+      mobileRouteActions.every(height => height >= 48),
+      "mobile portal actions should retain a 48px touch target: " +
+        JSON.stringify(mobileRouteActions),
+    );
     assert.deepEqual(browserErrors, []);
     console.log("browser smoke OK (portal routes, shared language, 390px layout)");
   } finally {
@@ -1029,6 +1037,20 @@ async function checkBungieAuthFlow(browser) {
     // --- (b) login button renders (three languages) and builds the authorize URL ---
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator("#bungieLoginButton").waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileLoginLayout = await page.locator("#bungieLoginButton").evaluate(element => {
+      const header = document.querySelector(".header").getBoundingClientRect();
+      return {
+        loginWidth: element.getBoundingClientRect().width,
+        headerWidth: header.width,
+      };
+    });
+    assert.ok(
+      mobileLoginLayout.loginWidth >= mobileLoginLayout.headerWidth - 4,
+      "mobile logged-out Bungie action should span the auth row: " +
+        JSON.stringify(mobileLoginLayout),
+    );
+    await page.setViewportSize({ width: 1440, height: 1000 });
     assert.equal(
       await page.locator("#bungieLoginButton").innerText(),
       "Bungie 登录",
@@ -1570,6 +1592,14 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload({ waitUntil: "networkidle" });
   await page.evaluate(() => window.setCalculatorMode("upgrade"));
+  const mobileModeControls = await page.locator(
+    "#targetGrid .stat-mode-control",
+  ).evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().height)));
+  assert.ok(
+    mobileModeControls.every(height => height >= 44),
+    "mobile target priority/rule controls should retain a 44px touch target: " +
+      JSON.stringify(mobileModeControls),
+  );
   const mobilePieceSummary = await page.locator(
     "#upgradeBuildEditor .upgrade-piece-row summary",
   ).first().evaluate(element => {
@@ -1620,6 +1650,12 @@ try {
   await page.locator("#onlyPlus5Tuning").check();
   await page.evaluate(() => window.solve());
   await page.locator("#results.show").waitFor();
+  const mobileSolutionList = page.locator("#solutionNav [role=\"list\"]");
+  assert.equal(
+    await mobileSolutionList.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length),
+    2,
+    "390px solution picker should remain a compact two-column list",
+  );
   await page.locator(".constraint-scroll-hint").waitFor({ state: "visible" });
   assert.equal(
     await page.locator(".constraint-matrix").getAttribute("tabindex"),
