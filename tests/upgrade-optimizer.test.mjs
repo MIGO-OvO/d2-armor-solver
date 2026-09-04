@@ -221,6 +221,11 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
     analysis.plan.replacementCount, 2,
     `expected the exact 2-swap plan, got ${analysis.plan.replacementCount} replacements`
   );
+  assert.deepEqual(analysis.plan.replacementProof, {
+    method: "replacement-count-iterative-deepening",
+    minimal: true,
+    examinedThrough: 2,
+  });
   assert.equal(
     analysis.plan.evaluation.finalTotals.weapons, target.weapons,
     "the plan must land exactly on the target"
@@ -240,6 +245,55 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
       `${label} required: expected 2 replacements, got ${requiredAnalysis.plan.replacementCount}`
     );
   }
+});
+
+test("three cooperating replacements are proven minimal beyond every one/two-slot move", () => {
+  const target = {
+    health: 26, melee: 70, grenade: 101, super: 46, class: 130, weapons: 110,
+  };
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const specs = [
+    ["Demolitionist", "weapons", "melee", "grenade", 10, "class", true],
+    ["Powerhouse", "melee", "super", "melee", 0, "class", true],
+    ["Brawler", "grenade", "super", "health", 10, "super", false],
+    ["Reaver", "health", "health", "grenade", 5, "weapons", false],
+    ["Gunner", "class", "melee", "health", 5, "super", false],
+  ];
+  const pieces = specs.map(([
+    archetypeId, tertiary, tuningFrom, tuningTo,
+    armorModSize, armorModStat, locked,
+  ], index) => {
+    const config = BASE_CONFIGS.find(candidate =>
+      candidate.archetype === archetypeId && candidate.tertiary === tertiary);
+    return normalizeUpgradePiece({
+      archetypeId,
+      tertiary,
+      tuningMode: index === 4 ? "plus3" : "shift",
+      tuningFrom,
+      tuningTo,
+      armorModSize,
+      armorModStat,
+      locked,
+      baseStats: { ...config.baseStats },
+    }, index);
+  });
+  const analysis = analyzeUpgradeCandidates(
+    pieces,
+    target,
+    fragments,
+    true,
+    STATS,
+    false,
+    { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+  );
+
+  assert.equal(analysis.plan?.metrics.allReached, true);
+  assert.equal(analysis.plan.replacementCount, 3);
+  assert.deepEqual(analysis.plan.replacementProof, {
+    method: "replacement-count-iterative-deepening",
+    minimal: true,
+    examinedThrough: 3,
+  });
 });
 
 // Regression for the real DIM-import scenario reported in the UI. The current
@@ -291,6 +345,7 @@ test("upgrade planning uses full-masterwork projections for kept DIM pieces", ()
     analysis.plan.replacementCount, 2,
     "only legs and class item need farming after retained pieces are projected"
   );
+  assert.equal(analysis.plan.replacementProof?.minimal, true);
   assert.deepEqual(
     analysis.plan.replacements.map(replacement => replacement.slotIndex).sort(),
     [3, 4]

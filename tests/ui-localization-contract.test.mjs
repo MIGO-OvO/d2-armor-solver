@@ -43,3 +43,20 @@ test("critical UI terms are wired to the centralized contract", () => {
     assert.equal(UI_TEXT[language].armorArchetype, TERMINOLOGY.armorArchetype[language]);
   }
 });
+
+test("Solver V3 UI copy distinguishes proof, limits, witnesses, and execution", async () => {
+  const source = await readFile(path.join(root, "src", "app.mjs"), "utf8");
+  for (const status of [
+    "EXACT_TARGET_PROVEN",
+    "RULE_FEASIBLE_PROVEN",
+    "INFEASIBLE_PROVEN",
+    "SEARCH_LIMIT_REACHED",
+    "VERIFIED",
+    "BLOCKED",
+  ]) {
+    assert.match(source, new RegExp(status), status);
+  }
+  assert.doesNotMatch(source, /No exact solution;/);
+  assert.doesNotMatch(source, /This is the closest setup/);
+  assert.doesNotMatch(source, /最接近目标的方案/);
+});

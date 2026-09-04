@@ -1,4 +1,6 @@
 import { BASE_CONFIGS, STATS } from "./armor-model.mjs";
+import { findExactTargetWitnesses } from "./exact-target-oracle.mjs";
+import { RESULT_STATUS, visibleStatFromArmor } from "./solver-v3-contract.mjs";
 
 const reachableRangeCache = new Map();
 
@@ -428,4 +430,57 @@ export function calculateReachableRanges(
 
   const result = { feasible: true, ranges };
   return cacheReachableRange(cacheKey, result);
+}
+
+export function findReachabilityWitness({
+  fixedPiece,
+  numPlus5,
+  numPlus10,
+  numPlus3,
+  fragments = {},
+  visibleTarget = {},
+}) {
+  if (!fixedPiece || STATS.some(stat => !Number.isSafeInteger(Number(visibleTarget[stat])))) {
+    return {
+      status: RESULT_STATUS.INVALID_INPUT,
+      witness: null,
+      exhaustive: false,
+    };
+  }
+  const armorTarget = Object.fromEntries(STATS.map(stat => [
+    stat,
+    Number(visibleTarget[stat]) - (Number(fragments[stat]) || 0),
+  ]));
+  const witnesses = findExactTargetWitnesses({
+    target: armorTarget,
+    numPlus5,
+    numPlus10,
+    numPlus3,
+    fixedConfig: fixedPiece,
+  });
+  const witness = witnesses[0] || null;
+  if (witness) {
+    witness.totals = { ...armorTarget };
+    witness.visibleTotals = Object.fromEntries(STATS.map(stat => [
+      stat,
+      visibleStatFromArmor(armorTarget[stat], fragments[stat] || 0),
+    ]));
+    return {
+      status: RESULT_STATUS.EXACT_TARGET_PROVEN,
+      witness,
+      exhaustive: true,
+    };
+  }
+  const hasClampBoundary = STATS.some(stat =>
+    Number(visibleTarget[stat]) === 0 || Number(visibleTarget[stat]) === 200);
+  return {
+    status: hasClampBoundary
+      ? RESULT_STATUS.SEARCH_LIMIT_REACHED
+      : RESULT_STATUS.INFEASIBLE_PROVEN,
+    witness: null,
+    exhaustive: !hasClampBoundary,
+    reason: hasClampBoundary
+      ? "clamped boundary corresponds to an armor-domain interval"
+      : null,
+  };
 }

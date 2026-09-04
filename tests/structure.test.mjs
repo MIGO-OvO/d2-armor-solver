@@ -8,6 +8,8 @@ const algorithmModules = [
   "src/core/budget.mjs",
   "src/core/reachability.mjs",
   "src/core/solver.mjs",
+  "src/core/exact-target-oracle.mjs",
+  "src/core/solver-v3-contract.mjs",
   "src/core/upgrade-optimizer.mjs",
   "src/core/inventory-solver.mjs",
   "src/core/inventory-plan.mjs",

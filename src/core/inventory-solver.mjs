@@ -1,4 +1,5 @@
 import { STATS } from "./armor-model.mjs";
+import { createPieceCapability } from "./solver-v3-contract.mjs";
 import {
   applyManualUpgradeModifiers,
   compareUpgradeMetrics,
@@ -8,9 +9,6 @@ import {
 } from "./upgrade-optimizer.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
-const MAX_ASSIGNMENTS = 200;
-const EXACT_COMBINATION_LIMIT = 4096;
-const INVENTORY_BEAM_WIDTH = 128;
 
 // Build a five-piece loadout from the imported inventory that satisfies the
 // set-bonus requirement (or none) and comes as close as possible to the stat
@@ -37,10 +35,6 @@ export function solveInventoryLoadout({
   for (const item of items) {
     if (item?.slot && bySlot.has(item.slot)) bySlot.get(item.slot).push(item);
   }
-  const armorTarget = Object.fromEntries(STATS.map(stat => [
-    stat,
-    Math.max(0, (targets[stat] || 0) - (fragments[stat] || 0)),
-  ]));
   const evaluate = pieces => evaluateUpgradePieces(
     pieces, targets, fragments, reassignModifiers, normalizedRequiredStats,
     onlyPlus5Tuning, userConstraints
@@ -67,7 +61,7 @@ export function solveInventoryLoadout({
 
   let examined = 0;
   const assignments = enumerateSetAssignments(bySlot, setRequirement);
-  for (const assignment of assignments.slice(0, MAX_ASSIGNMENTS)) {
+  for (const assignment of assignments) {
     const freeSlots = assignment.free.filter(slot => !lockedPiecesBySlot.has(slot));
     const constrainedAssignment = { ...assignment, free: freeSlots };
     const exhaustivePieces = enumerateSmallAssignmentLoadouts(
@@ -82,11 +76,11 @@ export function solveInventoryLoadout({
       }
       continue;
     }
-    const beamPieces = searchAssignmentBeam(
+    const exactPieces = searchAssignmentExact(
       bySlot, constrainedAssignment, lockedPiecesBySlot, setRequirement,
-      armorTarget, normalizedRequiredStats, reassignModifiers, onlyPlus5Tuning,
+      reassignModifiers, onlyPlus5Tuning,
     );
-    for (const pieces of beamPieces) {
+    for (const pieces of exactPieces) {
       if (!isLegalArmorLoadout(pieces)) continue;
       if (!satisfiesRequirement(pieces, setRequirement)) continue;
       push(pieces, evaluate(pieces));
@@ -112,6 +106,7 @@ export function solveInventoryLoadout({
     requirement: setRequirement,
     requiredStats: normalizedRequiredStats,
     examined,
+    searchComplete: !reassignModifiers,
     results: validResults.slice(0, maxResults).map(entry => ({
       pieces: entry.pieces,
       isCurrent: entry.key === currentKey,
@@ -139,7 +134,7 @@ function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot
       : bySlot.get(slot);
     if (items.length === 0) return [];
     combinationCount *= items.length;
-    if (combinationCount > EXACT_COMBINATION_LIMIT) return null;
+    if (combinationCount > 4096) return null;
     candidatesBySlot.push(items.map(item => ({ item })));
   }
 
@@ -215,75 +210,18 @@ function getStateKey(state, includeCoverage = true) {
   // total as a multiset; their armor-slot order does not. Canonicalizing that
   // multiset avoids retaining equivalent permutations in large inventories.
   const descriptors = [...state.descriptors].sort().join("|");
+  const capabilities = [...state.capabilityKeys].sort().join("|");
   const coverage = includeCoverage ? `|${state.coverageA}|${state.coverageB}` : "";
-  return `${stats}#${descriptors}#${state.exoticCount}${coverage}`;
+  return `${stats}#${descriptors}#${capabilities}#${state.exoticCount}${coverage}`;
 }
 
-function getCapabilityBounds(piece, reassignModifiers, onlyPlus5Tuning) {
-  const config = getUpgradeConfig(piece);
-  if (!reassignModifiers) {
-    const stats = applyManualUpgradeModifiers(config, piece);
-    return { minimums: stats, maximums: stats };
-  }
-
-  const minimums = { ...config.baseStats };
-  const maximums = { ...config.baseStats };
-  const tuningMode = onlyPlus5Tuning && piece.tuningMode === "plus3"
-    ? "shift"
-    : piece.tuningMode;
-  if (tuningMode === "plus3") {
-    for (const stat of config.masterworkStats || []) {
-      minimums[stat] += 1;
-      maximums[stat] += 1;
-    }
-  } else if (piece.exotic) {
-    for (const stat of STATS) {
-      minimums[stat] -= 5;
-      maximums[stat] += 5;
-    }
-  } else if (STATS.includes(piece.tuningTo)) {
-    minimums[piece.tuningTo] += 5;
-    maximums[piece.tuningTo] += 5;
-    for (const stat of STATS) {
-      if (stat !== piece.tuningTo) minimums[stat] -= 5;
-    }
-  }
-  for (const stat of STATS) maximums[stat] += piece.armorModSize || 0;
-  return { minimums, maximums };
-}
-
-function getOptimisticScore(state, remainingBounds, armorTarget, requiredStats) {
-  const requiredSet = new Set(requiredStats);
-  let lowerBound = 0;
-  let midpointDistance = 0;
-  for (const stat of STATS) {
-    const minimum = state.minimums[stat] + remainingBounds.minimums[stat];
-    const maximum = state.maximums[stat] + remainingBounds.maximums[stat];
-    const target = armorTarget[stat];
-    const gap = target < minimum
-      ? minimum - target
-      : target > maximum
-        ? target - maximum
-        : 0;
-    const weight = requiredSet.has(stat) ? 1e6 : 1;
-    lowerBound += gap * gap * weight;
-    const midpoint = (minimum + maximum) / 2;
-    midpointDistance += (midpoint - target) ** 2 * weight;
-  }
-  return [lowerBound, midpointDistance];
-}
-
-function compareBeamStates(left, right) {
-  return left.score[0] - right.score[0] || left.score[1] - right.score[1];
-}
-
-// Large inventories keep a broad, target-aware frontier. Unlike the previous
-// prefix-ratio beam, the score includes every unfilled slot's reachable range,
-// so a piece is not discarded merely because it looks weak before its support
-// pieces are added. Evaluation-equivalent identities are still collapsed.
-function searchAssignmentBeam(
-  bySlot, assignment, lockedPiecesBySlot, requirement, armorTarget,
-  requiredStats, reassignModifiers, onlyPlus5Tuning,
+// Large inventories use an exhaustive state frontier. States merge only when
+// their aggregate stats, Tuning/mod descriptors, set coverage, Exotic count,
+// and execution capabilities are future-equivalent. No width or Top-N limit
+// participates in reachability.
+function searchAssignmentExact(
+  bySlot, assignment, lockedPiecesBySlot, requirement,
+  reassignModifiers, onlyPlus5Tuning,
 ) {
   const candidatesBySlot = [];
   for (const slot of SLOT_ORDER) {
@@ -303,19 +241,27 @@ function searchAssignmentBeam(
       const contribution = getEvaluationContribution(
         piece, reassignModifiers, onlyPlus5Tuning
       );
-      const bounds = getCapabilityBounds(piece, reassignModifiers, onlyPlus5Tuning);
       const coverage = getRequirementCoverage(piece, requirement);
+      const capabilityKey = createPieceCapability(piece, slotIndex).equivalenceKey;
       const key = [
         ...STATS.map(stat => contribution.stats[stat]),
         contribution.descriptor,
-        Number(Boolean(piece.exotic)),
+        capabilityKey,
         ...coverage,
       ].join(":");
-      if (!compressed.has(key)) {
-        compressed.set(key, { piece, contribution, coverage, bounds });
+      const candidate = { piece, contribution, coverage, capabilityKey };
+      const existing = compressed.get(key);
+      if (!existing || getPieceInstanceKey(piece).localeCompare(
+        getPieceInstanceKey(existing.piece),
+      ) < 0) {
+        compressed.set(key, candidate);
       }
     }
-    candidatesBySlot.push({ slotIndex, candidates: [...compressed.values()] });
+    candidatesBySlot.push({
+      slotIndex,
+      candidates: [...compressed.values()].sort((left, right) =>
+        getPieceInstanceKey(left.piece).localeCompare(getPieceInstanceKey(right.piece))),
+    });
   }
 
   // Fewer distinct candidates first keeps intermediate state maps small; the
@@ -323,28 +269,12 @@ function searchAssignmentBeam(
   candidatesBySlot.sort((left, right) =>
     left.candidates.length - right.candidates.length
   );
-  const remainingBounds = Array.from(
-    { length: candidatesBySlot.length + 1 },
-    () => ({
-      minimums: Object.fromEntries(STATS.map(stat => [stat, 0])),
-      maximums: Object.fromEntries(STATS.map(stat => [stat, 0])),
-    }),
-  );
-  for (let index = candidatesBySlot.length - 1; index >= 0; index--) {
-    const candidates = candidatesBySlot[index].candidates;
-    for (const stat of STATS) {
-      remainingBounds[index].minimums[stat] = remainingBounds[index + 1].minimums[stat]
-        + Math.min(...candidates.map(candidate => candidate.bounds.minimums[stat]));
-      remainingBounds[index].maximums[stat] = remainingBounds[index + 1].maximums[stat]
-        + Math.max(...candidates.map(candidate => candidate.bounds.maximums[stat]));
-    }
-  }
   let states = new Map([["start", {
     pieces: Array(SLOT_ORDER.length),
     stats: Object.fromEntries(STATS.map(stat => [stat, 0])),
-    minimums: Object.fromEntries(STATS.map(stat => [stat, 0])),
-    maximums: Object.fromEntries(STATS.map(stat => [stat, 0])),
     descriptors: Array(SLOT_ORDER.length).fill(""),
+    capabilityKeys: Array(SLOT_ORDER.length).fill(""),
+    identityKeys: Array(SLOT_ORDER.length).fill(""),
     exoticCount: 0,
     coverageA: 0,
     coverageB: 0,
@@ -361,9 +291,15 @@ function searchAssignmentBeam(
         pieces[slotIndex] = candidate.piece;
         const descriptors = [...state.descriptors];
         descriptors[slotIndex] = candidate.contribution.descriptor;
+        const capabilityKeys = [...state.capabilityKeys];
+        capabilityKeys[slotIndex] = candidate.capabilityKey;
+        const identityKeys = [...state.identityKeys];
+        identityKeys[slotIndex] = getPieceInstanceKey(candidate.piece);
         const nextState = {
           pieces,
           descriptors,
+          capabilityKeys,
+          identityKeys,
           exoticCount,
           coverageA: Math.min(
             state.coverageA + candidate.coverage[0],
@@ -377,35 +313,23 @@ function searchAssignmentBeam(
             stat,
             state.stats[stat] + candidate.contribution.stats[stat],
           ])),
-          minimums: Object.fromEntries(STATS.map(stat => [
-            stat,
-            state.minimums[stat] + candidate.bounds.minimums[stat],
-          ])),
-          maximums: Object.fromEntries(STATS.map(stat => [
-            stat,
-            state.maximums[stat] + candidate.bounds.maximums[stat],
-          ])),
         };
-        nextState.score = getOptimisticScore(
-          nextState, remainingBounds[candidateIndex + 1], armorTarget, requiredStats,
-        );
         const key = getStateKey(nextState);
         const previous = next.get(key);
-        if (!previous || compareBeamStates(nextState, previous) < 0) {
+        if (!previous || identityKeys.join("|").localeCompare(
+          previous.identityKeys.join("|"),
+        ) < 0) {
           next.set(key, nextState);
         }
       }
     }
-    states = new Map(
-      [...next.entries()]
-        .sort((left, right) => compareBeamStates(left[1], right[1]))
-        .slice(0, INVENTORY_BEAM_WIDTH),
-    );
+    states = next;
     if (states.size === 0) return [];
   }
 
   const loadouts = [];
-  for (const state of states.values()) {
+  for (const state of [...states.values()].sort((left, right) =>
+    left.identityKeys.join("|").localeCompare(right.identityKeys.join("|")))) {
     if (!satisfiesRequirement(state.pieces, requirement)) continue;
     loadouts.push(state.pieces);
   }

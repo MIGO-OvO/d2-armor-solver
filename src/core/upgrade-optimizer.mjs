@@ -5,6 +5,11 @@ import { getEffectiveBaseStats, inferArchetypeFromStats } from "./dim-csv.mjs";
 import {
   compareScoreRanks, evaluateConfig, runSolver, scoreStats, scoreStatsRank,
 } from "./solver.mjs";
+import {
+  compareIntegerTuples,
+  createCanonicalId,
+} from "./solver-v3-contract.mjs";
+import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
 
 export const UPGRADE_SLOTS = [
   { id:'helmet', labels:['头盔','頭盔','Helmet'] },
@@ -151,6 +156,10 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     hash: item.hash,
     primaryPerkId: item.primaryPerkId || null,
     secondaryPerkId: item.secondaryPerkId || null,
+    sockets: item.sockets || [],
+    energy: item.energy || null,
+    allowedTuningStats: item.allowedTuningStats || null,
+    dataConfidence: item.dataConfidence || null,
   }, slotIndex);
 }
 
@@ -398,7 +407,7 @@ export function compareUpgradeMetrics(left, right) {
     const scoreRankOrder = compareScoreRanks(left.scoreRank, right.scoreRank);
     if (scoreRankOrder !== 0) return scoreRankOrder;
   }
-  return left.score - right.score;
+  return 0;
 }
 
 export function evaluateUpgradePieces(
@@ -444,7 +453,12 @@ export function evaluateUpgradePieces(
       piece.tuningMode === 'plus3' ? null : piece.exotic ? undefined : piece.tuningTo);
     const automaticEvaluation = evaluateConfig(
       configs, scoringTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, constraints,
-      fixedTuningTargets
+      fixedTuningTargets,
+      // The legacy Upgrade outer search evaluates many thousands of candidate
+      // sets. It is migrated separately to replacement-count iterative
+      // deepening; until then, do not multiply the exact fixed-five DP cost by
+      // the old seed/hill-climb loop.
+      { skipExactJointSearch: true },
     );
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
     const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
@@ -688,7 +702,7 @@ export function compareUpgradePlans(left, right) {
   const leftNonTuningOnly = (left.replacements || []).filter(r => !r.tuningOnly).length;
   const rightNonTuningOnly = (right.replacements || []).filter(r => !r.tuningOnly).length;
   if (leftNonTuningOnly !== rightNonTuningOnly) return leftNonTuningOnly - rightNonTuningOnly;
-  return left.evaluation.score - right.evaluation.score;
+  return createCanonicalId(left).localeCompare(createCanonicalId(right));
 }
 
 export function chooseUpgradeTertiaries(
@@ -703,21 +717,24 @@ export function chooseUpgradeTertiaries(
 
   for (const archetypeIndex of archetypeIndices) {
     let bestConfig = null;
-    let bestScore = Infinity;
+    let bestRank = null;
     for (let tertiaryIndex = 0; tertiaryIndex < 4; tertiaryIndex++) {
       const config = BASE_CONFIGS[archetypeIndex * 4 + tertiaryIndex];
       const completedCount = lockedConfigs.length + selected.length + 1;
-      const ratio = completedCount / 5;
-      let score = 0;
+      const rank = [0, 0];
       for (const stat of STATS) {
         const actual = partialTotals[stat] + config.baseStats[stat];
-        const difference = actual - armorTarget[stat] * ratio;
-        const requiredWeight = requiredSet.has(stat) ? 1e6 : 1;
-        score += (difference < 0 ? difference * difference * 3 : difference * difference)
-          * requiredWeight;
+        // Compare in fifths instead of multiplying the target by a fractional
+        // prefix ratio. Squaring scales every candidate at this depth equally
+        // while keeping the canonical tuple strictly integral.
+        const difference = actual * 5 - armorTarget[stat] * completedCount;
+        const penalty = difference < 0
+          ? difference * difference * 3
+          : difference * difference;
+        rank[requiredSet.has(stat) ? 0 : 1] += penalty;
       }
-      if (score < bestScore) {
-        bestScore = score;
+      if (!bestRank || compareIntegerTuples(rank, bestRank) < 0) {
+        bestRank = rank;
         bestConfig = config;
       }
     }
@@ -872,11 +889,11 @@ export function buildUpgradePlanSteps(
   return steps;
 }
 
-// The from-scratch solver searches the complete five-piece state space and is
-// therefore a stronger feasibility oracle than the upgrade planner's fast
-// greedy seeds + one-slot refinement. Convert one of its complete witnesses
-// back into real upgrade pieces, while retaining owned Legendary armor only
-// when its frame, tertiary, tuning mode, and randomly rolled +5 stat all match.
+// The from-scratch solver has an independent exact-target oracle before its
+// fuzzy fallback, so an exact result is a valid feasibility witness. Convert
+// such a witness back into real upgrade pieces, while retaining owned
+// Legendary armor only when its frame, tertiary, tuning mode, and randomly
+// rolled +5 stat all match.
 function findFromScratchUpgradeWitness(
   pieces, targets, fragments, reassignModifiers, requiredStats, userConstraints,
   evaluatePieces
@@ -912,7 +929,7 @@ function findFromScratchUpgradeWitness(
     : { config: getUpgradeConfig(pieces[exoticIndex]) };
   const solutions = runSolver(
     scoringTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3,
-    constraints, exoticSettings
+    constraints, exoticSettings, { maxExactSolutions: 1 }
   );
   let bestPlan = null;
 
@@ -998,6 +1015,142 @@ function findFromScratchUpgradeWitness(
     );
   }
   return bestPlan;
+}
+
+function replacementSubsets(indices, count) {
+  const result = [];
+  const chosen = [];
+  const visit = start => {
+    if (chosen.length === count) {
+      result.push([...chosen]);
+      return;
+    }
+    for (let index = start; index < indices.length; index++) {
+      chosen.push(indices[index]);
+      visit(index + 1);
+      chosen.pop();
+    }
+  };
+  visit(0);
+  return result;
+}
+
+function visitPermutations(values, visit, depth = 0) {
+  if (depth === values.length) {
+    visit(values);
+    return;
+  }
+  for (let index = depth; index < values.length; index++) {
+    [values[depth], values[index]] = [values[index], values[depth]];
+    visitPermutations(values, visit, depth + 1);
+    [values[depth], values[index]] = [values[index], values[depth]];
+  }
+}
+
+function findExactUpgradePlanIterative(
+  pieces, targets, fragments, reassignModifiers, evaluatePieces,
+  onlyPlus5Tuning,
+) {
+  if (!reassignModifiers) return null;
+  const unlocked = pieces
+    .map((piece, index) => piece.locked ? -1 : index)
+    .filter(index => index >= 0);
+  const armorTarget = Object.fromEntries(STATS.map(stat => [
+    stat,
+    Math.max(0, targets[stat] - (fragments[stat] || 0)),
+  ]));
+  const budget = getUpgradeModifierBudget(pieces);
+
+  for (let replacementDepth = 0; replacementDepth <= unlocked.length; replacementDepth++) {
+    let bestAtDepth = null;
+    for (const replacementSlots of replacementSubsets(unlocked, replacementDepth)) {
+      const replacementSet = new Set(replacementSlots);
+      const fixed = pieces
+        .map((piece, slotIndex) => ({ piece, slotIndex }))
+        .filter(({ slotIndex }) => !replacementSet.has(slotIndex));
+      const fixedEntries = fixed.map(({ piece }) => ({
+        config: getUpgradeConfig(piece),
+        tuningMode: piece.tuningMode,
+        tuningTo: piece.exotic ? undefined : piece.tuningTo,
+      }));
+      const allowedFreePlus3Counts = onlyPlus5Tuning
+        ? [0]
+        : Array.from({ length: replacementDepth + 1 }, (_, count) => count);
+      const witnesses = findExactPartialConfigWitnesses({
+        fixedEntries,
+        freePieceCount: replacementDepth,
+        target: armorTarget,
+        numPlus5: budget.numPlus5,
+        numPlus10: budget.numPlus10,
+        allowedFreePlus3Counts,
+        maxWitnesses: 64,
+      });
+
+      for (const witness of witnesses) {
+        const fixedCount = fixed.length;
+        const freeDescriptors = Array.from(
+          { length: replacementDepth },
+          (_, index) => fixedCount + index,
+        );
+        visitPermutations(freeDescriptors, descriptorOrder => {
+          const mapped = pieces.map(piece => ({ ...piece }));
+          const applyDescriptor = (slotIndex, descriptorIndex, keepOwned) => {
+            const config = witness.config[descriptorIndex];
+            const tuning = witness.tuningAssignments[descriptorIndex];
+            const mod = witness.modAssignments[descriptorIndex];
+            const configured = keepOwned
+              ? mapped[slotIndex]
+              : setUpgradePieceConfig(mapped[slotIndex], slotIndex, config);
+            mapped[slotIndex] = normalizeUpgradePiece({
+              ...configured,
+              tuningMode: tuning.mode === "+3" ? "plus3" : "shift",
+              tuningFrom: tuning.from,
+              tuningTo: tuning.to,
+              tuningUnknown: false,
+              armorModSize: mod?.size || 0,
+              armorModStat: mod?.stat || configured.armorModStat,
+            }, slotIndex);
+          };
+          fixed.forEach(({ slotIndex }, descriptorIndex) =>
+            applyDescriptor(slotIndex, descriptorIndex, true));
+          replacementSlots.forEach((slotIndex, index) =>
+            applyDescriptor(slotIndex, descriptorOrder[index], false));
+
+          const evaluation = evaluatePieces(mapped, false);
+          if (!evaluation.metrics.allReached) return;
+          const replacements = getUpgradeReplacements(pieces, mapped);
+          if (replacements.length > replacementDepth) return;
+          const plan = {
+            pieces: mapped,
+            evaluation,
+            metrics: evaluation.metrics,
+            replacements,
+            replacementCount: replacements.length,
+            replacementProof: {
+              method: "replacement-count-iterative-deepening",
+              minimal: true,
+              examinedThrough: replacementDepth,
+            },
+          };
+          if (!bestAtDepth || compareUpgradePlans(plan, bestAtDepth) < 0) {
+            bestAtDepth = plan;
+          }
+        });
+      }
+    }
+    if (bestAtDepth) {
+      bestAtDepth.steps = buildUpgradePlanSteps(
+        pieces,
+        bestAtDepth.pieces,
+        targets,
+        fragments,
+        bestAtDepth.evaluation,
+        evaluatePieces,
+      );
+      return bestAtDepth;
+    }
+  }
+  return null;
 }
 
 export function findUpgradeCompletionPlan(
@@ -1205,6 +1358,15 @@ export function analyzeUpgradeCandidates(
   let rankings = [];
   let plan = null;
   if (!baseline.metrics.allReached) {
+    plan = findExactUpgradePlanIterative(
+      pieces,
+      targets,
+      fragments,
+      reassignModifiers,
+      evaluatePieces,
+      onlyPlus5Tuning,
+    );
+    if (!plan) {
     // Full-target feasibility is invariant under the UI's fallback-priority
     // checkboxes. Always run the same all-six-stats search first; only if it
     // cannot reach the complete target may selected required stats steer the
@@ -1284,6 +1446,7 @@ export function analyzeUpgradeCandidates(
         pieces, targets, fragments, reassignModifiers, baseline, singleSwapSeeds,
         normalizedRequiredStats, evaluatePieces, onlyPlus5Tuning
       );
+    }
     }
   }
   const bestCandidate = rankings[0] || null;

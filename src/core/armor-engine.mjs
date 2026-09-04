@@ -1,7 +1,74 @@
-import { calculateReachableRanges } from "./reachability.mjs";
+import {
+  calculateReachableRanges,
+  findReachabilityWitness,
+} from "./reachability.mjs";
+import { assignArmorMods } from "./armor-mod-assignment.mjs";
 import { solveInventoryLoadout } from "./inventory-solver.mjs";
 import { runSolver } from "./solver.mjs";
+import {
+  EXECUTION_STATUS,
+  RESULT_STATUS,
+  STAT_DOMAIN,
+  attachResultCertificate,
+  createCanonicalId,
+  createProblemSpec,
+  createResultCertificate,
+  matchesExactTarget,
+  satisfiesConstraintModel,
+} from "./solver-v3-contract.mjs";
 import { analyzeUpgradeCandidates } from "./upgrade-optimizer.mjs";
+
+function certificateForWitness({
+  problemSpec,
+  witness,
+  witnessDomain,
+  executionStatus,
+  proof,
+  emptyStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED,
+}) {
+  let status = emptyStatus;
+  if (!problemSpec.valid) status = RESULT_STATUS.INVALID_INPUT;
+  else if (witness && matchesExactTarget(
+    witness,
+    problemSpec.constraintModel,
+    witnessDomain,
+  )) status = RESULT_STATUS.EXACT_TARGET_PROVEN;
+  else if (witness && satisfiesConstraintModel(
+    witness,
+    problemSpec.constraintModel,
+    witnessDomain,
+  )) status = RESULT_STATUS.RULE_FEASIBLE_PROVEN;
+  else if (proof?.exhaustive) status = RESULT_STATUS.INFEASIBLE_PROVEN;
+
+  return createResultCertificate({
+    status,
+    executionStatus,
+    problemSpec,
+    witness,
+    proof,
+    message: problemSpec.valid ? null : problemSpec.errors.join("; "),
+  });
+}
+
+function annotateWitnesses(witnesses) {
+  for (const witness of witnesses || []) {
+    if (witness && typeof witness === "object") {
+      witness.canonicalId = createCanonicalId(witness);
+    }
+  }
+  return witnesses;
+}
+
+function assessExecution(pieces, inventory, evaluation, availablePlugHashes = null) {
+  if (!Array.isArray(pieces) || pieces.length !== 5 || !evaluation) return null;
+  return assignArmorMods({
+    pieces,
+    inventory: inventory || pieces,
+    tuningAssignments: evaluation.tuningAssignments,
+    modAssignments: evaluation.modAssignments,
+    availablePlugHashes,
+  });
+}
 
 export function solveLoadout({
   target,
@@ -11,8 +78,31 @@ export function solveLoadout({
   constraints = {},
   exoticSettings = null,
   runtimeOptions = {},
+  fragments = {},
+  targetDomain = STAT_DOMAIN.ARMOR,
 }) {
-  return runSolver(
+  const problemSpec = createProblemSpec({
+    operation: "solve",
+    target,
+    fragments,
+    constraints,
+    targetDomain,
+    numPlus5,
+    numPlus10,
+    numPlus3,
+    pieces: exoticSettings?.config ? [exoticSettings.config] : [],
+    runtimeOptions,
+  });
+  if (!problemSpec.valid) {
+    return attachResultCertificate([], certificateForWitness({
+      problemSpec,
+      witness: null,
+      witnessDomain: targetDomain,
+      executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+      proof: { method: "input-validation", exhaustive: false },
+    }));
+  }
+  const solutions = annotateWitnesses(runSolver(
     target,
     numPlus5,
     numPlus10,
@@ -20,7 +110,19 @@ export function solveLoadout({
     constraints,
     exoticSettings,
     runtimeOptions,
-  );
+  ));
+  return attachResultCertificate(solutions, certificateForWitness({
+    problemSpec,
+    witness: solutions[0] || null,
+    witnessDomain: targetDomain,
+    executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+    proof: {
+      method: solutions.proofMethod || (solutions[0] && matchesExactTarget(
+        solutions[0], problemSpec.constraintModel, targetDomain,
+      ) ? "exact-target-oracle" : "bounded-fallback-search"),
+      exhaustive: Boolean(solutions.searchComplete),
+    },
+  }));
 }
 
 export function calculateReachability({
@@ -30,8 +132,35 @@ export function calculateReachability({
   numPlus3,
   fragments,
   lockedTargets,
+  probeTarget = null,
 }) {
-  return calculateReachableRanges(
+  const constraints = {
+    exact: Object.fromEntries(Object.keys(lockedTargets || {}).map(stat => [stat, true])),
+  };
+  const problemSpec = createProblemSpec({
+    operation: "calculateReachability",
+    target: lockedTargets,
+    fragments,
+    constraints,
+    targetDomain: STAT_DOMAIN.VISIBLE,
+    numPlus5,
+    numPlus10,
+    numPlus3,
+    pieces: fixedPiece ? [fixedPiece] : [],
+  });
+  if (!problemSpec.valid) {
+    return attachResultCertificate(
+      { feasible: false, ranges: {} },
+      certificateForWitness({
+        problemSpec,
+        witness: null,
+        witnessDomain: STAT_DOMAIN.VISIBLE,
+        executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+        proof: { method: "input-validation", exhaustive: false },
+      }),
+    );
+  }
+  const result = calculateReachableRanges(
     fixedPiece,
     numPlus5,
     numPlus10,
@@ -39,6 +168,27 @@ export function calculateReachability({
     fragments,
     lockedTargets,
   );
+  const probe = probeTarget ? findReachabilityWitness({
+    fixedPiece,
+    numPlus5,
+    numPlus10,
+    numPlus3,
+    fragments,
+    visibleTarget: probeTarget,
+  }) : null;
+  if (probe) result.probe = probe;
+  return attachResultCertificate(result, createResultCertificate({
+    status: probe?.status || (result.feasible
+      ? RESULT_STATUS.RULE_FEASIBLE_PROVEN
+      : RESULT_STATUS.INFEASIBLE_PROVEN),
+    executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+    problemSpec,
+    proof: {
+      method: "reachability-dynamic-programming",
+      exhaustive: probe ? probe.exhaustive : true,
+      witnessProducing: Boolean(probe?.witness),
+    },
+  }));
 }
 
 export function analyzeUpgrade({
@@ -50,7 +200,37 @@ export function analyzeUpgrade({
   onlyPlus5Tuning = false,
   constraints = {},
 }) {
-  return analyzeUpgradeCandidates(
+  const problemSpec = createProblemSpec({
+    operation: "analyzeUpgrade",
+    targets,
+    fragments,
+    constraints,
+    targetDomain: STAT_DOMAIN.VISIBLE,
+    pieces,
+  });
+  if (!problemSpec.valid) {
+    return attachResultCertificate({
+      pieces: pieces || [],
+      targets: targets || {},
+      fragments: fragments || {},
+      requiredStats: [],
+      constraints,
+      reassignModifiers,
+      projectedMasterworkIndices: [],
+      enteredBaseline: null,
+      baseline: null,
+      rankings: [],
+      best: null,
+      plan: null,
+    }, certificateForWitness({
+      problemSpec,
+      witness: null,
+      witnessDomain: STAT_DOMAIN.VISIBLE,
+      executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+      proof: { method: "input-validation", exhaustive: false },
+    }));
+  }
+  const result = analyzeUpgradeCandidates(
     pieces,
     targets,
     fragments,
@@ -59,8 +239,75 @@ export function analyzeUpgrade({
     onlyPlus5Tuning,
     constraints,
   );
+  const witness = result.plan || result.baseline || null;
+  if (result.plan) result.plan.canonicalId = createCanonicalId(result.plan);
+  const execution = assessExecution(
+    result.plan?.pieces || result.pieces,
+    pieces,
+    result.plan?.evaluation || result.baseline,
+  );
+  result.execution = execution;
+  return attachResultCertificate(result, certificateForWitness({
+    problemSpec,
+    witness,
+    witnessDomain: STAT_DOMAIN.VISIBLE,
+    executionStatus: execution?.executionStatus || EXECUTION_STATUS.NOT_APPLICABLE,
+    proof: {
+      method: "upgrade-candidate-search",
+      exhaustive: false,
+    },
+  }));
 }
 
 export function solveInventory(payload) {
-  return solveInventoryLoadout(payload);
+  const problemSpec = createProblemSpec({
+    operation: "solveInventory",
+    targets: payload?.targets,
+    fragments: payload?.fragments,
+    constraints: payload?.userConstraints,
+    targetDomain: STAT_DOMAIN.VISIBLE,
+    pieces: payload?.items,
+  });
+  if (!problemSpec.valid) {
+    return attachResultCertificate({
+      requirement: payload?.setRequirement || null,
+      requiredStats: [],
+      examined: 0,
+      results: [],
+    }, certificateForWitness({
+      problemSpec,
+      witness: null,
+      witnessDomain: STAT_DOMAIN.VISIBLE,
+      executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+      proof: { method: "input-validation", exhaustive: false },
+    }));
+  }
+  const result = solveInventoryLoadout(payload);
+  if (!result) return result;
+  const witness = result.results?.[0] || null;
+  for (const entry of result.results || []) {
+    entry.canonicalId = createCanonicalId(entry);
+    entry.execution = assessExecution(
+      entry.pieces,
+      payload?.items,
+      entry,
+      payload?.availablePlugHashes || null,
+    );
+  }
+  return attachResultCertificate(result, certificateForWitness({
+    problemSpec,
+    witness,
+    witnessDomain: STAT_DOMAIN.VISIBLE,
+    executionStatus: witness?.execution?.executionStatus
+      || EXECUTION_STATUS.NOT_APPLICABLE,
+    proof: {
+      method: result.searchComplete
+        ? "inventory-equivalence-frontier"
+        : "inventory-frontier-with-legacy-assignment-evaluator",
+      exhaustive: Boolean(result.searchComplete),
+    },
+    emptyStatus: result.searchComplete
+      ? RESULT_STATUS.INFEASIBLE_PROVEN
+      : RESULT_STATUS.SEARCH_LIMIT_REACHED,
+  }));
 }
