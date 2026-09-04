@@ -1,3 +1,21 @@
+import {
+  ARCHETYPE_LABELS,
+  ARMOR_ARCHETYPES,
+  STAT_LABELS_BY_LANGUAGE,
+  TERMINOLOGY,
+  getArchetypeDefinition,
+  getTerm,
+  normalizeArchetypeId,
+} from "./terminology.mjs";
+
+export {
+  ARCHETYPE_LABELS,
+  STAT_LABELS_BY_LANGUAGE,
+  TERMINOLOGY,
+  getTerm,
+  normalizeArchetypeId,
+};
+
 // ============================================================
 // ICONS
 // ============================================================
@@ -28,11 +46,6 @@ export function icon(name, { size = '', label = '', cls = '' } = {}) {
 // CONSTANTS
 // ============================================================
 export const STATS = ['health', 'melee', 'grenade', 'super', 'class', 'weapons'];
-export const STAT_LABELS_BY_LANGUAGE = {
-  'zh-chs': { health:'生命值', melee:'近战', grenade:'手雷', super:'超能', class:'职业', weapons:'武器' },
-  'zh-cht': { health:'生命值', melee:'近戰', grenade:'手榴彈', super:'超能力', class:'職業', weapons:'武器' },
-  en: { health:'Health', melee:'Melee', grenade:'Grenade', super:'Super', class:'Class', weapons:'Weapons' },
-};
 export let STAT_LABELS = STAT_LABELS_BY_LANGUAGE['zh-chs'];
 
 export function setStatLabels(language) {
@@ -48,20 +61,6 @@ export const DEFAULT_TARGETS = { health:0, melee:100, grenade:100, super:100, cl
 export const SOLUTION_PREVIEW_COUNT = 10;
 export const PAGE_LANGUAGE_STORAGE_KEY = 'd2_armor_page_language_v1';
 export const EXOTIC_LANGUAGE_STORAGE_KEY = 'd2_armor_exotic_language_v1';
-export const ARCHETYPE_LABELS = {
-  Siegebreaker: { 'zh-chs':'突围者', 'zh-cht':'破圍者', en:'Siegebreaker' },
-  Bulwark: { 'zh-chs':'堡垒', 'zh-cht':'堡壘', en:'Bulwark' },
-  Brawler: { 'zh-chs':'搏击手', 'zh-cht':'赤拳互鬥', en:'Brawler' },
-  Skirmisher: { 'zh-chs':'突击手', 'zh-cht':'衝突者', en:'Skirmisher' },
-  Grenadier: { 'zh-chs':'掷雷手', 'zh-cht':'榴彈兵', en:'Grenadier' },
-  Demolitionist: { 'zh-chs':'爆破专家', 'zh-cht':'爆破專家', en:'Demolitionist' },
-  Colossus: { 'zh-chs':'装甲兵', 'zh-cht':'巨神兵', en:'Colossus' },
-  Paragon: { 'zh-chs':'楷模典范', 'zh-cht':'至高典範', en:'Paragon' },
-  Reaver: { 'zh-chs':'掠夺者', 'zh-cht':'剝奪者', en:'Reaver' },
-  Specialist: { 'zh-chs':'专家', 'zh-cht':'戰術家', en:'Specialist' },
-  Gunner: { 'zh-chs':'枪手', 'zh-cht':'槍手', en:'Gunner' },
-  Powerhouse: { 'zh-chs':'高能者', 'zh-cht':'發電站', en:'Powerhouse' },
-};
 export const EXOTIC_ARCHETYPE_LABELS = ARCHETYPE_LABELS;
 export const UI_TEXT = {
   'zh-chs': {
@@ -105,30 +104,30 @@ export const UI_TEXT = {
     refineHeading:'优先属性与约束调整', refineDescription:'选择优化目标后点击下方按钮重新求解。约束条件对求解器施加硬性限制。',
     refineButton:'重新优化', recommendedBuildHeading:'方案详情',
     exoticRecommendationHeading:'异域护甲推荐',
-    exoticRecommendationDescription:'普通模式按方案推荐异域护甲框架；异域职业物品模式严格使用你锁定的属性框架。',
+    exoticRecommendationDescription:'普通模式按方案推荐异域护甲框架；异域职业物品模式严格使用你锁定的护甲框架。',
     footerContent:'<div class="footer-title">命运2 T5配装求解器·优化版 Ver 2.0.7</div><div class="footer-credit"><span class="footer-role">优化版作者</span><span>MIGO-OvO</span><span>B站 UID: 23930138</span><span>反馈群: 1104108070</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub主页</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">B站主页</a></div><div class="footer-credit"><span class="footer-role">原版作者</span><span>B站 UID: 57597346</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者B站主页</a></div>',
     lock:'锁定', none:'不设置', viewLightgg:'查看 light.gg',
     exoticClassItem:'异域职业物品', legendaryArmor:'传说护甲', exoticArmor:'异域护甲', armor:'护甲',
-    armorArchetype:'护甲框架', fragments:'碎片', perk:'特性', tuning:'调整', tuningMod:'调整模组', armorMod:'护甲模组',
-    primaryStat:'主要属性', secondaryStat:'次要属性', tertiaryStat:'第三属性', masterwork:'大师杰作',
+    armorArchetype:TERMINOLOGY.armorArchetype['zh-chs'], fragments:'碎片', perk:'特性', tuning:TERMINOLOGY.tuning['zh-chs'], tuningMod:TERMINOLOGY.tuningMod['zh-chs'], armorMod:TERMINOLOGY.armorMod['zh-chs'],
+    primaryStat:TERMINOLOGY.primaryStat['zh-chs'], secondaryStat:TERMINOLOGY.secondaryStat['zh-chs'], tertiaryStat:TERMINOLOGY.tertiaryStat['zh-chs'], masterwork:TERMINOLOGY.masterwork['zh-chs'],
   },
   'zh-cht': {
     documentTitle:'天命2 T5配裝求解器',
     pageHeading:'天命2 <span>T5</span> 配裝求解器',
-    pageSubtitle:'設定目標數值 → 計算 5 件防具的最佳組合 · 12 種防具原型 · 自動分配調整',
+    pageSubtitle:'設定目標數值 → 計算 5 件防具的最佳組合 · 12 種防具原型 · 自動分配調校',
     pageLanguageLabel:'網頁語言',
     skipToTargets:'跳至目標輸入',
     freeNotice:'本程式完全免費',
     fraudNotice:'如果你是付費購買的，代表你受騙了！',
     introSummary:'程式介紹',
-    introContent:'<p>本程式用於天命2防具3.0版的T5配裝求解。輸入目標六維數值、模組和碎片後，程式會列舉五件防具的實際組合，並結合已有防具判斷還需取得什麼。</p><p>異域職業物品模式會根據職業及左右欄特長鎖定30/25/20防具原型，再計算異域職業物品與四件傳說防具的真實可達範圍。調整模組、防具模組和第三數值均參與逐件計算。</p><p>基礎參數：每件T5防具為主要數值30、次要數值25、第三數值20，其餘三項傑作各5，共90點；五件共450點。調整模組可選+5/-5或+3；每件可裝備一個+5或+10防具模組；單項數值範圍為0–200。</p><p>12種防具原型：破圍者、堡壘、赤拳互鬥、衝突者、榴彈兵、爆破專家、巨神兵、至高典範、剝奪者、戰術家、槍手、發電站。</p>',
+    introContent:'<p>本程式用於天命2防具3.0版的T5配裝求解。輸入目標六維數值、模組和碎片後，程式會列舉五件防具的實際組合，並結合已有防具判斷還需取得什麼。</p><p>異域職業物品模式會根據職業及左右欄特長鎖定30/25/20防具原型，再計算異域職業物品與四件傳說防具的真實可達範圍。調校模組、防具模組和第三數值均參與逐件計算。</p><p>基礎參數：每件T5防具為主要數值30、次要數值25、第三數值20，其餘三項大師之作各5，共90點；五件共450點。調校模組可選+5/-5或+3；每件可裝備一個+5或+10防具模組；單項數值範圍為0–200。</p><p>12種防具原型：破圍者、堡壘、赤拳互鬥、散兵、榴彈兵、爆破專家、巨神兵、至高典範、剝奪者、戰術家、槍手、發電站。</p>',
     calculatorModeLabel:'計算模式', standardModeButton:'從零求解', upgradeModeButton:'最佳化現有配裝',
     upgradeBuildHeading:'最佳化現有配裝',
     upgradeBuildDescription:'選擇每件防具的原型、第三數值與模組；異域或不想替換的防具請勾選「固定」。',
     inventoryImportAriaLabel:'已有防具',
     upgradeCurrentHeading:'目前五件防具',
     upgradeCurrentDescription:'異域和不想替換的防具請勾選「固定」。',
-    upgradeReassignModifiers:'計算時自動重排調整和數值模組',
+    upgradeReassignModifiers:'計算時自動重排調校和數值模組',
     upgradeTargetHint:'這裡填最低目標。勾選「必須達標」後，該數值會優先滿足；其餘方案再依總缺口由小到大排列。高於目標仍視為達標。',
     upgradeRequiredStat:'必須達標',
     upgradeRequiredStatShort:'必達',
@@ -137,13 +136,13 @@ export const UI_TEXT = {
     targetsHeading:'目標六維數值', resetTargetsButton:'恢復預設值',
     targetModeHint:'「優先」決定餘量先分配給哪項數值（高 → 中 → 低）；「規則」決定輸入值是精確值、下限、上限或區間。點擊對應按鈕即可切換。',
     exoticModeLabel:'啟用<strong style="color:var(--accent);">異域職業物品模式</strong>',
-    exoticModeDescription:'鎖定異域職業物品的主要/次要/第三數值原型，再用其餘四件傳說防具計算最佳解與六維理論極限。調整由求解器自動分配，無需手動指定。',
+    exoticModeDescription:'鎖定異域職業物品的主要/次要/第三數值原型，再用其餘四件傳說防具計算最佳解與六維理論極限。調校由求解器自動分配，無需手動指定。',
     exoticModeDetail:'選擇職業及左右欄特長後，程式自動鎖定對應的30/25/20固定原型；右欄特長與主要/次要數值衝突時，依遊戲候補順序取剩餘數值。',
     classLabel:'職業', primaryPerkLabel:'主要特長（左欄，決定主要/次要數值）', secondaryPerkLabel:'次要特長（右欄，決定第三數值）',
     plus5ModCount:'+5模組數量', plus10ModCount:'+10模組數量',
-    onlyPlus5TuningLabel:'只使用<strong style="color:var(--accent);">+5/-5</strong>調整（不使用+3）',
-    onlyPlus5TuningHint:'選取後，求解方案不會分配+3調整。',
-    plus3ModeLabel:'啟用調整<strong style="color:var(--accent);">+3</strong>模式（免費+3點/件）',
+    onlyPlus5TuningLabel:'只使用<strong style="color:var(--accent);">+5/-5</strong>調校（不使用+3）',
+    onlyPlus5TuningHint:'選取後，求解方案不會分配+3調校。',
+    plus3ModeLabel:'啟用調校<strong style="color:var(--accent);">+3</strong>模式（免費+3點/件）',
     selectWord:'選擇', plus3PiecesSuffix:'件防具使用+3模式（其餘用+5/-5）',
     solveButton:'求解最佳配裝', saveBuildButton:'儲存目前配裝',
     backToSolutionsTitle:'返回方案列表', jumpToDetailsTitle:'跳至配裝詳情',
@@ -153,12 +152,12 @@ export const UI_TEXT = {
     refineHeading:'優先數值與限制調整', refineDescription:'選擇最佳化目標後，點擊下方按鈕重新求解。限制條件會對求解器施加硬性限制。',
     refineButton:'重新最佳化', recommendedBuildHeading:'方案詳情',
     exoticRecommendationHeading:'異域防具推薦',
-    exoticRecommendationDescription:'一般模式依方案推薦異域防具原型；異域職業物品模式嚴格使用你鎖定的數值原型。',
+    exoticRecommendationDescription:'一般模式依方案推薦異域防具原型；異域職業物品模式嚴格使用你鎖定的防具原型。',
     footerContent:'<div class="footer-title">天命2 T5配裝求解器·優化版 Ver 2.0.7</div><div class="footer-credit"><span class="footer-role">優化版作者</span><span>MIGO-OvO</span><span>Bilibili UID: 23930138</span><span>回饋群: 1104108070</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub 主頁</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">Bilibili 主頁</a></div><div class="footer-credit"><span class="footer-role">原版作者</span><span>Bilibili UID: 57597346</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">作者 Bilibili 主頁</a></div>',
     lock:'鎖定', none:'不設定', viewLightgg:'查看 light.gg',
     exoticClassItem:'異域職業物品', legendaryArmor:'傳說防具', exoticArmor:'異域防具', armor:'防具',
-    armorArchetype:'防具原型', fragments:'碎片', perk:'特長', tuning:'調整', tuningMod:'調整模組', armorMod:'防具模組',
-    primaryStat:'主要數值', secondaryStat:'次要數值', tertiaryStat:'第三數值', masterwork:'傑作',
+    armorArchetype:TERMINOLOGY.armorArchetype['zh-cht'], fragments:'碎片', perk:'特長', tuning:TERMINOLOGY.tuning['zh-cht'], tuningMod:TERMINOLOGY.tuningMod['zh-cht'], armorMod:TERMINOLOGY.armorMod['zh-cht'],
+    primaryStat:TERMINOLOGY.primaryStat['zh-cht'], secondaryStat:TERMINOLOGY.secondaryStat['zh-cht'], tertiaryStat:TERMINOLOGY.tertiaryStat['zh-cht'], masterwork:TERMINOLOGY.masterwork['zh-cht'],
   },
   en: {
     documentTitle:'Destiny 2 T5 Armor Solver',
@@ -201,12 +200,12 @@ export const UI_TEXT = {
     refineHeading:'Priority Stats and Constraints', refineDescription:'Choose optimization goals, then solve again. Constraints are hard limits.',
     refineButton:'Optimize Again', recommendedBuildHeading:'Solution details',
     exoticRecommendationHeading:'Exotic Armor Recommendation',
-    exoticRecommendationDescription:'Standard mode recommends an Exotic Armor archetype; Exotic Class Item mode strictly uses the locked stat archetype.',
+    exoticRecommendationDescription:'Standard mode recommends an Exotic Armor Archetype; Exotic Class Item mode strictly uses the locked Armor Archetype.',
     footerContent:'<div class="footer-title">Destiny 2 T5 Armor Solver · Optimized Edition Ver 2.0.7</div><div class="footer-credit"><span class="footer-role">Optimized edition author</span><span>MIGO-OvO</span><span>Bilibili UID: 23930138</span><span>Feedback group: 1104108070</span><a href="https://github.com/MIGO-OvO" target="_blank" rel="noopener noreferrer">GitHub profile</a><a href="https://space.bilibili.com/23930138?spm_id_from=333.1007.0.0" target="_blank" rel="noopener noreferrer">Bilibili profile</a></div><div class="footer-credit"><span class="footer-role">Original author</span><span>Bilibili UID: 57597346</span><a href="https://space.bilibili.com/57597346" target="_blank" rel="noopener noreferrer">Bilibili profile</a></div>',
     lock:'Lock', none:'None', viewLightgg:'View on light.gg',
     exoticClassItem:'Exotic Class Item', legendaryArmor:'Legendary Armor', exoticArmor:'Exotic Armor', armor:'Armor',
-    armorArchetype:'Armor Archetype', fragments:'Fragments', perk:'Perk', tuning:'Tuning', tuningMod:'Tuning Mod', armorMod:'Armor Mod',
-    primaryStat:'Primary Stat', secondaryStat:'Secondary Stat', tertiaryStat:'Tertiary Stat', masterwork:'Masterwork',
+    armorArchetype:TERMINOLOGY.armorArchetype.en, fragments:'Fragments', perk:'Perk', tuning:TERMINOLOGY.tuning.en, tuningMod:TERMINOLOGY.tuningMod.en, armorMod:TERMINOLOGY.armorMod.en,
+    primaryStat:TERMINOLOGY.primaryStat.en, secondaryStat:TERMINOLOGY.secondaryStat.en, tertiaryStat:TERMINOLOGY.tertiaryStat.en, masterwork:TERMINOLOGY.masterwork.en,
   },
 };
 
@@ -222,6 +221,10 @@ export function t(key, vars = {}) {
     value = String(value).replaceAll(`{${name}}`, String(replacement));
   }
   return value;
+}
+
+export function term(key) {
+  return getTerm(key, getPageLanguage());
 }
 
 export function l(chs, cht, en) {
@@ -314,23 +317,10 @@ export function getExoticArchetypeLabel(archetype) {
   return EXOTIC_ARCHETYPE_LABELS[archetype]?.[getExoticLanguage()] || archetype;
 }
 
-export const ARCHETYPES = [
-  { id:'Siegebreaker', hash:2503381935, name:'突围者', primary:'health', secondary:'grenade' },
-  { id:'Bulwark', hash:549468645, name:'壁垒', primary:'health', secondary:'class' },
-  { id:'Brawler', hash:3349393475, name:'搏击手', primary:'melee', secondary:'health' },
-  { id:'Skirmisher', hash:1687144140, name:'突击手', primary:'melee', secondary:'weapons' },
-  { id:'Grenadier', hash:2937665788, name:'掷雷手', primary:'grenade', secondary:'super' },
-  { id:'Demolitionist', hash:2222960133, name:'爆破专家', primary:'grenade', secondary:'class' },
-  { id:'Colossus', hash:1418248448, name:'装甲兵', primary:'super', secondary:'health' },
-  { id:'Paragon', hash:4227065942, name:'楷模典范', primary:'super', secondary:'melee' },
-  { id:'Reaver', hash:351770835, name:'掠夺者', primary:'class', secondary:'melee' },
-  { id:'Specialist', hash:2230428468, name:'专家', primary:'class', secondary:'weapons' },
-  { id:'Gunner', hash:1807652646, name:'枪手', primary:'weapons', secondary:'grenade' },
-  { id:'Powerhouse', hash:544009373, name:'高能者', primary:'weapons', secondary:'super' },
-];
+export const ARCHETYPES = ARMOR_ARCHETYPES;
 
 export function getArchetypeLabel(nameOrId) {
-  const archetype = ARCHETYPES.find(item => item.id === nameOrId || item.name === nameOrId);
+  const archetype = getArchetypeDefinition(nameOrId);
   return archetype ? ARCHETYPE_LABELS[archetype.id][getPageLanguage()] : getExoticArchetypeLabel(nameOrId);
 }
 
@@ -456,7 +446,7 @@ export const BASE_CONFIGS = [];
         if (!mwSet.has(s)) stats[s] = 5;
       }
       BASE_CONFIGS.push({
-        archetype: arch.name,
+        archetype: arch.id,
         primary: arch.primary,
         secondary: arch.secondary,
         tertiary: tertiary,

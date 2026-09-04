@@ -1,5 +1,5 @@
-import { ARCHETYPES, STATS } from "./armor-model.mjs";
-import { farmabilityScore } from "./solver.mjs";
+import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
+import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -13,9 +13,7 @@ const LEGENDARY_SLOTS = INVENTORY_PLAN_SLOTS.slice(0, 4);
 const MAX_MATCH_CANDIDATES = 8;
 
 function archetypeIdForName(name) {
-  // Exotic class item configs carry the archetype ID (e.g. "Brawler") while
-  // legendary configs carry the localized name; accept both.
-  return ARCHETYPES.find(archetype => archetype.name === name || archetype.id === name)?.id || null;
+  return normalizeArchetypeId(name);
 }
 
 function getItemTuningTo(item) {
@@ -454,6 +452,8 @@ function repairChosenForExactness(solution, chosen, setRequirement) {
 function comparePlans(left, right) {
   // Plans whose owned pieces can actually reach the exact totals rank first.
   if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
+  const targetOrder = compareScoreRanks(left.solution?.rank, right.solution?.rank);
+  if (targetOrder !== 0) return targetOrder;
   if (left.farmCount !== right.farmCount) return left.farmCount - right.farmCount;
   if (left.fixedExoticDistance !== right.fixedExoticDistance) {
     return left.fixedExoticDistance - right.fixedExoticDistance;

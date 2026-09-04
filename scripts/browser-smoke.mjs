@@ -265,6 +265,7 @@ function runBuild(env) {
 let server;
 let portalUrl;
 let baseUrl;
+const previewPort = Number(process.env.BROWSER_SMOKE_PORT) || 4174;
 
 async function startPreview() {
   server = await preview({
@@ -272,12 +273,12 @@ async function startPreview() {
     logLevel: "silent",
     preview: {
       host: "127.0.0.1",
-      port: 4174,
+      port: previewPort,
       strictPort: false,
     },
   });
   const address = server.httpServer.address();
-  const port = typeof address === "object" && address ? address.port : 4174;
+  const port = typeof address === "object" && address ? address.port : previewPort;
   portalUrl = "http://127.0.0.1:" + port + "/";
   baseUrl = portalUrl + "app/";
 }
@@ -316,11 +317,17 @@ async function checkPortal(browser) {
       "the primary offline route should download the latest Release archive",
     );
 
+    await page.locator("#portalLanguage").selectOption("zh-chs");
+    assert.match(await page.locator('[data-i18n="capabilityTwo"]').innerText(), /护甲套装加成.*调整模组/);
+    assert.equal(await page.locator('[data-i18n="statHealth"]').innerText(), "生命值");
     await page.locator("#portalLanguage").selectOption("zh-cht");
     assert.equal(await page.locator(".route--online h3").innerText(), "線上使用");
     assert.equal(await page.locator("html").getAttribute("lang"), "zh-Hant");
+    assert.match(await page.locator('[data-i18n="capabilityTwo"]').innerText(), /防具套裝獎勵.*調校模組/);
+    assert.equal(await page.locator('[data-i18n="statSuper"]').innerText(), "超能力");
     await page.locator("#portalLanguage").selectOption("en");
     assert.equal(await page.locator(".route--online h3").innerText(), "Use online");
+    assert.match(await page.locator('[data-i18n="capabilityTwo"]').innerText(), /Tuning Mods/);
     assert.equal(
       await page.evaluate(() => localStorage.getItem("d2_armor_page_language_v1")),
       "en",
@@ -667,6 +674,9 @@ async function checkUpgradeTargetSync(browser) {
       element.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await page.locator("#setReqMode").selectOption("set4");
+    // The set picker now lists the whole 56-set catalog, so pick the set this
+    // fixture actually owns instead of relying on the first option.
+    await page.locator("#setReqA").selectOption("741162535");
     await page.evaluate(() => window.analyzeArmorUpgrades());
     assert.equal(
       await page.locator("#upgradeResults").isHidden(),
@@ -786,7 +796,9 @@ async function checkSetRequirementSnapshot(browser) {
 
     const staleSolve = page.evaluate(() => window.analyzeArmorUpgrades());
     await page.waitForTimeout(25);
-    await page.evaluate(() => window.updateSetRequirementMode("set4"));
+    // The set picker lists the full catalog now; select the fixture's set.
+    await page.locator("#setReqMode").selectOption("set4");
+    await page.locator("#setReqA").selectOption("741162535");
     await staleSolve;
     assert.equal(
       await page.locator("#inventoryResults").isHidden(),
@@ -956,11 +968,20 @@ async function checkBungieAuthFlow(browser) {
     }[url.pathname];
     if (writeRoute) {
       assert.equal(route.request().method(), "POST", `${writeRoute} must use POST`);
-      writeRequests[writeRoute].push(route.request().postDataJSON());
+      const requestBody = route.request().postDataJSON();
+      writeRequests[writeRoute].push(requestBody);
+      const response = writeRoute === "equipItems"
+        ? {
+            equipResults: requestBody.itemIds.map(itemInstanceId => ({
+              itemInstanceId,
+              equipStatus: 1,
+            })),
+          }
+        : 0;
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ ErrorCode: 1, Response: 0 }),
+        body: JSON.stringify({ ErrorCode: 1, Response: response }),
       });
     }
     if (/\/Destiny2\/\d+\/Profile\//.test(url.pathname)) {
@@ -1025,6 +1046,29 @@ async function checkBungieAuthFlow(browser) {
     await page.waitForFunction(() => /Bungie 登录/.test(
       document.getElementById("bungieLoginButton")?.textContent || "",
     ));
+
+    // Official Armor 3.0 terminology must render from the same contract in
+    // every application locale, including dynamic Archetype controls.
+    await page.evaluate(() => window.setCalculatorMode("upgrade"));
+    for (const [language, skirmisher, tuningMod] of [
+      ["zh-chs", "突击手", "调整模组"],
+      ["zh-cht", "散兵", "調校模組"],
+      ["en", "Skirmisher", "Tuning Mod"],
+    ]) {
+      await page.locator("#pageLanguage").selectOption(language);
+      assert.equal(
+        await page.locator('#upgradeBuildEditor select option[value="Skirmisher"]').first().innerText(),
+        skirmisher,
+        `${language} should render the official Skirmisher name`,
+      );
+      assert.equal(
+        await page.locator("#upgradeBuildEditor .input-group > span", { hasText: tuningMod }).first().innerText(),
+        tuningMod,
+        `${language} should render the official Tuning Mod term`,
+      );
+    }
+    await page.locator("#pageLanguage").selectOption("zh-chs");
+    await page.evaluate(() => window.setCalculatorMode("solve"));
 
     await page.locator("#bungieLoginButton").click();
     await page.waitForLoadState("networkidle");
@@ -1216,15 +1260,19 @@ async function checkBungieAuthFlow(browser) {
         await page.locator(".bungie-equip-hint").innerText(),
     );
     await equipButton.click();
-    await page.waitForFunction(() => /五件护甲|护甲与可用模组/.test(
+    await page.waitForFunction(() => /五件护甲与全部模组已装备|护甲与模组已装备|已装备 \d\/5 件护甲|装备到游戏失败|已完成部分/.test(
       document.getElementById("bungieEquipStatus")?.textContent || "",
     ));
     assert.equal(writeRequests.transfer.length, 5, "five vault armor pieces should transfer");
     assert.equal(writeRequests.equipItems.length, 1, "target armor should equip in one request");
+    const customEquipStatus = await page.locator("#bungieEquipStatus").innerText();
     assert.ok(
       writeRequests.insertPlug.length > 0 ||
-        /五件护甲与模组已装备/.test(await page.locator("#bungieEquipStatus").innerText()),
-      "the custom plan must either write its sockets or explicitly report an armor-only apply",
+        /五件护甲与(?:全部)?模组已装备/.test(
+          customEquipStatus,
+        ),
+      "the custom plan must either write its sockets or explicitly report an armor-only apply: " +
+        JSON.stringify({ customEquipStatus, insertPlug: writeRequests.insertPlug.length }),
     );
     assert.equal(writeRequests.equipItems[0].itemIds.length, 5);
     assert.ok(writeRequests.insertPlug.every(body => body.plug?.socketArrayType === 0));
@@ -1565,11 +1613,12 @@ try {
       JSON.stringify(mobileLiveStats),
   );
 
-  await page.evaluate(async () => {
+  await page.evaluate(() => {
     window.setCalculatorMode("solve");
     window.resetTargetStats();
-    await window.solve();
   });
+  await page.locator("#onlyPlus5Tuning").check();
+  await page.evaluate(() => window.solve());
   await page.locator("#results.show").waitFor();
   await page.locator(".constraint-scroll-hint").waitFor({ state: "visible" });
   assert.equal(

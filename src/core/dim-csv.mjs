@@ -1,8 +1,8 @@
 import {
   ARCHETYPES,
-  ARCHETYPE_LABELS,
   EXOTIC_CLASSES,
   STATS,
+  normalizeArchetypeId,
 } from "./armor-model.mjs";
 import { getArmorSetByItemHash } from "./armor-sets.mjs";
 
@@ -74,8 +74,8 @@ const DIM_STAT_COLUMNS = [
 const SLOT_BY_NAME = new Map([
   ["头盔", "helmet"], ["頭盔", "helmet"], ["Helmet", "helmet"],
   ["臂铠", "arms"], ["臂鎧", "arms"], ["Gauntlets", "arms"],
-  ["胸部护甲", "chest"], ["胸部護甲", "chest"], ["Chest Armor", "chest"],
-  ["腿部护甲", "legs"], ["腿部護甲", "legs"], ["Leg Armor", "legs"],
+  ["胸部护甲", "chest"], ["胸部護甲", "chest"], ["胸部防具", "chest"], ["Chest Armor", "chest"],
+  ["腿部护甲", "legs"], ["腿部護甲", "legs"], ["腿部防具", "legs"], ["Leg Armor", "legs"],
   ["猎人披风", "classItem"], ["獵人披風", "classItem"], ["Hunter Cloak", "classItem"],
   ["泰坦印记", "classItem"], ["泰坦印記", "classItem"], ["Titan Mark", "classItem"],
   ["术士臂环", "classItem"], ["術士臂環", "classItem"], ["Warlock Bond", "classItem"],
@@ -83,8 +83,8 @@ const SLOT_BY_NAME = new Map([
 
 const CLASS_BY_NAME = new Map([
   ["泰坦", "titan"], ["Titan", "titan"],
-  ["猎人", "hunter"], ["Hunter", "hunter"],
-  ["术士", "warlock"], ["Warlock", "warlock"],
+  ["猎人", "hunter"], ["獵人", "hunter"], ["Hunter", "hunter"],
+  ["术士", "warlock"], ["術士", "warlock"], ["Warlock", "warlock"],
 ]);
 
 const STAT_BY_NAME = new Map();
@@ -108,12 +108,7 @@ STAT_BY_NAME.set("超能力", "super");
 STAT_BY_NAME.set("職業", "class");
 STAT_BY_NAME.set("武器", "weapons");
 
-const ARCHETYPE_BY_NAME = new Map();
-for (const archetype of ARCHETYPES) {
-  for (const language of ["zh-chs", "zh-cht", "en"]) {
-    ARCHETYPE_BY_NAME.set(ARCHETYPE_LABELS[archetype.id][language], archetype.id);
-  }
-}
+const EXOTIC_RARITY_NAMES = new Set(["exotic", "异域", "異域"]);
 
 export function parseBaseStats(record) {
   const stats = {};
@@ -261,7 +256,7 @@ export function normalizeDimItem(record) {
   // tertiary. DIM's Archetype column is empty for these, so derive them here.
   const exoticClassItem = Object.values(EXOTIC_CLASSES)
     .find(entry => entry.itemHash === hash) || null;
-  let archetypeId = ARCHETYPE_BY_NAME.get(record.Archetype) || null;
+  let archetypeId = normalizeArchetypeId(record.Archetype);
   let exoticStat20 = null;
   if (exoticClassItem) {
     const stat30 = STATS.find(stat => baseStats[stat] === 30);
@@ -294,7 +289,7 @@ export function normalizeDimItem(record) {
     // Exotic Class Items are recognized by their known item hashes in addition
     // to the Rarity column, so a localized DIM export (e.g. "异域"/"異域")
     // never loses the exotic flag — and with it the auto-lock on the piece.
-    exotic: String(record.Rarity || "").toLowerCase() === "exotic" || Boolean(exoticClassItem),
+    exotic: EXOTIC_RARITY_NAMES.has(String(record.Rarity || "").trim().toLowerCase()) || Boolean(exoticClassItem),
     archetypeId,
     tertiary,
     tuningStat,

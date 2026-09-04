@@ -48,6 +48,8 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 ### v2.0.7 (latest)
 
+- Improved real-inventory search to rank target quality first and keep a broader, target-aware frontier for large inventories, so an exact build is not discarded by an early local score or by saving one more owned piece.
+- Aligned exact rules between the existing-loadout and from-scratch paths. When the fast replacement search misses an exact build, the complete solver now supplies a feasible plan while preserving fixed Legendary `+5` rolls and freely selectable Exotic tuning.
 - Fixed Exotic Class Item right-column tertiary-stat priorities, correcting eight affected `30/25/20` perk combinations involving Wormhusk, Armamentarium, Starfire, Swarm, and Harmony; added regression coverage for all 192 combinations across the three classes.
 
 ### v2.0.6
@@ -83,7 +85,7 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 - Renamed to "命运2 T5配装求解器·优化版" with updated footer credits (Ver 2.0.1).
 - Fixed DIM import so bare armor (no tuning or armor mod installed) resolves its fixed +5 roll.
-- Exotic Class Items are recognized by their fixed 30/25/20 roll (frame + tertiary).
+- Exotic Class Items are recognized by their fixed 30/25/20 roll (Armor Archetype + tertiary stat).
 - Planning no longer rejects owned pieces over a different +5 roll. A whole-assignment feasibility check (pinned +5, free -5, free mods) decides matching and downgrades infeasible pieces back to farm.
 
 ### v2.0.0 inventory planning
@@ -92,9 +94,10 @@ v2 was a major upgrade around real-inventory builds:
 
 - Import DIM Armor CSV and recognize class, slot, Tier, Exotic, equipped state, base stats, sets, and masterwork level.
 - Infer installed `+3` / `+5/-5` tuning and `+5` / `+10` armor mods from the stats DIM displays.
-- New owned-armor solving: prefer exact matches from inventory and show which slots, frames, and tuning directions still need farming.
+- New owned-armor solving: prefer exact matches from inventory and show which slots, Armor Archetypes, and Tuning directions still need farming.
 - Support fixed normal Exotics, Exotic Class Items, and closest-stat comparison between multiple copies of the same Exotic.
 - Support `4-piece`, `2-piece`, and `2+2` set constraints, with 56 built-in Bungie Manifest sets.
+- The set picker lists the full 56-set catalog grouped by activity category (World / Lost Sectors, Vanguard / Gambit, Crucible / PvP, Dungeon, Raid), marks owned piece counts, and previews the selected set's 2pc / 4pc perks and acquisition source.
 - Export owned-armor builds as DIM loadout links carrying armor instances, stat mods, and tuning mods.
 - "Optimize current build" supports must-meet stats, real armor distribution, pinned pieces, and replacement plans sorted by benefit.
 - Reworked the DIM import, inventory results, and replacement-planning UI for desktop, 390px narrow screens, keyboard focus, and status feedback.
@@ -110,14 +113,14 @@ See the [v2.0.0 release](https://github.com/MIGO-OvO/d2-armor-solver/releases/ta
 - Give each stat a priority (high / mid / low) and a fuzzy constraint (exact / at least / at most / range). The solver maximizes reachable stats in priority order, then balances the rest.
 - Apply Fragment stat changes, `+5` / `+10` armor mods, and `+3` / `+5/-5` tuning.
 - Lock targets, or limit plans to `+5/-5` tuning only.
-- Enumerate five-piece armor frames and show the target delta, theoretical reachable range, and farming needs.
-- Support Exotic Class Items with class, left/right-column perks, and the fixed `30/25/20` frame.
+- Enumerate five-piece Armor Archetypes and show the target delta, theoretical reachable range, and farming needs.
+- Support Exotic Class Items with class, left/right-column perks, and the fixed `30/25/20` Armor Archetype.
 
 ### DIM inventory planning
 
 - Filter imported armor by class and Tier 5.
 - Match owned armor first, then sort plans by farming count and stat closeness.
-- Pin a normal Exotic by slot and name; multiple copies of the same Exotic are compared automatically by frame, tertiary stat, and tuning.
+- Pin a normal Exotic by slot and name; multiple copies of the same Exotic are compared automatically by archetype, tertiary stat, and Tuning.
 - Set set requirements for a target plan and make sure the inventory combination or farming suggestion meets the piece count.
 - View plans made entirely of owned armor, or a mixed "owned + to-farm" plan.
 
@@ -149,6 +152,8 @@ Limitations:
 
 - Simplified Chinese, Traditional Chinese, and English UI.
 - Drafts, language, mode, and named builds auto-save to `localStorage`.
+- Armor Archetypes use stable English IDs / Bungie Manifest hashes as internal identity. Legacy localized values such as `壁垒` are migrated in place without clearing user data.
+- Official terminology is centralized. Game-specific names with Manifest hashes come only from Bungie Manifest `displayProperties` in all three languages; DIM / light.gg are compatibility or cross-check sources, and Chinese game names are never generated by automatic script conversion.
 - Reduced motion, keyboard operation, clear focus, and `aria-live` status announcements.
 - GitHub Pages and Cloudflare Workers Static Assets share the same production build.
 

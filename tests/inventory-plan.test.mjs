@@ -26,7 +26,7 @@ function makeSolution(configs = BASE_CONFIGS.slice(0, 5), exoticIndex = null) {
 function makeItem(solution, index, overrides = {}) {
   const config = solution.config[index];
   const tuning = solution.tuningAssignments[index];
-  const archetypeId = ARCHETYPES.find(archetype => archetype.name === config.archetype).id;
+  const archetypeId = ARCHETYPES.find(archetype => archetype.id === config.archetype).id;
   return {
     id: `item-${index}`,
     hash: 1000 + index,
@@ -55,6 +55,33 @@ test("inventory plans count exact owned identities before farming gaps", () => {
     plan.pieces.filter(piece => piece.item).map(piece => piece.slot),
     ["helmet", "arms", "chest"],
   );
+});
+
+test("target quality outranks matching more owned armor", () => {
+  const better = {
+    ...makeSolution(BASE_CONFIGS.slice(0, 5)),
+    rank: [0, 0, 0, 0, 0, 0],
+    score: 0,
+  };
+  const worse = {
+    ...makeSolution(BASE_CONFIGS.slice(5, 10)),
+    rank: [0, 25, 0, 0, 0, 75],
+    score: 25,
+  };
+  const items = worse.config.map((_, index) => makeItem(worse, index, {
+    id: `worse-${index}`,
+    setHash: 741162535,
+  }));
+
+  const [plan] = rankInventoryPlans({
+    solutions: [better, worse],
+    items,
+    classId: "hunter",
+    setRequirement: { type: "set", setHash: 741162535, count: 4 },
+  });
+
+  assert.equal(plan.solution, better,
+    "owned-piece savings must only break ties between equally good stat plans");
 });
 
 test("a fixed regular Exotic slot rejects a matching Legendary and recommends farming", () => {
@@ -233,7 +260,7 @@ function makeOwnedLegendary(solution, index, tuningTo) {
     classId: "hunter",
     tier: "5",
     exotic: false,
-    archetypeId: ARCHETYPES.find(archetype => archetype.name === config.archetype)?.id,
+    archetypeId: ARCHETYPES.find(archetype => archetype.id === config.archetype)?.id,
     tertiary: config.tertiary,
     tuningMode: "shift",
     tuningTo,

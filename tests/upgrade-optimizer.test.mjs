@@ -21,6 +21,7 @@ import {
 import {
   ARCHETYPES, BASE_CONFIGS, STATS,
 } from "../src/core/armor-model.mjs";
+import { scoreStatsRank } from "../src/core/solver.mjs";
 
 const TARGETS = {
   health: 20,
@@ -86,6 +87,58 @@ test("unreachable required targets fall back to the smallest required gap", () =
   assert.ok(compareUpgradeMetrics(closerRequiredGap, smallerOverallGap) < 0);
 });
 
+test("high-priority target gaps outrank a smaller unprioritized total gap", () => {
+  const targets = Object.fromEntries(STATS.map(stat => [stat, 100]));
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const constraints = {
+    minimums: { health: 100 },
+    priorityLevels: { weapons: 1 },
+    exact: Object.fromEntries(STATS.map(stat => [stat, true])),
+  };
+  const highPriorityCloser = {
+    health: 100, melee: 100, grenade: 0, super: 100, class: 100, weapons: 90,
+  };
+  const totalGapCloser = {
+    health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 50,
+  };
+  const metrics = totals => getUpgradeMetrics(
+    totals, targets, 0, ["health"],
+    scoreStatsRank(totals, targets, constraints), constraints, fragments,
+  );
+
+  assert.equal(metrics(highPriorityCloser).requiredAllReached, true);
+  assert.equal(metrics(totalGapCloser).requiredAllReached, true);
+  assert.ok(
+    metrics(highPriorityCloser).shortfall > metrics(totalGapCloser).shortfall,
+    "fixture: the preferred plan deliberately has a larger unprioritized total gap",
+  );
+  assert.ok(compareUpgradeMetrics(
+    metrics(highPriorityCloser), metrics(totalGapCloser),
+  ) < 0, "the high-priority Weapons gap must be compared before the generic gap");
+});
+
+test("upgrade evaluation preserves priority metadata instead of hiding it behind default exact rules", () => {
+  const pieces = Array.from({ length: 5 }, (_, index) =>
+    createDefaultUpgradePiece(index));
+  const targets = Object.fromEntries(STATS.map(stat => [
+    stat, stat === "weapons" ? 200 : 60,
+  ]));
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const constraints = {
+    priorityLevels: { weapons: 1 },
+    exact: Object.fromEntries(STATS.map(stat => [stat, true])),
+  };
+
+  const evaluation = evaluateUpgradePieces(
+    pieces, targets, fragments, false, [], false, constraints,
+  );
+
+  assert.equal(evaluation.rank[1], 0,
+    "default exact flags must not pre-empt priority ordering for partial plans");
+  assert.ok(evaluation.rank[2] > 0,
+    "the High-priority Weapons gap must survive constraint construction");
+});
+
 test("replacement planning allocates farmable armor to a required stat first", () => {
   const pieces = Array.from({ length: 5 }, (_, index) =>
     createDefaultUpgradePiece(index));
@@ -123,7 +176,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
     const config = BASE_CONFIGS.find(c =>
       c.archetype === archName && c.tertiary === tertiary);
     return normalizeUpgradePiece({
-      archetypeId: ARCHETYPES.find(a => a.name === archName)?.id,
+      archetypeId: ARCHETYPES.find(a => a.id === archName)?.id,
       tertiary,
       tuningMode: "shift",
       tuningFrom: tuning.from || "health",
@@ -137,7 +190,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
 
   // Fixture from a known exact from-scratch solution for this target:
   // 突围者/melee + 高能者/melee + 高能者/grenade + 高能者/melee + 高能者/grenade.
-  const archetypes = ["突围者", "高能者", "高能者", "高能者", "高能者"];
+  const archetypes = ["Siegebreaker", "Powerhouse", "Powerhouse", "Powerhouse", "Powerhouse"];
   const tertiaries = ["melee", "melee", "grenade", "melee", "grenade"];
   const tuningTo = ["class", "class", "health", "class", "grenade"];
   const tuningFrom = ["health", "health", "super", "weapons", "health"];
@@ -155,7 +208,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
   // two-piece swap) is the exact fix.
   const broken = pieces.map((piece, index) => index === 1 || index === 3
     ? makePiece(
-      "突围者", piece.tertiary,
+      "Siegebreaker", piece.tertiary,
       { from: piece.tuningFrom, to: piece.tuningTo },
       { size: piece.armorModSize, stat: piece.armorModStat }, index
     )
@@ -196,7 +249,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
 test("upgrade planning uses full-masterwork projections for kept DIM pieces", () => {
   const grenadier = ARCHETYPES.find(archetype => archetype.id === "Grenadier");
   const fullStats = BASE_CONFIGS.find(config =>
-    config.archetype === grenadier.name && config.tertiary === "melee"
+    config.archetype === grenadier.id && config.tertiary === "melee"
   ).baseStats;
   const currentStats = [
     fullStats,
@@ -320,6 +373,46 @@ test("a known fixed tuning stat becomes the piece's tuning destination", () => {
   const piece = createUpgradePieceFromItem(item, 0);
   assert.equal(piece.tuningUnknown, false);
   assert.equal(piece.tuningTo, "health");
+});
+
+test("Exotic tuning stays free while Legendary +5 destinations stay fixed", () => {
+  const config = BASE_CONFIGS.find(entry =>
+    entry.archetype === "Siegebreaker" && entry.tertiary === "melee");
+  const pieces = Array.from({ length: 5 }, (_, index) => normalizeUpgradePiece({
+    archetypeId: "Siegebreaker",
+    tertiary: "melee",
+    tuningMode: "shift",
+    tuningFrom: "health",
+    tuningTo: index === 0 ? "class" : "weapons",
+    armorModSize: 0,
+    armorModStat: "health",
+    baseStats: { ...config.baseStats },
+    exotic: index === 0,
+  }, index));
+  const target = Object.fromEntries(STATS.map(stat => [
+    stat,
+    pieces.reduce((sum, piece) => sum + piece.baseStats[stat], 0),
+  ]));
+  target.health -= 25;
+  target.melee += 5;
+  target.weapons += 20;
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const constraints = { exact: Object.fromEntries(STATS.map(stat => [stat, true])) };
+
+  const exoticResult = evaluateUpgradePieces(
+    pieces, target, fragments, true, [], false, constraints
+  );
+  assert.equal(exoticResult.metrics.allReached, true);
+  assert.equal(exoticResult.tuningAssignments[0].to, "melee",
+    "the Exotic may choose a +5 destination different from its installed value");
+
+  const legendaryResult = evaluateUpgradePieces(
+    pieces.map((piece, index) => ({ ...piece, exotic: false, locked: index === 0 })),
+    target, fragments, true, [], false, constraints
+  );
+  assert.equal(legendaryResult.metrics.allReached, false,
+    "the same +5 destination remains fixed on Legendary armor");
+  assert.equal(legendaryResult.tuningAssignments[0].to, "class");
 });
 
 // "Only +5/-5" restricts every proposed plan and candidate, while the entered
@@ -667,4 +760,56 @@ test("at-most metric accounting returns to the final domain for fragments", () =
     1,
     "past the fragment-adjusted cap is a violation",
   );
+});
+
+test("all-required upgrade search stays exact when from-scratch proves feasibility", () => {
+  const target = {
+    health: 75, melee: 65, grenade: 110, super: 105, class: 35, weapons: 110,
+  };
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const constraints = {
+    exact: Object.fromEntries(STATS.map(stat => [stat, true])),
+  };
+  const pieces = [
+    {
+      slot: "helmet", archetypeId: "Paragon", tertiary: "grenade",
+      tuningMode: "shift", tuningFrom: "grenade", tuningTo: "melee",
+      armorModSize: 10, armorModStat: "class", exotic: true, locked: true,
+      baseStats: { health: 5, melee: 25, grenade: 20, super: 30, class: 5, weapons: 5 },
+    },
+    {
+      slot: "arms", archetypeId: "Powerhouse", tertiary: "grenade",
+      tuningMode: "shift", tuningFrom: "grenade", tuningTo: "class",
+      armorModSize: 10, armorModStat: "super", exotic: false, locked: false,
+      baseStats: { health: 5, melee: 5, grenade: 20, super: 25, class: 5, weapons: 30 },
+    },
+    {
+      slot: "chest", archetypeId: "Specialist", tertiary: "grenade",
+      tuningMode: "shift", tuningFrom: "health", tuningTo: "class",
+      armorModSize: 10, armorModStat: "grenade", exotic: false, locked: false,
+      baseStats: { health: 5, melee: 5, grenade: 20, super: 5, class: 30, weapons: 25 },
+    },
+    {
+      slot: "legs", archetypeId: "Grenadier", tertiary: "health",
+      tuningMode: "shift", tuningFrom: "grenade", tuningTo: "class",
+      armorModSize: 10, armorModStat: "health", exotic: false, locked: false,
+      baseStats: { health: 20, melee: 5, grenade: 30, super: 25, class: 5, weapons: 5 },
+    },
+    {
+      slot: "classItem", archetypeId: "Skirmisher", tertiary: "grenade",
+      tuningMode: "shift", tuningFrom: "melee", tuningTo: "class",
+      armorModSize: 10, armorModStat: "class", exotic: false, locked: false,
+      baseStats: { health: 5, melee: 30, grenade: 20, super: 5, class: 5, weapons: 25 },
+    },
+  ].map((piece, index) => normalizeUpgradePiece(piece, index));
+
+  const analysis = analyzeUpgradeCandidates(
+    pieces, target, fragments, true, STATS, false, constraints,
+  );
+
+  assert.equal(analysis.baseline.metrics.allReached, false,
+    "fixture: rearranging the current fixed Legendary +5 rolls is not exact");
+  assert.ok(analysis.plan, "the exact plan proven by from-scratch solving must be reported");
+  assert.equal(analysis.plan.metrics.allReached, true);
+  assert.deepEqual(analysis.plan.evaluation.finalTotals, target);
 });

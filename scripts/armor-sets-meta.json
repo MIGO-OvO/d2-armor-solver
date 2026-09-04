@@ -1,0 +1,919 @@
+{
+  "categoryOrder": [
+    { "zh": "世界/遗失区域", "zhCht": "世界/失落區域", "en": "World / Lost Sectors" },
+    { "zh": "先锋/智谋", "zhCht": "先鋒/千謀百計", "en": "Vanguard / Gambit" },
+    { "zh": "熔炉/PvP", "zhCht": "熔爐競技場/PvP", "en": "Crucible / PvP" },
+    { "zh": "地牢", "zhCht": "地城", "en": "Dungeon" },
+    { "zh": "突袭", "zhCht": "突襲", "en": "Raid" }
+  ],
+  "sets": {
+    "Wildwood": {
+      "groupId": "W-01",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "扭曲 / 大师遗落之地:EDZ",
+      "classNotes": []
+    },
+    "Exodus Down": {
+      "groupId": "W-02",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "扭曲 / 大师遗落之地:涅索斯轨道",
+      "classNotes": []
+    },
+    "Reverie Dawn": {
+      "groupId": "W-03",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "扭曲 / 大师遗落之地:幽梦之城",
+      "classNotes": []
+    },
+    "Dreambane": {
+      "groupId": "W-04",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "扭曲 / 大师遗落之地:月球",
+      "classNotes": []
+    },
+    "Crystocrene": {
+      "groupId": "W-05",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "扭曲 / 大师遗落之地:木卫二",
+      "classNotes": []
+    },
+    "Seventh Seraph": {
+      "groupId": "W-06",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "扭曲 / 大师遗落之地:发射基地",
+      "classNotes": []
+    },
+    "Veritas": {
+      "groupId": "W-07",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "扭曲 / 大师遗落之地:萨瓦图恩的王座世界",
+      "classNotes": []
+    },
+    "Thunderhead": {
+      "groupId": "W-08",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "大师遗落之地 / 覆写行动:内欧姆那",
+      "classNotes": []
+    },
+    "First Ascent": {
+      "groupId": "W-09",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "大师遗落之地 / 推翻:苍白之心",
+      "classNotes": []
+    },
+    "AION Adapter": {
+      "groupId": "W-10",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "筛网 / 神话探索 / 装备专注:开普勒",
+      "classNotes": []
+    },
+    "AION Renewal": {
+      "groupId": "W-11",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "筛网 / 神话探索 / 装备专注:开普勒",
+      "classNotes": []
+    },
+    "Thriving Survivor": {
+      "groupId": "W-12",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "宗师无序边界委托",
+      "classNotes": []
+    },
+    "Shrewd Survivor": {
+      "groupId": "W-13",
+      "category": {
+        "zh": "世界/遗失区域",
+        "zhCht": "世界/失落區域",
+        "en": "World / Lost Sectors"
+      },
+      "source": "宗师无序边界委托",
+      "classNotes": []
+    },
+    "Techsec": {
+      "groupId": "VG-01",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "先锋专注",
+      "classNotes": []
+    },
+    "Smoke Jumper Set": {
+      "groupId": "VG-02",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "先锋专注",
+      "classNotes": []
+    },
+    "Ferropotent": {
+      "groupId": "VG-03",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "先锋专注",
+      "classNotes": []
+    },
+    "Luminopotent": {
+      "groupId": "VG-04",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "先锋专注",
+      "classNotes": []
+    },
+    "Bushido": {
+      "groupId": "VG-05",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "先锋专注",
+      "classNotes": []
+    },
+    "Swordmaster": {
+      "groupId": "VG-06",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "先锋专注",
+      "classNotes": []
+    },
+    "Eutechnology": {
+      "groupId": "VG-07",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "先锋专注",
+      "classNotes": []
+    },
+    "Lustrous": {
+      "groupId": "VG-08",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "勇敢教条专注",
+      "classNotes": []
+    },
+    "Cyberserpent Null": {
+      "groupId": "VG-09",
+      "category": {
+        "zh": "先锋/智谋",
+        "zhCht": "先鋒/千謀百計",
+        "en": "Vanguard / Gambit"
+      },
+      "source": "智谋",
+      "classNotes": []
+    },
+    "Last Discipline": {
+      "groupId": "PVP-01",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "熔炉专注",
+      "classNotes": []
+    },
+    "Disaster Corps Set": {
+      "groupId": "PVP-02",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "熔炉专注",
+      "classNotes": []
+    },
+    "Wild Anthem": {
+      "groupId": "PVP-03",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "熔炉专注",
+      "classNotes": []
+    },
+    "Triumphal Anthem": {
+      "groupId": "PVP-04",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "熔炉专注",
+      "classNotes": []
+    },
+    "Iron Panoply Set": {
+      "groupId": "PVP-05",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "钢铁旗帜",
+      "classNotes": []
+    },
+    "Iron Battalion Set": {
+      "groupId": "PVP-06",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "钢铁旗帜",
+      "classNotes": []
+    },
+    "Per Audacia": {
+      "groupId": "PVP-07",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "竞赛对战熔炉",
+      "classNotes": []
+    },
+    "Twofold Crown": {
+      "groupId": "PVP-08",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "欧西里斯的试炼",
+      "classNotes": []
+    },
+    "New Demotic": {
+      "groupId": "PVP-09",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "欧西里斯的试炼",
+      "classNotes": []
+    },
+    "Cruel Electrum": {
+      "groupId": "PVP-10",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "欧西里斯的试炼",
+      "classNotes": []
+    },
+    "Circuit": {
+      "groupId": "PVP-11",
+      "category": {
+        "zh": "熔炉/PvP",
+        "zhCht": "熔爐競技場/PvP",
+        "en": "Crucible / PvP"
+      },
+      "source": "快雀竞速",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "全职业",
+            "zhCht": "全職業",
+            "en": "All classes"
+          },
+          "family": {
+            "zh": "回路（多数部件）",
+            "zhCht": "賽道（多數部件）",
+            "en": "Circuit (most pieces)"
+          },
+          "note": "多数部件使用 Circuit；头盔和职业物品存在 Racer’s / Keeper / Defender / Runner 等局部例外，因此标记为“局部例外”。"
+        }
+      ]
+    },
+    "Techeun's Regalia": {
+      "groupId": "D-01",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选地牢:破碎王座",
+      "classNotes": []
+    },
+    "Apostate's Blade": {
+      "groupId": "D-02",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选地牢:异端深渊",
+      "classNotes": []
+    },
+    "CODA": {
+      "groupId": "D-03",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选地牢:预言",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "粉碎（终曲）",
+            "zhCht": "粉碎（終章）",
+            "en": "Crushing (CODA)"
+          },
+          "note": "按四件主要护甲的共同前缀归纳；职业物品为 Mark of Judgment (CODA)。中文为便于检索的词根对照，不冒充独立效果组定义。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "流动（终曲）",
+            "zhCht": "流動（終章）",
+            "en": "Flowing (CODA)"
+          },
+          "note": "按四件主要护甲的共同前缀归纳；职业物品为 Cloak of Judgment (CODA)。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "引导（终曲）",
+            "zhCht": "引導（終章）",
+            "en": "Channeling (CODA)"
+          },
+          "note": "按四件主要护甲的共同前缀归纳；职业物品为 Bond of Judgment (CODA)。"
+        }
+      ]
+    },
+    "Yearning Echo": {
+      "groupId": "D-04",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选或大师地牢:贪婪之握",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "降临回音",
+            "zhCht": "降臨迴音",
+            "en": "Descending Echo"
+          },
+          "note": "三职业实际系列名均不同；简中/繁中名称按代表部件官方本地化核对。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "扭曲回音",
+            "zhCht": "扭曲迴音",
+            "en": "Twisting Echo"
+          },
+          "note": "三职业实际系列名均不同；简中/繁中名称按代表部件官方本地化核对。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "腐化回音",
+            "zhCht": "腐化迴音",
+            "en": "Corrupting Echo"
+          },
+          "note": "三职业实际系列名均不同；简中/繁中名称按代表部件官方本地化核对。"
+        }
+      ]
+    },
+    "Deep Explorer": {
+      "groupId": "D-05",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选或大师地牢:二象性",
+      "classNotes": []
+    },
+    "TM Custom": {
+      "groupId": "D-06",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选或大师地牢:守望者尖塔",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "TM-Cogburn 定制",
+            "zhCht": "TM-Cogburn 自訂版",
+            "en": "TM-Cogburn Custom"
+          },
+          "note": "官方英文系列名保留；中文仅翻译 Custom，避免制造未经核验的官方音译。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "TM-Earp 定制",
+            "zhCht": "TM-Earp 自訂版",
+            "en": "TM-Earp Custom"
+          },
+          "note": "官方英文系列名保留；中文仅翻译 Custom。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "TM-Moss 定制",
+            "zhCht": "TM-Moss 自訂版",
+            "en": "TM-Moss Custom"
+          },
+          "note": "官方英文系列名保留；中文仅翻译 Custom。"
+        }
+      ]
+    },
+    "Taken King": {
+      "groupId": "D-07",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选或大师地牢:深渊机灵",
+      "classNotes": []
+    },
+    "Dark Age": {
+      "groupId": "D-08",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选或大师地牢:战争领主的废墟",
+      "classNotes": []
+    },
+    "Spacewalk": {
+      "groupId": "D-09",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选或大师地牢:晚星之主",
+      "classNotes": []
+    },
+    "Flain": {
+      "groupId": "D-10",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "精选或大师地牢:分离教义",
+      "classNotes": []
+    },
+    "Sage Protector": {
+      "groupId": "D-11",
+      "category": {
+        "zh": "地牢",
+        "zhCht": "地城",
+        "en": "Dungeon"
+      },
+      "source": "平衡之境地牢 (启用功绩)",
+      "classNotes": []
+    },
+    "Great Hunt": {
+      "groupId": "R-01",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:最后一愿",
+      "classNotes": []
+    },
+    "Kentarch 3": {
+      "groupId": "R-02",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:救赎花园",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "全职业",
+            "zhCht": "全職業",
+            "en": "All classes"
+          },
+          "family": {
+            "zh": "无统一系列前缀（按部位命名）",
+            "zhCht": "無統一系列前綴（按部位命名）",
+            "en": "No single armor-family prefix"
+          },
+          "note": "部件按 Exaltation / Transcendence / Temptation / Righteousness / Ascendancy 等槽位主题命名；“第三百夫长/Kentarch 3”是效果组。"
+        }
+      ]
+    },
+    "Legacy's Oath": {
+      "groupId": "R-03",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:深岩墓室",
+      "classNotes": []
+    },
+    "Atheon's Memory": {
+      "groupId": "R-04",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:玻璃拱顶",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "卡布尔套装",
+            "zhCht": "卡布爾套裝",
+            "en": "Kabr's Armor"
+          },
+          "note": "官方英文部件多数以 Kabr's 为前缀；职业物品 Light of the Great Prism 为槽位特例。简中名称按游戏常用系列名汇总。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "至高狂徒套装",
+            "zhCht": "至高狂徒套裝",
+            "en": "Prime Zealot Suit"
+          },
+          "note": "官方英文部件多数以 Prime Zealot 为前缀；职业物品 Shattered Vault Cloak 为槽位特例。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "光芒套装（赫曾领主）",
+            "zhCht": "光芒套裝（赫曾領主）",
+            "en": "Armor of the Hezen Lords"
+          },
+          "note": "官方英文部件多数为 “of the Hezen Lords”；职业物品 Fragment of the Prime 为槽位特例。"
+        }
+      ]
+    },
+    "Resonant Fury": {
+      "groupId": "R-05",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:门徒誓约",
+      "classNotes": []
+    },
+    "Crota's Memory": {
+      "groupId": "R-06",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:克洛塔的末日",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "碎志者套装",
+            "zhCht": "碎志者套裝",
+            "en": "Willbreaker's Set"
+          },
+          "note": "多数部件共享 Willbreaker's 词根；按共同前缀归纳。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "无统一系列前缀（5件各自命名）",
+            "zhCht": "無統一系列前綴（5件各自命名）",
+            "en": "No single armor-family prefix"
+          },
+          "note": "猎人五件使用各自独立名称，不应把“克洛塔记忆”直接当成物品系列名。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "死亡歌手套装",
+            "zhCht": "死亡歌者套裝",
+            "en": "Deathsinger's Set"
+          },
+          "note": "多数部件共享 Deathsinger's 词根；按共同前缀归纳。"
+        }
+      ]
+    },
+    "Nezarec's Nightmare": {
+      "groupId": "R-07",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:梦魇根源",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "Agony（保留英文系列名）",
+            "zhCht": "Agony（保留英文系列名）",
+            "en": "Agony"
+          },
+          "note": "官方英文部件共同词根；未把词根强行包装成未经核验的官方中文套装定义。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "Trepidation（保留英文系列名）",
+            "zhCht": "Trepidation（保留英文系列名）",
+            "en": "Trepidation"
+          },
+          "note": "官方英文部件共同词根；中文列保留英文以确保可检索性。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "Detestation（保留英文系列名）",
+            "zhCht": "Detestation（保留英文系列名）",
+            "en": "Detestation"
+          },
+          "note": "官方英文部件共同词根；中文列保留英文以确保可检索性。"
+        }
+      ]
+    },
+    "Oryx's Memory": {
+      "groupId": "R-08",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:国王的陨落",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "War Numen's（保留英文系列名）",
+            "zhCht": "War Numen's（保留英文系列名）",
+            "en": "War Numen's"
+          },
+          "note": "官方英文部件共同词根；中文列保留英文。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "Darkhollow（保留英文系列名）",
+            "zhCht": "Darkhollow（保留英文系列名）",
+            "en": "Darkhollow"
+          },
+          "note": "官方英文部件共同词根；中文列保留英文。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "无统一系列前缀（5件各自命名）",
+            "zhCht": "無統一系列前綴（5件各自命名）",
+            "en": "No single armor-family prefix"
+          },
+          "note": "术士部件为 Grasp of Eir、Chasm of Yul、Mouth of Ur、Path of Xol、Bond of the Wormlore 等独立名称。"
+        }
+      ]
+    },
+    "Promised": {
+      "groupId": "R-09",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "精选或大师突袭:救赎的边缘",
+      "classNotes": [
+        {
+          "class": {
+            "zh": "泰坦",
+            "zhCht": "泰坦",
+            "en": "Titan"
+          },
+          "family": {
+            "zh": "Promised Reunion（保留英文系列名）",
+            "zhCht": "Promised Reunion（保留英文系列名）",
+            "en": "Promised Reunion"
+          },
+          "note": "同一效果组下三职业系列词尾不同；中文列保留英文系列名。"
+        },
+        {
+          "class": {
+            "zh": "猎人",
+            "zhCht": "獵人",
+            "en": "Hunter"
+          },
+          "family": {
+            "zh": "Promised Reign（保留英文系列名）",
+            "zhCht": "Promised Reign（保留英文系列名）",
+            "en": "Promised Reign"
+          },
+          "note": "同一效果组下三职业系列词尾不同；中文列保留英文系列名。"
+        },
+        {
+          "class": {
+            "zh": "术士",
+            "zhCht": "術士",
+            "en": "Warlock"
+          },
+          "family": {
+            "zh": "Promised Victory（保留英文系列名）",
+            "zhCht": "Promised Victory（保留英文系列名）",
+            "en": "Promised Victory"
+          },
+          "note": "同一效果组下三职业系列词尾不同；中文列保留英文系列名。"
+        }
+      ]
+    },
+    "Collective Psyche": {
+      "groupId": "R-10",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "永久沙漠突袭 (含功绩)",
+      "classNotes": []
+    },
+    "Wayward Psyche Set": {
+      "groupId": "R-11",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "史诗永久沙漠突袭 (含功绩)",
+      "classNotes": []
+    },
+    "Pantheos Resplendent": {
+      "groupId": "R-12",
+      "category": {
+        "zh": "突袭",
+        "zhCht": "突襲",
+        "en": "Raid"
+      },
+      "source": "万神殿突袭S (含功绩)",
+      "classNotes": []
+    }
+  }
+}

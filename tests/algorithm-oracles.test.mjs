@@ -52,7 +52,7 @@ test("hard-minimum evaluation searches both sides of free tuning shifts", () => 
   const configs = specs.map(([archetypeId, tertiary]) => {
     const archetype = ARCHETYPES.find(entry => entry.id === archetypeId);
     return BASE_CONFIGS.find(config =>
-      config.archetype === archetype.name && config.tertiary === tertiary);
+      config.archetype === archetype.id && config.tertiary === tertiary);
   });
   const target = {
     health: 55,
@@ -94,7 +94,7 @@ function createInventoryOracleFixture() {
     const slotItems = [];
     for (let itemIndex = 0; itemIndex < 4; itemIndex++) {
       const config = BASE_CONFIGS[Math.floor(random() * BASE_CONFIGS.length)];
-      const archetype = ARCHETYPES.find(entry => entry.name === config.archetype);
+      const archetype = ARCHETYPES.find(entry => entry.id === config.archetype);
       const baseStats = { ...config.baseStats };
       const item = {
         id: `oracle-${slotIndex}-${itemIndex}`,
