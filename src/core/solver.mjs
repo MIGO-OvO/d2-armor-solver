@@ -148,6 +148,12 @@ function chooseGreedyModifierAllocation(
 // stat is rolled with the piece and cannot be re-picked; only the -5 source is
 // free. Pass null (the from-scratch solver) to let both sides be chosen.
 export function applySingleTuning(totals, target, constraints, forcedFromHits, fixedTo = null) {
+  const allowedTargets = Array.isArray(fixedTo)
+    ? fixedTo.filter(stat => STATS.includes(stat))
+    : STATS.includes(fixedTo)
+      ? [fixedTo]
+      : STATS;
+  const pinnedTo = allowedTargets.length === 1 ? allowedTargets[0] : null;
   const hasAdvancedConstraints = (constraints?.priorityOrder?.length || 0) > 0 ||
     Object.values(constraints?.priorityLevels || {}).some(v => v > 0) ||
     Object.values(constraints?.minimums || {}).some(v => v > 0) ||
@@ -159,14 +165,14 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
     for (const s of STATS) gaps[s] = totals[s] - target[s];
     let fromStat = null;
     for (const s of STATS) {
-      if (s === fixedTo) continue;
+      if (s === pinnedTo) continue;
       if (hits[s] > 0 && gaps[s] > 0) { fromStat = s; hits[s]--; break; }
     }
     if (fromStat === null) {
       let bestExcess = -Infinity;
-      fromStat = STATS.find(s => s !== fixedTo);
+      fromStat = STATS.find(s => s !== pinnedTo);
       for (const s of STATS) {
-        if (s === fixedTo) continue;
+        if (s === pinnedTo) continue;
         const excess = gaps[s];
         const isPriority = constraints?.priorities && constraints.priorities[s];
         const adjustedExcess = isPriority ? excess - 999 : excess;
@@ -177,10 +183,10 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
         }
       }
     }
-    if (fixedTo) return { from: fromStat, to: fixedTo };
+    if (pinnedTo) return { from: fromStat, to: pinnedTo };
     let bestDeficit = Infinity;
     let toStat = null;
-    for (const s of STATS) {
+    for (const s of allowedTargets) {
       if (s === fromStat) continue;
       const deficit = gaps[s];
       const isPriority = constraints?.priorities && constraints.priorities[s];
@@ -197,8 +203,8 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
 
   const forcedCandidates = STATS.filter(s => (forcedFromHits[s] || 0) > 0 && totals[s] > target[s]);
   const fromCandidates = (forcedCandidates.length > 0 ? forcedCandidates : STATS)
-    .filter(s => s !== fixedTo);
-  const toCandidates = fixedTo ? [fixedTo] : STATS;
+    .filter(s => s !== pinnedTo);
+  const toCandidates = allowedTargets;
   let best = null;
   let bestRank = null;
   const currentRank = scoreStatsRank(totals, target, constraints);
@@ -227,16 +233,20 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
       }
     }
   }
-  return best || { from: STATS.find(s => s !== fixedTo), to: fixedTo || STATS[1] };
+  const fallbackTo = allowedTargets[0] || STATS[1];
+  return best || { from: STATS.find(s => s !== fallbackTo), to: fallbackTo };
 }
 
-// fixedTuningTargets describes armor you already own: a stat id pins a
-// Legendary piece's rolled +5 side, null marks +3 mode, and undefined keeps a
-// shift piece's +5 side free (Exotic armor). Pass null for fully farmed armor.
+// fixedTuningTargets preserves the legacy fixed-assignment API. New callers
+// pass runtimeOptions.tuningCapabilities to enumerate Balanced and every legal
+// directional destination independently from the piece's current assignment.
 export function evaluateConfig(
   baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints,
   fixedTuningTargets = null, runtimeOptions = {}
 ) {
+  const tuningCapabilities = Array.isArray(runtimeOptions.tuningCapabilities)
+    ? runtimeOptions.tuningCapabilities
+    : null;
   if (!runtimeOptions.skipExactJointSearch) {
     const exactEvaluation = findBestFixedConfigWitness({
       configs: baseConfigs,
@@ -245,6 +255,7 @@ export function evaluateConfig(
       numPlus10,
       numPlus3,
       fixedTuningTargets,
+      tuningCapabilities,
       rankTotals: totals => scoreStatsRank(totals, target, constraints),
       compareRanks: compareScoreRanks,
     });
@@ -256,7 +267,8 @@ export function evaluateConfig(
     }
   }
 
-  const allocateModifiers = !fixedTuningTargets && numPlus5 + numPlus10 <= 2
+  const allocateModifiers = !fixedTuningTargets && !tuningCapabilities
+      && numPlus5 + numPlus10 <= 2
     ? chooseBestModifierAllocation
     : chooseGreedyModifierAllocation;
   const baseTotals = {};
@@ -287,7 +299,18 @@ export function evaluateConfig(
   // per-piece mode is already known (null entry = that piece runs +3), so the
   // single matching mask is used instead of trying every distribution.
   const masks = [];
-  if (fixedTuningTargets) {
+  if (tuningCapabilities) {
+    for (let mask = 0; mask < 32; mask++) {
+      const allowed = tuningCapabilities.every((capability, index) => {
+        const balanced = Boolean((mask >> index) & 1);
+        return balanced
+          ? capability?.allowBalanced !== false
+          : Array.isArray(capability?.allowedDirectionalStats)
+            && capability.allowedDirectionalStats.some(stat => STATS.includes(stat));
+      });
+      if (allowed) masks.push(mask);
+    }
+  } else if (fixedTuningTargets) {
     let fixedMask = 0;
     for (let i = 0; i < 5; i++) {
       if (fixedTuningTargets[i] === null) fixedMask |= (1 << i);
@@ -300,7 +323,10 @@ export function evaluateConfig(
       if (bits === numPlus3) masks.push(m);
     }
   }
-  if (masks.length === 0) masks.push(0);
+  if (masks.length === 0) {
+    if (tuningCapabilities) return null;
+    masks.push(0);
+  }
 
   for (const mask of masks) {
     const totals = { ...baseTotals };
@@ -318,9 +344,11 @@ export function evaluateConfig(
     const hitsRemaining = { ...forcedFromHits };
     for (let i = 0; i < 5; i++) {
       if (tuningAssignments[i] !== null) continue;
-      const fixedTo = STATS.includes(fixedTuningTargets?.[i])
-        ? fixedTuningTargets[i]
-        : null;
+      const fixedTo = tuningCapabilities
+        ? tuningCapabilities[i].allowedDirectionalStats
+        : STATS.includes(fixedTuningTargets?.[i])
+          ? fixedTuningTargets[i]
+          : null;
       const t = applySingleTuning(
         totals, target, constraints, hitsRemaining, fixedTo
       );
@@ -370,13 +398,15 @@ export function evaluateConfig(
         const currentTo = bestOverall.tuningAssignments[i].to;
         // With a pinned +5 (owned armor) only the -5 source can be retried;
         // otherwise both sides of the shift must remain searchable.
-        const pinnedTo = STATS.includes(fixedTuningTargets?.[i])
-          ? fixedTuningTargets[i]
-          : null;
-        const variants = pinnedTo
-          ? STATS
-            .filter(stat => stat !== pinnedTo)
-            .map(altFrom => ({ from: altFrom, to: pinnedTo }))
+        const allowedTargets = tuningCapabilities
+          ? tuningCapabilities[i].allowedDirectionalStats
+          : STATS.includes(fixedTuningTargets?.[i])
+            ? [fixedTuningTargets[i]]
+            : STATS;
+        const variants = tuningCapabilities || allowedTargets.length === 1
+          ? allowedTargets.flatMap(altTo => STATS
+            .filter(altFrom => altFrom !== altTo)
+            .map(altFrom => ({ from: altFrom, to: altTo })))
           : searchFullTuningNeighborhood
             ? STATS.flatMap(altFrom => STATS
               .filter(altTo => altTo !== altFrom)

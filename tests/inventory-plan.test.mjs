@@ -144,7 +144,7 @@ test("set farming never assigns a regular set to the fixed Exotic slot", () => {
   assert.equal(plan.pieces.filter(piece => piece.farmSetHash === setHash).length, 4);
 });
 
-test("a named Exotic recommends the closest roll when no copy is usable", () => {
+test("a named Exotic with unknown directional capability is not treated as usable", () => {
   const solution = makeSolution();
   const fixedExotic = {
     classId: "hunter",
@@ -152,13 +152,14 @@ test("a named Exotic recommends the closest roll when no copy is usable", () => 
     hash: 9001,
     name: "Selected Exotic",
   };
-  // Both copies run a +3 Tuning mod, which cannot serve the solution's +5/-5
-  // slot; the closest roll is still recommended for farming reference.
+  // A +3 assignment alone does not reveal which directional destinations the
+  // Exotic supports, so neither copy is a verified match for this solution.
   const closeRoll = makeItem(solution, 0, {
     id: "close-roll",
     hash: fixedExotic.hash,
     name: fixedExotic.name,
     exotic: true,
+    dataConfidence: { tuning: "unknown" },
     tuningMode: "plus3",
     tuningTo: null,
   });
@@ -183,7 +184,36 @@ test("a named Exotic recommends the closest roll when no copy is usable", () => 
   assert.equal(plan.farmCount, 1);
   assert.equal(plan.pieces[0].item, null);
   assert.equal(plan.pieces[0].closestItem.id, "close-roll");
-  assert.deepEqual(plan.pieces[0].closestMismatch.fields, ["tuningMode"]);
+  assert.deepEqual(plan.pieces[0].closestMismatch.fields, ["tuningCapability"]);
+});
+
+test("a named Exotic can change assignment without changing owned identity", () => {
+  const solution = makeSolution();
+  const fixedExotic = {
+    classId: "hunter",
+    slot: "helmet",
+    hash: 9001,
+    name: "Selected Exotic",
+  };
+  const flexibleRoll = makeItem(solution, 0, {
+    id: "flexible-roll",
+    hash: fixedExotic.hash,
+    name: fixedExotic.name,
+    exotic: true,
+    allowedTuningStats: [...STATS],
+    tuningMode: "plus3",
+    tuningTo: null,
+  });
+  const legendaryPieces = [1, 2, 3, 4].map(index => makeItem(solution, index));
+  const [plan] = rankInventoryPlans({
+    solutions: [solution],
+    items: [flexibleRoll, ...legendaryPieces],
+    classId: "hunter",
+    fixedExotic,
+  });
+
+  assert.equal(plan.farmCount, 0);
+  assert.equal(plan.pieces[0].item.id, "flexible-roll");
 });
 
 test("Exotic Class Item solutions map the fixed config to the class item slot", () => {

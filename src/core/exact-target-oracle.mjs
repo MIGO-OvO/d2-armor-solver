@@ -77,11 +77,16 @@ function buildRestrictedShiftStates(targets) {
     code: 0,
   }]]);
   for (const target of targets) {
+    const allowedTargets = Array.isArray(target)
+      ? new Set(target.filter(stat => STATS.includes(stat)))
+      : STATS.includes(target)
+        ? new Set([target])
+        : null;
     const next = new Map();
     for (const state of states.values()) {
       for (let actionIndex = 0; actionIndex < SHIFT_ACTIONS.length; actionIndex++) {
         const action = SHIFT_ACTIONS[actionIndex];
-        if (STATS.includes(target) && action.to !== STATS.indexOf(target)) continue;
+        if (allowedTargets && !allowedTargets.has(STATS[action.to])) continue;
         const values = state.values.map((value, index) =>
           value + action.delta[index]);
         const key = stateKey(values);
@@ -240,7 +245,9 @@ const restrictedAdjustmentCache = new Map();
 const MAX_RESTRICTED_ADJUSTMENT_CACHE_ENTRIES = 2;
 
 function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10) {
-  const cacheKey = `${targets.map(target => target || "*").join(",")}|${numPlus5}|${numPlus10}`;
+  const cacheKey = `${targets.map(target => Array.isArray(target)
+    ? `[${target.join(",")}]`
+    : target || "*").join(";")}|${numPlus5}|${numPlus10}`;
   const cached = restrictedAdjustmentCache.get(cacheKey);
   if (cached) {
     restrictedAdjustmentCache.delete(cacheKey);
@@ -363,12 +370,25 @@ export function findBestFixedConfigWitness({
   numPlus10,
   numPlus3,
   fixedTuningTargets = null,
+  tuningCapabilities = null,
   rankTotals,
   compareRanks,
 }) {
   if (!Array.isArray(configs) || configs.length !== 5) return null;
   if (typeof rankTotals !== "function" || typeof compareRanks !== "function") return null;
-  const masks = fixedTuningTargets
+  const masks = tuningCapabilities
+    ? Array.from({ length: 32 }, (_, mask) => ({
+      mask,
+      positions: Array.from({ length: 5 }, (__, index) => index)
+        .filter(index => (mask >> index) & 1),
+    })).filter(({ mask }) => tuningCapabilities.every((capability, index) => {
+      const balanced = Boolean((mask >> index) & 1);
+      return balanced
+        ? capability?.allowBalanced !== false
+        : Array.isArray(capability?.allowedDirectionalStats)
+          && capability.allowedDirectionalStats.some(stat => STATS.includes(stat));
+    }))
+    : fixedTuningTargets
     ? [{
       mask: fixedTuningTargets.reduce((mask, value, index) =>
         value === null ? mask | (1 << index) : mask, 0),
@@ -394,10 +414,12 @@ export function findBestFixedConfigWitness({
         }
       } else {
         shiftPieceIndices.push(pieceIndex);
-        shiftTargets.push(fixedTuningTargets?.[pieceIndex]);
+        shiftTargets.push(tuningCapabilities
+          ? tuningCapabilities[pieceIndex].allowedDirectionalStats
+          : fixedTuningTargets?.[pieceIndex]);
       }
     }
-    const adjustmentIndex = fixedTuningTargets
+    const adjustmentIndex = fixedTuningTargets || tuningCapabilities
       ? getRestrictedAdjustmentIndex(shiftTargets, numPlus5, numPlus10)
       : getAdjustmentIndex(shiftPieceIndices.length, numPlus5, numPlus10);
     const modifierUnits = numPlus5 + numPlus10 * 2;
@@ -764,16 +786,11 @@ export function findExactPartialConfigWitnesses({
   const normalizedTarget = STATS.map(stat => Number(target?.[stat]));
   if (normalizedTarget.some(value => !Number.isInteger(value))) return [];
   const modifierUnits = numPlus5 + numPlus10 * 2;
-  const fixedBaseTotals = STATS.map(() => 0);
+  const fixedBaseOnly = STATS.map(() => 0);
   for (const entry of fixedEntries) {
     const config = entry.config;
     for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
-      fixedBaseTotals[statIndex] += Number(config?.baseStats?.[STATS[statIndex]]) || 0;
-    }
-    if (entry.tuningMode === "plus3") {
-      for (const stat of config.masterworkStats || []) {
-        fixedBaseTotals[STATS.indexOf(stat)] += 1;
-      }
+      fixedBaseOnly[statIndex] += Number(config?.baseStats?.[STATS[statIndex]]) || 0;
     }
   }
 
@@ -782,90 +799,124 @@ export function findExactPartialConfigWitnesses({
   const counts = [...new Set(allowedFreePlus3Counts || [])]
     .filter(count => Number.isInteger(count) && count >= 0 && count <= freePieceCount)
     .sort((left, right) => left - right);
-
-  for (const freePlus3Count of counts) {
-    if (witnesses.length >= maxWitnesses) break;
-    const freeShiftCount = freePieceCount - freePlus3Count;
-    const shiftTargets = [
-      ...fixedEntries
-        .filter(entry => entry.tuningMode !== "plus3")
-        .map(entry => entry.tuningTo),
-      ...Array(freeShiftCount).fill(undefined),
-    ];
-    const adjustmentIndex = getRestrictedAdjustmentIndex(
-      shiftTargets,
-      numPlus5,
-      numPlus10,
-    );
-    const expectedTotal = fixedBaseTotals.reduce((sum, value) => sum + value, 0)
-      + freePieceCount * 90
-      + freePlus3Count * 3
-      + numPlus5 * 5
-      + numPlus10 * 10;
-    if (normalizedTarget.reduce((sum, value) => sum + value, 0) !== expectedTotal) {
-      continue;
-    }
-
-    const inspect = (plus3, shift) => {
-      if (witnesses.length >= maxWitnesses) return;
-      const baseTotals = fixedBaseTotals.map((value, statIndex) =>
-        value + plus3.totals[statIndex] + shift.totals[statIndex]);
-      const units = normalizedTarget.map((value, statIndex) => {
-        const residual = value - baseTotals[statIndex];
-        return residual % 5 === 0 ? residual / 5 : Number.NaN;
-      });
-      if (units.some(value => !Number.isInteger(value))) return;
-      if (units[5] !== modifierUnits - units.slice(0, 5)
-        .reduce((sum, value) => sum + value, 0)) return;
-      const key = packAdjustment(units);
-      if (key < 0) return;
-      const packedWitness = getPackedWitness(adjustmentIndex, key);
-      if (!packedWitness) return;
-
-      const configs = [
-        ...fixedEntries.map(entry => entry.config),
-        ...plus3.indices.map(index => BASE_CONFIGS[index]),
-        ...shift.indices.map(index => BASE_CONFIGS[index]),
-      ];
-      let mask = 0;
-      for (let index = 0; index < fixedEntries.length; index++) {
-        if (fixedEntries[index].tuningMode === "plus3") mask |= 1 << index;
-      }
-      for (let index = 0; index < plus3.indices.length; index++) {
-        mask |= 1 << (fixedEntries.length + index);
-      }
-      const groupKey = [
-        freePlus3Count,
-        ...plus3.indices,
-        "|",
-        ...shift.indices,
-      ].join(":");
-      if (seen.has(groupKey)) return;
-      seen.add(groupKey);
-      witnesses.push({
-        config: configs,
-        totals: { ...target },
-        fixedCount: fixedEntries.length,
-        freePlus3Count,
-        ...materializeWitness(configs, mask, adjustmentIndex, packedWitness),
-      });
-    };
-
-    if (freePlus3Count > 0 && freeShiftCount > 0) {
-      const plus3Selections = buildModeSelections(freePlus3Count, PLUS3_VECTORS);
-      visitModeSelections(freeShiftCount, BASE_VECTORS, shift => {
-        for (const plus3 of plus3Selections) {
-          inspect(plus3, shift);
-          if (witnesses.length >= maxWitnesses) return;
+  const fixedModeSelections = [];
+  for (let mask = 0; mask < (1 << fixedEntries.length); mask++) {
+    let allowed = true;
+    const baseTotals = [...fixedBaseOnly];
+    const shiftTargets = [];
+    let fixedPlus3Count = 0;
+    for (let index = 0; index < fixedEntries.length; index++) {
+      const entry = fixedEntries[index];
+      const balanced = Boolean((mask >> index) & 1);
+      const allowBalanced = entry.allowBalanced ?? entry.tuningMode === "plus3";
+      const allowedDirectionalStats = Array.isArray(entry.allowedDirectionalStats)
+        ? entry.allowedDirectionalStats.filter(stat => STATS.includes(stat))
+        : STATS.includes(entry.tuningTo) ? [entry.tuningTo] : [];
+      if (balanced) {
+        if (!allowBalanced) {
+          allowed = false;
+          break;
         }
-      });
-    } else if (freePlus3Count > 0) {
-      visitModeSelections(freePlus3Count, PLUS3_VECTORS, plus3 =>
-        inspect(plus3, { indices: [], totals: STATS.map(() => 0) }));
-    } else {
-      visitModeSelections(freeShiftCount, BASE_VECTORS, shift =>
-        inspect({ indices: [], totals: STATS.map(() => 0) }, shift));
+        fixedPlus3Count++;
+        for (const stat of entry.config.masterworkStats || []) {
+          baseTotals[STATS.indexOf(stat)] += 1;
+        }
+      } else {
+        if (allowedDirectionalStats.length === 0) {
+          allowed = false;
+          break;
+        }
+        shiftTargets.push(allowedDirectionalStats);
+      }
     }
+    if (allowed) fixedModeSelections.push({
+      mask,
+      baseTotals,
+      shiftTargets,
+      fixedPlus3Count,
+    });
+  }
+
+  for (const fixedSelection of fixedModeSelections) {
+    for (const freePlus3Count of counts) {
+      if (witnesses.length >= maxWitnesses) break;
+      const freeShiftCount = freePieceCount - freePlus3Count;
+      const expectedTotal = fixedSelection.baseTotals
+        .reduce((sum, value) => sum + value, 0)
+        + freePieceCount * 90
+        + freePlus3Count * 3
+        + numPlus5 * 5
+        + numPlus10 * 10;
+      if (normalizedTarget.reduce((sum, value) => sum + value, 0) !== expectedTotal) {
+        continue;
+      }
+      const adjustmentIndex = getRestrictedAdjustmentIndex(
+        [...fixedSelection.shiftTargets, ...Array(freeShiftCount).fill(undefined)],
+        numPlus5,
+        numPlus10,
+      );
+
+      const inspect = (plus3, shift) => {
+        if (witnesses.length >= maxWitnesses) return;
+        const baseTotals = fixedSelection.baseTotals.map((value, statIndex) =>
+          value + plus3.totals[statIndex] + shift.totals[statIndex]);
+        const units = normalizedTarget.map((value, statIndex) => {
+          const residual = value - baseTotals[statIndex];
+          return residual % 5 === 0 ? residual / 5 : Number.NaN;
+        });
+        if (units.some(value => !Number.isInteger(value))) return;
+        if (units[5] !== modifierUnits - units.slice(0, 5)
+          .reduce((sum, value) => sum + value, 0)) return;
+        const key = packAdjustment(units);
+        if (key < 0) return;
+        const packedWitness = getPackedWitness(adjustmentIndex, key);
+        if (!packedWitness) return;
+
+        const configs = [
+          ...fixedEntries.map(entry => entry.config),
+          ...plus3.indices.map(index => BASE_CONFIGS[index]),
+          ...shift.indices.map(index => BASE_CONFIGS[index]),
+        ];
+        let mask = fixedSelection.mask;
+        for (let index = 0; index < plus3.indices.length; index++) {
+          mask |= 1 << (fixedEntries.length + index);
+        }
+        const groupKey = [
+          fixedSelection.mask,
+          freePlus3Count,
+          ...plus3.indices,
+          "|",
+          ...shift.indices,
+        ].join(":");
+        if (seen.has(groupKey)) return;
+        seen.add(groupKey);
+        witnesses.push({
+          config: configs,
+          totals: { ...target },
+          fixedCount: fixedEntries.length,
+          fixedPlus3Count: fixedSelection.fixedPlus3Count,
+          freePlus3Count,
+          ...materializeWitness(configs, mask, adjustmentIndex, packedWitness),
+        });
+      };
+
+      if (freePlus3Count > 0 && freeShiftCount > 0) {
+        const plus3Selections = buildModeSelections(freePlus3Count, PLUS3_VECTORS);
+        visitModeSelections(freeShiftCount, BASE_VECTORS, shift => {
+          for (const plus3 of plus3Selections) {
+            inspect(plus3, shift);
+            if (witnesses.length >= maxWitnesses) return;
+          }
+        });
+      } else if (freePlus3Count > 0) {
+        visitModeSelections(freePlus3Count, PLUS3_VECTORS, plus3 =>
+          inspect(plus3, { indices: [], totals: STATS.map(() => 0) }));
+      } else {
+        visitModeSelections(freeShiftCount, BASE_VECTORS, shift =>
+          inspect({ indices: [], totals: STATS.map(() => 0) }, shift));
+      }
+    }
+    if (witnesses.length >= maxWitnesses) break;
   }
   return witnesses;
 }

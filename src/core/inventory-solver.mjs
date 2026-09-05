@@ -6,6 +6,7 @@ import {
   createUpgradePieceFromItem,
   evaluateUpgradePieces,
   getUpgradeConfig,
+  getUpgradeTuningCapability,
 } from "./upgrade-optimizer.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
@@ -192,12 +193,9 @@ function getEvaluationContribution(piece, reassignModifiers, onlyPlus5Tuning) {
     };
   }
 
-  const tuningMode = onlyPlus5Tuning && piece.tuningMode === "plus3"
-    ? "shift"
-    : piece.tuningMode;
-  const tuning = tuningMode === "plus3"
-    ? `+3:${[...(config.masterworkStats || [])].sort().join(",")}`
-    : `shift:${piece.exotic ? "free" : piece.tuningTo || "unknown"}`;
+  const capability = getUpgradeTuningCapability(piece, onlyPlus5Tuning);
+  const tuning = `balanced:${Number(capability.allowBalanced)}:directional:${
+    capability.allowedDirectionalStats?.join(",") || "unknown"}`;
   return {
     stats: config.baseStats,
     descriptor: `${tuning}:mod${piece.armorModSize || 0}`,

@@ -1752,9 +1752,13 @@ function renderSolutionStatRows(counts, prefix = '') {
 }
 
 function formatFarmTuning(piece) {
-  return piece.tuningMode === 'plus3'
-    ? l('+3模式', '+3模式', '+3 mode')
-    : l(`固定 +5 ${STAT_LABELS[piece.tuningTo]}`, `固定 +5 ${STAT_LABELS[piece.tuningTo]}`, `Fixed +5 ${STAT_LABELS[piece.tuningTo]}`);
+  if (piece.exotic) return l('异域可选调整', '異域可選調校', 'Exotic flexible Tuning');
+  const tunedStat = piece.tunedStat || piece.tuningTo;
+  return l(
+    `固有 +5 ${STAT_LABELS[tunedStat]}`,
+    `固有 +5 ${STAT_LABELS[tunedStat]}`,
+    `Intrinsic +5 ${STAT_LABELS[tunedStat]}`,
+  );
 }
 
 function renderFarmRequirements(result) {
@@ -4129,7 +4133,9 @@ function updateUpgradeTuningChoice(index, value) {
   }
   const [, tuningTo] = String(value).split(':');
   updateUpgradePiece(index, 'tuningMode', 'shift');
-  updateUpgradePiece(index, 'tuningTo', STATS.includes(tuningTo) ? tuningTo : STATS[0], true);
+  const tunedStat = STATS.includes(tuningTo) ? tuningTo : STATS[0];
+  updateUpgradePiece(index, 'tunedStat', tunedStat);
+  updateUpgradePiece(index, 'tuningTo', tunedStat, true);
 }
 
 function renderUpgradeBuildEditor(openIndex = null) {
@@ -4494,9 +4500,13 @@ function formatUpgradeConfigSummary(config) {
 // otherwise a "+5 stat only" replacement looks like no change at all.
 function formatUpgradePieceSummary(piece) {
   const config = getUpgradeConfig(piece);
-  const roll = piece.tuningMode === 'plus3'
-    ? l('调整 +3', '調校 +3', 'Tuning +3')
-    : l(`调整 +5${STAT_LABELS[piece.tuningTo]}`, `調校 +5${STAT_LABELS[piece.tuningTo]}`, `Tuning +5 ${STAT_LABELS[piece.tuningTo]}`);
+  const roll = piece.exotic
+    ? l('异域可选调整', '異域可選調校', 'Exotic flexible Tuning')
+    : l(
+      `固有 +5${STAT_LABELS[piece.tunedStat || piece.tuningTo]}`,
+      `固有 +5${STAT_LABELS[piece.tunedStat || piece.tuningTo]}`,
+      `Intrinsic +5 ${STAT_LABELS[piece.tunedStat || piece.tuningTo]}`,
+    );
   return `${formatUpgradeConfigSummary(config)} · ${roll}`;
 }
 

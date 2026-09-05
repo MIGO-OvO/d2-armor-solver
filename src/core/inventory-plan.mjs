@@ -16,8 +16,24 @@ function archetypeIdForName(name) {
   return normalizeArchetypeId(name);
 }
 
-function getItemTuningTo(item) {
-  return item?.tuningTo || item?.tuningStat || null;
+function getItemTunedStat(item) {
+  return item?.tunedStat || item?.tuningTo || item?.tuningStat || null;
+}
+
+function getItemDirectionalStats(item) {
+  if (!item) return null;
+  if (!item.exotic) {
+    const tunedStat = getItemTunedStat(item);
+    return tunedStat ? [tunedStat] : null;
+  }
+  if (Array.isArray(item.allowedTuningStats)) {
+    return [...new Set(item.allowedTuningStats)].filter(stat => STATS.includes(stat));
+  }
+  // DIM exports do not expose reusable socket plugs. Preserve the established
+  // game-model fallback (Exotic destinations are flexible) unless an API path
+  // explicitly marks the capability as unknown.
+  if (item.dataConfidence?.tuning !== "unknown") return [...STATS];
+  return null;
 }
 
 function getItemKey(item) {
@@ -25,10 +41,9 @@ function getItemKey(item) {
 }
 
 function getEligibilityKey({
-  slot, archetypeId, tertiary, tuningMode, exotic,
+  slot, archetypeId, tertiary, exotic,
 }) {
-  const normalizedMode = tuningMode === "plus3" ? "plus3" : "shift";
-  return `${slot}|${archetypeId}|${tertiary}|${normalizedMode}|${Number(Boolean(exotic))}`;
+  return `${slot}|${archetypeId}|${tertiary}|${Number(Boolean(exotic))}`;
 }
 
 function getSetRequirement(requirement = { type: "none" }) {
@@ -86,12 +101,9 @@ function getFixedExoticMismatch(item, requirement) {
     fields.push("tertiary");
     score += 20;
   }
-  const itemTuningMode = item.tuningMode === "plus3" ? "plus3" : "shift";
-  if (itemTuningMode !== requirement.tuningMode) {
-    fields.push("tuningMode");
-    score += 10;
-  } else if (requirement.tuningMode === "shift" && getItemTuningTo(item) !== requirement.tuningTo) {
-    fields.push("tuningTo");
+  if (requirement.tuningMode === "shift"
+      && !getItemDirectionalStats(item)?.includes(requirement.tuningTo)) {
+    fields.push("tuningCapability");
     score += 5;
   }
   return { score, fields };
@@ -102,16 +114,12 @@ function isItemEligible(item, requirement, options) {
   if (options.classId && item.classId !== options.classId) return false;
   if (item.archetypeId !== requirement.archetypeId) return false;
   if (item.tertiary !== requirement.tertiary) return false;
-  // The tuning MODE is installed on the piece and read from the export. The
-  // fixed +5 side of a +5/-5 roll is rolled onto LEGENDARY armor and cannot be
-  // re-picked (only the -5 source is free), so a legendary piece only serves a
-  // shift requirement whose +5 destination matches its fixed roll. Exotic armor
-  // accepts any directional tuning, so its +5 side is never filtered here.
-  if (requirement.tuningMode === "plus3") {
-    if (item.tuningMode !== "plus3") return false;
-  } else {
-    if (item.tuningMode === "plus3") return false;
-    if (!item.exotic && getItemTuningTo(item) !== requirement.tuningTo) return false;
+  // Installed mode/source are assignment state. Balanced can be installed on
+  // any compatible piece; a directional assignment only checks the immutable
+  // Legendary tunedStat (Exotics expose a set of allowed destinations).
+  if (requirement.tuningMode === "shift") {
+    const allowedDirectionalStats = getItemDirectionalStats(item);
+    if (!allowedDirectionalStats?.includes(requirement.tuningTo)) return false;
   }
 
   const fixedExotic = options.fixedExotic || null;
@@ -176,8 +184,8 @@ function getMaximumSetCoverage(setRequirement) {
 }
 
 // Candidate identity is irrelevant to exact stat reachability once slot,
-// archetype, tertiary, and tuning mode have matched. Only the pinned +5 side
-// and (when requested) set membership can change the assignment outcome.
+// archetype and tertiary have matched. Only directional Tuning capability and
+// (when requested) set membership can change the assignment outcome.
 // Keeping the first sorted item for each signature preserves equipped/locked/
 // masterwork preferences without re-exploring equivalent search states.
 function compressAssignmentCandidates(candidates, setRequirement) {
@@ -187,7 +195,8 @@ function compressAssignmentCandidates(candidates, setRequirement) {
     const setKey = setRequirement.type === "none"
       ? ""
       : Number(item.setHash) || 0;
-    const key = `${getItemTuningTo(item) || "free"}|${setKey}`;
+    const capabilityKey = getItemDirectionalStats(item)?.join(",") || "unknown";
+    const key = `${capabilityKey}|${setKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     compressed.push(item);
@@ -256,7 +265,7 @@ function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequi
     const pinnedCounts = Object.fromEntries(STATS.map(stat => [stat, 0]));
     for (let index = 0; index < chosen.length; index++) {
       if (solution.tuningAssignments?.[index]?.mode === "+3") continue;
-      const tuningTo = getItemTuningTo(chosen[index]);
+      const tuningTo = chosen[index]?.exotic ? null : getItemTunedStat(chosen[index]);
       if (tuningTo) pinnedCounts[tuningTo]++;
     }
     const key = STATS.map(stat => pinnedCounts[stat]).join(",");
@@ -376,7 +385,7 @@ export function assignmentCanReachExact(solution, chosen) {
     // Exotic armor accepts any directional tuning, so its +5 side is free to
     // re-roll and never pins a stat. Only a legendary piece's rolled +5 is
     // fixed and pins that stat.
-    const pinnedTo = item && !item.exotic ? getItemTuningTo(item) : null;
+    const pinnedTo = item && !item.exotic ? getItemTunedStat(item) : null;
     if (pinnedTo) pinned[pinnedTo]++;
     else freeCount++;
   }

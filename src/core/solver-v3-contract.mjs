@@ -213,6 +213,7 @@ function normalizeAllowedTuningStats(piece) {
       .filter(stat => STATS.includes(stat))
       .sort((left, right) => STATS.indexOf(left) - STATS.indexOf(right));
   }
+  if (STATS.includes(piece?.tunedStat)) return [piece.tunedStat];
   if (STATS.includes(piece?.tuningStat)) return [piece.tuningStat];
   if (STATS.includes(piece?.tuningTo) && !piece?.exotic) return [piece.tuningTo];
   return null;
@@ -250,9 +251,15 @@ export function createPieceCapability(piece = {}, slotIndex = 0) {
   const energyCapacity = finiteInteger(piece.energy?.capacity ?? piece.energyCapacity);
   const energyUsed = finiteInteger(piece.energy?.used ?? piece.energyUsed);
   const tuningConfidence = String(
-    piece.tuningConfidence || piece.tuningCapabilityConfidence || "unknown",
+    piece.tuningConfidence
+      || piece.tuningCapabilityConfidence
+      || piece.dataConfidence?.tuning
+      || "unknown",
   );
   const allowedTuningStats = normalizeAllowedTuningStats(piece);
+  const tunedStat = !piece?.exotic && STATS.includes(piece?.tunedStat ?? piece?.tuningStat)
+    ? piece.tunedStat ?? piece.tuningStat
+    : null;
   const executionKnown = sockets.length > 0
     && sockets.every(socket => socket.candidateState === "known")
     && tuningConfidence !== "unknown";
@@ -270,8 +277,17 @@ export function createPieceCapability(piece = {}, slotIndex = 0) {
     setHash: piece.setHash === null || piece.setHash === undefined
       ? null
       : Number(piece.setHash),
-    tuningMode: String(piece.tuningMode || "unknown"),
+    tunedStat,
     allowedTuningStats,
+    tuningAssignment: {
+      mode: String(piece.tuningAssignment?.mode || piece.tuningMode || "unknown"),
+      from: STATS.includes(piece.tuningAssignment?.from ?? piece.tuningFrom)
+        ? piece.tuningAssignment?.from ?? piece.tuningFrom
+        : null,
+      to: STATS.includes(piece.tuningAssignment?.to ?? piece.tuningTo)
+        ? piece.tuningAssignment?.to ?? piece.tuningTo
+        : null,
+    },
     tuningConfidence,
     sockets,
     energy: {
@@ -290,7 +306,7 @@ export function createPieceCapability(piece = {}, slotIndex = 0) {
     exotic: capability.exotic,
     locked: capability.locked,
     setHash: capability.setHash,
-    tuningMode: capability.tuningMode,
+    tunedStat: capability.tunedStat,
     allowedTuningStats: capability.allowedTuningStats,
     tuningConfidence: capability.tuningConfidence,
     sockets: capability.sockets,
