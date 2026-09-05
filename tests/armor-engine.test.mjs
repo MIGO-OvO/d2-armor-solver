@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   calculateReachability,
+  solveInventory,
   solveLoadout,
 } from "../src/core/armor-engine.mjs";
 import { solveLoadoutAsync } from "../src/core/armor-engine-client.mjs";
+import { findExactTargetWitnesses } from "../src/core/exact-target-oracle.mjs";
 import {
   BASE_CONFIGS,
   DEFAULT_TARGETS,
@@ -94,6 +96,86 @@ test("reachability exposes a proof certificate without changing its legacy field
   assert.equal(result.feasible, true);
   assert.equal(result.status, RESULT_STATUS.RULE_FEASIBLE_PROVEN);
   assert.equal(result.certificate.proof.exhaustive, true);
+});
+
+test("clamped reachability without an interval proof is always search-limited", () => {
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  for (const health of [0, 200]) {
+    const result = calculateReachability({
+      fixedPiece: BASE_CONFIGS[0],
+      numPlus5: 0,
+      numPlus10: 5,
+      numPlus3: 0,
+      fragments,
+      lockedTargets: { health },
+    });
+
+    assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+    assert.equal(result.certificate.proof.exhaustive, false);
+  }
+});
+
+test("bounded relaxed search cannot turn the reachable Health=225 rule into infeasibility", () => {
+  const reachableHealth225 = {
+    health: 225,
+    melee: 75,
+    grenade: 125,
+    super: 25,
+    class: 25,
+    weapons: 25,
+  };
+  assert.ok(findExactTargetWitnesses({
+    target: reachableHealth225,
+    numPlus5: 0,
+    numPlus10: 5,
+    numPlus3: 0,
+  }).length > 0, "fixture: an Armor-domain Health=225 witness exists");
+
+  const solutions = solveLoadout({
+    target: {
+      health: 225,
+      melee: 100,
+      grenade: 100,
+      super: 100,
+      class: 100,
+      weapons: 100,
+    },
+    numPlus5: 0,
+    numPlus10: 5,
+    numPlus3: 0,
+    constraints: { exact: { health: true } },
+    runtimeOptions: { relaxedCandidateLimit: 1 },
+  });
+
+  assert.ok(solutions.length > 0, "the bounded search should still expose its incumbent");
+  assert.equal(solutions.searchComplete, false);
+  assert.equal(solutions.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+  assert.notEqual(solutions.status, RESULT_STATUS.INFEASIBLE_PROVEN);
+});
+
+test("unknown inventory capability data cannot produce an infeasibility certificate", () => {
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const slots = ["helmet", "arms", "chest", "legs", "classItem"];
+  const items = slots.map((slot, index) => ({
+    id: `unknown-${slot}`,
+    slot,
+    archetypeId: BASE_CONFIGS[index].archetype,
+    tertiary: BASE_CONFIGS[index].tertiary,
+    baseStats: { ...BASE_CONFIGS[index].baseStats },
+    setHash: null,
+  }));
+  const result = solveInventory({
+    items,
+    targets: fragments,
+    fragments,
+    setRequirement: { type: "set", setHash: 12345, count: 5 },
+    reassignModifiers: false,
+  });
+
+  assert.equal(result.results.length, 0);
+  assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+  assert.equal(result.certificate.proof.exhaustive, false);
+  assert.match(result.certificate.proof.limitation, /unknown data/);
 });
 
 test("three hard minimums stay within the interactive solving budget", () => {

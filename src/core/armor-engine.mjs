@@ -38,7 +38,11 @@ function certificateForWitness({
     problemSpec.constraintModel,
     witnessDomain,
   )) status = RESULT_STATUS.RULE_FEASIBLE_PROVEN;
-  else if (proof?.exhaustive) status = RESULT_STATUS.INFEASIBLE_PROVEN;
+
+  // Infeasibility is a property of a trusted, operation-specific proof, not
+  // of a caller-provided Boolean. Producers that can prove an empty domain
+  // must opt in through emptyStatus; arbitrary `proof.exhaustive` metadata is
+  // never sufficient to upgrade a bounded miss into INFEASIBLE_PROVEN.
 
   return createResultCertificate({
     status,
@@ -177,16 +181,27 @@ export function calculateReachability({
     visibleTarget: probeTarget,
   }) : null;
   if (probe) result.probe = probe;
+  const hasClampBoundary = [
+    ...Object.values(lockedTargets || {}),
+    ...Object.values(probeTarget || {}),
+  ].some(value => Number(value) === 0 || Number(value) === 200);
+  const hasIntervalProof = result.intervalProof === true || probe?.intervalProof === true;
+  const clampSearchLimited = hasClampBoundary && !hasIntervalProof;
   return attachResultCertificate(result, createResultCertificate({
-    status: probe?.status || (result.feasible
-      ? RESULT_STATUS.RULE_FEASIBLE_PROVEN
-      : RESULT_STATUS.INFEASIBLE_PROVEN),
+    status: clampSearchLimited
+      ? RESULT_STATUS.SEARCH_LIMIT_REACHED
+      : probe?.status || (result.feasible
+        ? RESULT_STATUS.RULE_FEASIBLE_PROVEN
+        : RESULT_STATUS.INFEASIBLE_PROVEN),
     executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
     problemSpec,
     proof: {
       method: "reachability-dynamic-programming",
-      exhaustive: probe ? probe.exhaustive : true,
+      exhaustive: clampSearchLimited ? false : (probe ? probe.exhaustive : true),
       witnessProducing: Boolean(probe?.witness),
+      ...(clampSearchLimited ? {
+        limitation: "clamped boundary requires an interval-complete proof",
+      } : {}),
     },
   }));
 }
@@ -284,6 +299,11 @@ export function solveInventory(payload) {
   }
   const result = solveInventoryLoadout(payload);
   if (!result) return result;
+  const hasUnknownCapabilityData = problemSpec.pieceCapabilities.some(
+    capability => !capability.executionKnown,
+  );
+  const canProveInventoryInfeasible = Boolean(result.searchComplete)
+    && !hasUnknownCapabilityData;
   const witness = result.results?.[0] || null;
   for (const entry of result.results || []) {
     entry.canonicalId = createCanonicalId(entry);
@@ -301,12 +321,15 @@ export function solveInventory(payload) {
     executionStatus: witness?.execution?.executionStatus
       || EXECUTION_STATUS.NOT_APPLICABLE,
     proof: {
-      method: result.searchComplete
+      method: canProveInventoryInfeasible
         ? "inventory-equivalence-frontier"
         : "inventory-frontier-with-legacy-assignment-evaluator",
-      exhaustive: Boolean(result.searchComplete),
+      exhaustive: canProveInventoryInfeasible,
+      ...(hasUnknownCapabilityData ? {
+        limitation: "one or more inventory capabilities contain unknown data",
+      } : {}),
     },
-    emptyStatus: result.searchComplete
+    emptyStatus: canProveInventoryInfeasible
       ? RESULT_STATUS.INFEASIBLE_PROVEN
       : RESULT_STATUS.SEARCH_LIMIT_REACHED,
   }));

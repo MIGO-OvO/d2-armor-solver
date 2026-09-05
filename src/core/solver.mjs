@@ -1004,7 +1004,10 @@ function tryRelaxedProof(
       return createCanonicalId(left).localeCompare(createCanonicalId(right));
     });
     const proven = [candidates[0]];
-    proven.searchComplete = true;
+    // The relaxed target list is K-best and does not cover the full Armor
+    // value domain. A witness found here is useful, but a miss against the
+    // user's hard rules is not an infeasibility proof.
+    proven.searchComplete = false;
     proven.proofMethod = "relaxed-k-best-plus-exact-target-oracle";
     return proven;
   }

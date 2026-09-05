@@ -223,8 +223,9 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
   );
   assert.deepEqual(analysis.plan.replacementProof, {
     method: "replacement-count-iterative-deepening",
-    minimal: true,
     examinedThrough: 2,
+    complete: false,
+    limitation: "tuning identity is not yet modeled independently from assignment",
   });
   assert.equal(
     analysis.plan.evaluation.finalTotals.weapons, target.weapons,
@@ -247,7 +248,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
   }
 });
 
-test("three cooperating replacements are proven minimal beyond every one/two-slot move", () => {
+test("three cooperating replacements are found beyond every one/two-slot move", () => {
   const target = {
     health: 26, melee: 70, grenade: 101, super: 46, class: 130, weapons: 110,
   };
@@ -291,8 +292,9 @@ test("three cooperating replacements are proven minimal beyond every one/two-slo
   assert.equal(analysis.plan.replacementCount, 3);
   assert.deepEqual(analysis.plan.replacementProof, {
     method: "replacement-count-iterative-deepening",
-    minimal: true,
     examinedThrough: 3,
+    complete: false,
+    limitation: "tuning identity is not yet modeled independently from assignment",
   });
 });
 
@@ -345,7 +347,7 @@ test("upgrade planning uses full-masterwork projections for kept DIM pieces", ()
     analysis.plan.replacementCount, 2,
     "only legs and class item need farming after retained pieces are projected"
   );
-  assert.equal(analysis.plan.replacementProof?.minimal, true);
+  assert.notEqual(analysis.plan.replacementProof?.minimal, true);
   assert.deepEqual(
     analysis.plan.replacements.map(replacement => replacement.slotIndex).sort(),
     [3, 4]

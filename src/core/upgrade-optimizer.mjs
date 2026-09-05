@@ -1128,8 +1128,9 @@ function findExactUpgradePlanIterative(
             replacementCount: replacements.length,
             replacementProof: {
               method: "replacement-count-iterative-deepening",
-              minimal: true,
               examinedThrough: replacementDepth,
+              complete: false,
+              limitation: "tuning identity is not yet modeled independently from assignment",
             },
           };
           if (!bestAtDepth || compareUpgradePlans(plan, bestAtDepth) < 0) {

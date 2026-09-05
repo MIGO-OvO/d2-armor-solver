@@ -78,7 +78,7 @@ test("minimum rules keep the remaining stats exact and accept surplus", () => {
   assert.equal(satisfiesTargetConstraints(solution.totals, target, constraints), true);
   assert.notEqual(solution.score, 0, "minimum surplus is valid despite a nonzero fit score");
   assert.equal(solutions.status, RESULT_STATUS.RULE_FEASIBLE_PROVEN);
-  assert.equal(solutions.certificate.proof.exhaustive, true);
+  assert.equal(solutions.certificate.proof.exhaustive, false);
 });
 
 test("maximum and range bounds participate in rule satisfaction", () => {
@@ -151,8 +151,8 @@ test("at-most cap stays hard even when surplus budget must be spilled", () => {
     false,
     "the exact stats can no longer all be met once the surplus has to go somewhere, but the cap itself must hold",
   );
-  assert.equal(solutions.certificate.proof.exhaustive, true);
-  assert.equal(solutions.status, RESULT_STATUS.INFEASIBLE_PROVEN);
+  assert.equal(solutions.certificate.proof.exhaustive, false);
+  assert.equal(solutions.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
 });
 
 test("non-binding rule changes preserve the canonical exact witness", () => {
