@@ -13,6 +13,8 @@ import {
   createConstraintModel,
   createPieceCapability,
   createProblemSpec,
+  createProofEvidence,
+  createRulesetId,
   createResultCertificate,
   getArmorSolverInput,
   matchesExactTarget,
@@ -263,4 +265,98 @@ test("result certificates survive legacy array containers and structured clone",
     armorTotals: expectedArmorTotals,
     visibleTotals: expectedArmorTotals,
   }));
+});
+
+test("certificate builder rejects legacy Booleans and forged/replayed proof evidence", () => {
+  const problemSpec = createProblemSpec({
+    target: Object.fromEntries(STATS.map(stat => [stat, 1])),
+    constraints: { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+  });
+  const options = {
+    producer: "exact-target-oracle",
+    method: "exact-target-oracle",
+    complete: true,
+    statesExamined: 1,
+    scope: "target-point",
+    outcome: "infeasible",
+    assumptions: ["known-data", "complete-catalog", "residue-rejection"],
+  };
+  const issued = createProofEvidence(problemSpec, options);
+  const certify = (proof, spec = problemSpec) => createResultCertificate({
+    status: RESULT_STATUS.INFEASIBLE_PROVEN, problemSpec: spec, proof,
+  });
+  assert.equal(certify(issued).status, RESULT_STATUS.INFEASIBLE_PROVEN);
+  const cases = [
+    { exhaustive: true },
+    { ...issued },
+    structuredClone(issued),
+    createProofEvidence(problemSpec, { ...options, producer: "heuristic" }),
+    createProofEvidence(problemSpec, { ...options, method: "bounded-fallback-search" }),
+    createProofEvidence(problemSpec, { ...options, truncated: true }),
+    createProofEvidence(problemSpec, { ...options, complete: false }),
+    createProofEvidence(problemSpec, { ...options, assumptions: ["unknown-data"] }),
+    createProofEvidence(problemSpec, { ...options, statesExamined: -1 }),
+    createProofEvidence(problemSpec, { ...options, scope: "rule-domain" }),
+    createProofEvidence(problemSpec, { ...options, outcome: "unknown" }),
+    { ...issued, domain: STAT_DOMAIN.VISIBLE },
+    null,
+  ];
+  for (const proof of cases) {
+    assert.equal(certify(proof).status, RESULT_STATUS.SEARCH_LIMIT_REACHED,
+      JSON.stringify(proof));
+  }
+  const differentProblem = createProblemSpec({ target: { health: 200 } });
+  assert.notEqual(createRulesetId(differentProblem), issued.rulesetId);
+  assert.equal(certify(issued, differentProblem).status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+  assert.equal(certify(certify(issued).proof).status, RESULT_STATUS.SEARCH_LIMIT_REACHED,
+    "a serialized audit certificate cannot mint a new certificate");
+});
+
+test("a complete point oracle does not prove interval or fuzzy-rule infeasibility", () => {
+  for (const targetDomain of [STAT_DOMAIN.ARMOR, STAT_DOMAIN.VISIBLE]) {
+    const problemSpec = createProblemSpec({
+      target: { health: 200 }, targetDomain,
+      constraints: { exact: { health: true } },
+    });
+    const proof = createProofEvidence(problemSpec, {
+      producer: "exact-target-oracle", method: "exact-target-oracle",
+      complete: true, scope: "target-point", outcome: "infeasible",
+      assumptions: ["known-data"], statesExamined: 1,
+    });
+    assert.equal(createResultCertificate({
+      status: RESULT_STATUS.INFEASIBLE_PROVEN, problemSpec, proof,
+    }).status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+  }
+});
+
+test("point-rule reachability evidence cannot authorize a clamped interval proof", () => {
+  const problemSpec = createProblemSpec({
+    operation: "calculateReachability", target: { health: 200 },
+    targetDomain: STAT_DOMAIN.VISIBLE, constraints: { exact: { health: true } },
+  });
+  const proof = createProofEvidence(problemSpec, {
+    producer: "reachability-dp", method: "point-rule-dynamic-programming",
+    complete: true, assumptions: ["known-data"], outcome: "infeasible",
+  });
+  const result = createResultCertificate({
+    status: RESULT_STATUS.INFEASIBLE_PROVEN, problemSpec, proof,
+  });
+  assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+  assert.equal(result.proof.complete, false);
+  assert.match(result.proof.validationErrors.join(";"), /interval-complete/);
+});
+
+test("caller-supplied verification cannot bypass witness reconstruction", () => {
+  const problemSpec = createProblemSpec();
+  const fakeWitness = { totals: Object.fromEntries(STATS.map(stat => [stat, 0])) };
+  for (const status of [RESULT_STATUS.EXACT_TARGET_PROVEN, RESULT_STATUS.RULE_FEASIBLE_PROVEN]) {
+    const result = createResultCertificate({
+      status, problemSpec, witness: fakeWitness,
+      verification: { valid: true, witness: fakeWitness, errors: [] },
+    });
+    assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+    assert.equal(result.witnessVerification.valid, false);
+    assert.equal(createResultCertificate({ status, problemSpec }).status,
+      RESULT_STATUS.SEARCH_LIMIT_REACHED, "no witness is not a feasibility proof");
+  }
 });

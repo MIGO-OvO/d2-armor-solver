@@ -90,5 +90,5 @@ test("a missed clamped boundary target is limited, never falsely proven infeasib
     visibleTarget: Object.fromEntries(STATS.map(stat => [stat, 0])),
   });
   assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
-  assert.equal(result.exhaustive, false);
+  assert.equal(result.proof.complete, false);
 });

@@ -125,7 +125,8 @@ test("reachability exposes a proof certificate without changing its legacy field
 
   assert.equal(result.feasible, true);
   assert.equal(result.status, RESULT_STATUS.RULE_FEASIBLE_PROVEN);
-  assert.equal(result.certificate.proof.exhaustive, true);
+  assert.equal(result.certificate.proof.complete, true);
+  assert.equal(result.certificate.proof.producer, "reachability-dp");
 });
 
 test("clamped reachability without an interval proof is always search-limited", () => {
@@ -141,7 +142,7 @@ test("clamped reachability without an interval proof is always search-limited", 
     });
 
     assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
-    assert.equal(result.certificate.proof.exhaustive, false);
+    assert.equal(result.certificate.proof.complete, false);
   }
 });
 
@@ -178,7 +179,7 @@ test("bounded relaxed search cannot turn the reachable Health=225 rule into infe
   });
 
   assert.ok(solutions.length > 0, "the bounded search should still expose its incumbent");
-  assert.equal(solutions.searchComplete, false);
+  assert.equal(solutions.proof.complete, false);
   assert.equal(solutions.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
   assert.notEqual(solutions.status, RESULT_STATUS.INFEASIBLE_PROVEN);
 });
@@ -204,8 +205,30 @@ test("unknown inventory capability data cannot produce an infeasibility certific
 
   assert.equal(result.results.length, 0);
   assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
-  assert.equal(result.certificate.proof.exhaustive, false);
+  assert.equal(result.certificate.proof.complete, false);
   assert.match(result.certificate.proof.limitation, /unknown data/);
+});
+
+test("exact residue rejection accounts for the locked piece's actual stat residues", () => {
+  const fixedPiece = {
+    ...BASE_CONFIGS[0],
+    baseStats: {
+      ...BASE_CONFIGS[0].baseStats,
+      health: BASE_CONFIGS[0].baseStats.health + 1,
+      grenade: BASE_CONFIGS[0].baseStats.grenade - 1,
+    },
+  };
+  const target = Object.fromEntries(STATS.map(stat => [
+    stat, fixedPiece.baseStats[stat] + 4 * BASE_CONFIGS[0].baseStats[stat]
+      + (stat === "health" ? -25 : stat === "melee" ? 25 : 0),
+  ]));
+  const result = calculateReachability({
+    fixedPiece, numPlus3: 0, numPlus5: 0, numPlus10: 0,
+    fragments: Object.fromEntries(STATS.map(stat => [stat, 0])),
+    lockedTargets: {}, probeTarget: target,
+  });
+  assert.equal(result.status, RESULT_STATUS.EXACT_TARGET_PROVEN);
+  assert.deepEqual(result.certificate.witnessVerification.armorTotals, target);
 });
 
 test("three hard minimums stay within the interactive solving budget", () => {

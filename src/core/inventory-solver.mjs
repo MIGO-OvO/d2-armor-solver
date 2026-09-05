@@ -1,5 +1,8 @@
 import { STATS } from "./armor-model.mjs";
-import { createPieceCapability } from "./solver-v3-contract.mjs";
+import {
+  STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEvidence,
+  satisfiesConstraintModel,
+} from "./solver-v3-contract.mjs";
 import {
   applyManualUpgradeModifiers,
   compareUpgradeMetrics,
@@ -26,7 +29,11 @@ export function solveInventoryLoadout({
   onlyPlus5Tuning = false,
   maxResults = 12,
   userConstraints = {},
-}) {
+}, problemSpec = createProblemSpec({
+  operation: "solveInventory", targets, fragments, constraints: userConstraints,
+  targetDomain: STAT_DOMAIN.VISIBLE, pieces: items,
+  inventoryContext: { setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces },
+})) {
   if (!setRequirement) return null;
   const normalizedRequiredStats = [...new Set(requiredStats)]
     .filter(stat => STATS.includes(stat));
@@ -103,11 +110,28 @@ export function solveInventoryLoadout({
   validResults.sort((left, right) =>
     compareUpgradeMetrics(left.evaluation.metrics, right.evaluation.metrics)
   );
+  const hasUnknownCapabilityData = problemSpec.pieceCapabilities.some(
+    capability => !capability.executionKnown,
+  );
   return {
     requirement: setRequirement,
     requiredStats: normalizedRequiredStats,
     examined,
-    searchComplete: !reassignModifiers,
+    searchStats: { frontierComplete: true, assignmentComplete: !reassignModifiers },
+    proof: createProofEvidence(problemSpec, {
+      producer: "inventory-frontier",
+      method: "complete-inventory-frontier",
+      complete: !reassignModifiers && !hasUnknownCapabilityData,
+      truncated: reassignModifiers,
+      statesExamined: examined,
+      assumptions: hasUnknownCapabilityData ? [] : ["known-data", "fixed-modifier-assignments"],
+      outcome: validResults.some(entry => satisfiesConstraintModel(
+        entry.evaluation, problemSpec.constraintModel, STAT_DOMAIN.VISIBLE,
+      )) ? "feasible" : "infeasible",
+      limitation: hasUnknownCapabilityData
+        ? "one or more inventory capabilities contain unknown data"
+        : reassignModifiers ? "modifier assignment evaluator is bounded" : null,
+    }),
     results: validResults.slice(0, maxResults).map(entry => ({
       pieces: entry.pieces,
       isCurrent: entry.key === currentKey,

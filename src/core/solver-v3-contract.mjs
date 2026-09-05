@@ -25,6 +25,17 @@ export const STAT_DOMAIN = Object.freeze({
 const RESULT_STATUS_VALUES = new Set(Object.values(RESULT_STATUS));
 const EXECUTION_STATUS_VALUES = new Set(Object.values(EXECUTION_STATUS));
 
+// Only evidence issued at an internal producer boundary can authorize a
+// negative certificate. Serialized certificates are audit records, not bearer
+// tokens: copying their fields must not authorize a new result certificate.
+const issuedProofEvidence = new WeakSet();
+const PROOF_PRODUCERS = Object.freeze({
+  "exact-target-oracle": ["exact-target-oracle"],
+  "reachability-dp": ["point-rule-dynamic-programming", "interval-complete-dynamic-programming"],
+  "inventory-frontier": ["complete-inventory-frontier"],
+  "global-fuzzy-enumeration": ["complete-global-fuzzy-enumeration"],
+});
+
 function own(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
@@ -328,6 +339,7 @@ export function createProblemSpec({
   pieces = [],
   runtimeOptions = {},
   exoticSettings = null,
+  inventoryContext = null,
 } = {}) {
   const errors = [];
   const constraintModel = createConstraintModel({
@@ -363,6 +375,7 @@ export function createProblemSpec({
       fixedConfig: exoticSettings?.config || null,
       exoticSelection,
     },
+    inventoryContext,
     valid: errors.length === 0,
     errors,
   };
@@ -429,6 +442,125 @@ export function stableSerialize(value) {
   }
   const keys = Object.keys(value).sort();
   return `{${keys.map(key => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(",")}}`;
+}
+
+export function createRulesetId(problemSpec) {
+  // Canonical serialization is intentionally collision-free. Runtime limits
+  // are not rules; inventory identities, assignments and set requirements are.
+  return `solver-v3-proof-v1:${stableSerialize({
+    operation: problemSpec?.operation,
+    constraintModel: problemSpec?.constraintModel,
+    budget: problemSpec?.budget,
+    pieceCapabilities: problemSpec?.pieceCapabilities,
+    solverContext: problemSpec?.solverContext,
+    inventoryContext: problemSpec?.inventoryContext,
+  })}`;
+}
+
+// Internal producer API. Public payloads never flow into this function as
+// proof options; each producer supplies the facts of the search it just ran.
+export function createProofEvidence(problemSpec, {
+  method = "unknown",
+  producer = "unknown",
+  complete = false,
+  truncated = false,
+  statesExamined = 0,
+  assumptions = [],
+  scope = "rule-domain",
+  outcome = "unknown",
+  limitation = null,
+} = {}) {
+  const evidence = Object.freeze({
+    method,
+    producer,
+    domain: STAT_DOMAIN.ARMOR,
+    complete: complete === true,
+    truncated: truncated === true,
+    statesExamined,
+    assumptions: Object.freeze([...assumptions]),
+    rulesetId: createRulesetId(problemSpec),
+    scope,
+    outcome,
+    ...(limitation ? { limitation } : {}),
+  });
+  issuedProofEvidence.add(evidence);
+  return evidence;
+}
+
+export function normalizeProofEvidence(problemSpec, proof = {}) {
+  if (!proof || typeof proof !== "object") proof = {};
+  const errors = [];
+  const expectedRulesetId = createRulesetId(problemSpec);
+  if (!issuedProofEvidence.has(proof)) errors.push("evidence was not issued by an internal producer");
+  if (!PROOF_PRODUCERS[proof.producer]?.includes(proof.method)) {
+    errors.push("untrusted proof producer or method");
+  }
+  if (proof.rulesetId !== expectedRulesetId) errors.push("rulesetId mismatch");
+  if (proof.domain !== STAT_DOMAIN.ARMOR) errors.push("proof domain must be armor");
+  if (proof.complete !== true) errors.push("search is incomplete");
+  if (proof.truncated !== false) errors.push("search may be truncated");
+  if (!Number.isSafeInteger(proof.statesExamined) || proof.statesExamined < 0) {
+    errors.push("invalid statesExamined");
+  }
+  if (!Array.isArray(proof.assumptions)
+      || proof.assumptions.some(value => typeof value !== "string")
+      || !proof.assumptions.includes("known-data")) {
+    errors.push("proof requires known data");
+  }
+  if (!problemSpec?.valid) errors.push("invalid ProblemSpec");
+  const rules = problemSpec?.constraintModel?.rules || [];
+  const pointRules = rules.every(rule => rule.armorMinimum === null && rule.armorMaximum === null
+    || rule.armorMinimum !== null && rule.armorMinimum === rule.armorMaximum);
+  if (proof.producer === "exact-target-oracle" && proof.scope !== "target-point") {
+    errors.push("exact oracle covers only a target point");
+  }
+  const operations = {
+    "exact-target-oracle": ["solve", "calculateReachability"],
+    "reachability-dp": ["calculateReachability"],
+    "inventory-frontier": ["solveInventory"],
+    "global-fuzzy-enumeration": ["solve"],
+  };
+  if (!operations[proof.producer]?.includes(problemSpec?.operation)) {
+    errors.push("producer does not cover this operation");
+  }
+  if (["solve", "calculateReachability"].includes(problemSpec?.operation)
+      && problemSpec.pieceCapabilities.some(capability =>
+        Object.values(capability.baseStats).some(value => value < 5))) {
+    errors.push("fixed-piece data is outside the nonnegative tuning proof domain");
+  }
+  if (proof.producer === "reachability-dp"
+      && proof.method === "point-rule-dynamic-programming" && !pointRules) {
+    errors.push("non-point rules require an interval-complete proof");
+  }
+  if (proof.producer === "inventory-frontier"
+      && problemSpec?.pieceCapabilities?.some(capability => !capability.executionKnown)) {
+    errors.push("one or more inventory capabilities contain unknown data");
+  }
+  if (!["target-point", "rule-domain"].includes(proof.scope)) errors.push("unknown proof scope");
+  if (!["feasible", "infeasible", "unknown"].includes(proof.outcome)) errors.push("unknown proof outcome");
+  return {
+    method: typeof proof.method === "string" ? proof.method : "unknown",
+    producer: typeof proof.producer === "string" ? proof.producer : "unknown",
+    domain: proof.domain ?? null,
+    complete: errors.length === 0,
+    truncated: proof.truncated !== false,
+    statesExamined: Number.isSafeInteger(proof.statesExamined) ? proof.statesExamined : 0,
+    assumptions: Array.isArray(proof.assumptions) ? [...proof.assumptions] : [],
+    rulesetId: proof.rulesetId ?? null,
+    scope: proof.scope ?? null,
+    outcome: proof.outcome ?? "unknown",
+    validationErrors: errors,
+    ...(proof.limitation ? { limitation: proof.limitation } : {}),
+  };
+}
+
+function evidenceCoversRules(problemSpec, proof) {
+  if (!proof.complete) return false;
+  if (proof.scope === "rule-domain") return true;
+  return problemSpec.constraintModel.rules.every(rule =>
+    rule.armorMinimum !== null
+    && rule.armorMinimum === rule.armorMaximum
+    && rule.armorMinimum === rule.preferredArmor);
 }
 
 export function createCanonicalId(witness) {
@@ -611,7 +743,6 @@ export function createResultCertificate({
   problemSpec,
   witness = null,
   proof = {},
-  verification = null,
   message = null,
 } = {}) {
   if (!RESULT_STATUS_VALUES.has(status)) {
@@ -620,28 +751,32 @@ export function createResultCertificate({
   if (!EXECUTION_STATUS_VALUES.has(executionStatus)) {
     throw new TypeError(`unknown Solver V3 execution status: ${executionStatus}`);
   }
-  const resolvedVerification = verification
-    || (witness ? verifyWitness(problemSpec, witness) : null);
+  const resolvedVerification = witness ? verifyWitness(problemSpec, witness) : null;
+  const verifiedProof = normalizeProofEvidence(problemSpec, proof);
   const verifiedWitness = resolvedVerification?.valid
     ? resolvedVerification.witness
     : null;
   let verifiedStatus = status;
+  const witnessSatisfiesRules = verifiedWitness && satisfiesConstraintModel(
+    verifiedWitness, problemSpec.constraintModel, STAT_DOMAIN.ARMOR,
+  );
+  const completeRuleProof = evidenceCoversRules(problemSpec, verifiedProof);
   if (status === RESULT_STATUS.EXACT_TARGET_PROVEN
-      && (!verifiedWitness || !matchesExactTarget(
+      && (!witnessSatisfiesRules || !matchesExactTarget(
         verifiedWitness,
         problemSpec?.constraintModel,
         problemSpec?.constraintModel?.targetDomain,
       ))) {
     verifiedStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED;
   } else if (status === RESULT_STATUS.RULE_FEASIBLE_PROVEN
-      && witness
-      && (!verifiedWitness || !satisfiesConstraintModel(
-        verifiedWitness,
-        problemSpec?.constraintModel,
-        problemSpec?.constraintModel?.targetDomain,
-      ))) {
+      && !witnessSatisfiesRules
+      && !(completeRuleProof && verifiedProof.outcome === "feasible")) {
+    verifiedStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED;
+  } else if (status === RESULT_STATUS.INFEASIBLE_PROVEN
+      && (witnessSatisfiesRules || !completeRuleProof || verifiedProof.outcome !== "infeasible")) {
     verifiedStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED;
   }
+  if (!problemSpec?.valid) verifiedStatus = RESULT_STATUS.INVALID_INPUT;
   return {
     schemaVersion: SOLVER_V3_SCHEMA_VERSION,
     status: verifiedStatus,
@@ -652,7 +787,7 @@ export function createResultCertificate({
       constraintModel: problemSpec?.constraintModel || null,
       budget: problemSpec?.budget || null,
     },
-    proof: { ...proof },
+    proof: verifiedProof,
     witnessVerification: resolvedVerification ? {
       valid: resolvedVerification.valid,
       errors: [...resolvedVerification.errors],

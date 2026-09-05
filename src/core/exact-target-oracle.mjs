@@ -506,7 +506,9 @@ export function findBestGlobalWitness({
   lowerBoundRank,
   compareRanks,
   initialBest = null,
+  searchStats = {},
 }) {
+  searchStats.statesExamined = 0;
   if (typeof rankTotals !== "function" || typeof lowerBoundRank !== "function" ||
       typeof compareRanks !== "function") return initialBest;
   const fixed = normalizeFixedConfig(fixedConfig);
@@ -532,12 +534,14 @@ export function findBestGlobalWitness({
     });
 
     const inspect = (plus3, shift) => {
+      searchStats.statesExamined++;
       const baseTotals = fixedTotals.map((value, statIndex) =>
         value + plus3.totals[statIndex] + shift.totals[statIndex]);
       const lowerRank = lowerBoundRank(baseTotals, adjustmentValueSets);
       if (incumbentRank && compareRanks(lowerRank, incumbentRank) > 0) return;
 
       for (let row = 0; row < adjustmentIndex.reachableKeys.length; row++) {
+        searchStats.statesExamined++;
         const units = adjustmentIndex.reachableUnits;
         const totals = Object.fromEntries(STATS.map((stat, statIndex) => [
           stat,
@@ -641,7 +645,9 @@ export function findExactTargetWitnesses({
   numPlus10,
   numPlus3,
   fixedConfig = null,
+  searchStats = {},
 }) {
+  searchStats.statesExamined = 1; // Includes arithmetic/residue rejection.
   const normalizedTarget = STATS.map(stat => Number(target?.[stat]));
   if (normalizedTarget.some(value => !Number.isInteger(value))) return [];
   if (!Number.isInteger(numPlus3) || numPlus3 < 0 || numPlus3 > 5) return [];
@@ -651,9 +657,9 @@ export function findExactTargetWitnesses({
   // Base armor, directional Tuning, and +5/+10 stat mods are all multiples of
   // five. With no +3 pieces, residue rejection is a complete O(1) proof and
   // avoids enumerating 2.6M five-config multisets for an impossible target.
-  if (numPlus3 === 0 && normalizedTarget.some(value => value % 5 !== 0)) return [];
-
   const fixed = normalizeFixedConfig(fixedConfig);
+  if (numPlus3 === 0 && normalizedTarget.some((value, index) =>
+    (value - (fixed?.base[index] || 0)) % 5 !== 0)) return [];
   const baseTotal = fixed
     ? fixed.base.reduce((sum, value) => sum + value, 0) + 4 * 90
     : 5 * 90;
@@ -693,6 +699,7 @@ export function findExactTargetWitnesses({
   if (!fixed && numPlus3 > 0 && numPlus3 < 5) {
     const mask = (1 << numPlus3) - 1;
     const inspectPair = (plus3, shift) => {
+      searchStats.statesExamined++;
       const residuals = normalizedTarget.map((value, statIndex) =>
         value - plus3.totals[statIndex] - shift.totals[statIndex]);
       if (residuals.some(value => value % 5 !== 0)) return;
@@ -726,6 +733,7 @@ export function findExactTargetWitnesses({
 
   const inspectSelection = () => {
     for (const maskEntry of masks) {
+      searchStats.statesExamined++;
       const units = STATS.map((_, statIndex) => {
         let value = normalizedTarget[statIndex] - runningBaseTotals[statIndex];
         for (const pieceIndex of maskEntry.positions) {

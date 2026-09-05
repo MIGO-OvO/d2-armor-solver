@@ -62,7 +62,7 @@ export function preferConstraintSatisfyingSolutions(
   const satisfying = solutions.filter(solution =>
     satisfiesTargetConstraints(solution.totals, target, constraints));
   if (satisfying.length === 0) return solutions;
-  for (const key of ["certificate", "status", "executionStatus", "searchComplete", "proofMethod"]) {
+  for (const key of ["certificate", "status", "executionStatus", "proof"]) {
     if (solutions[key] !== undefined) satisfying[key] = solutions[key];
   }
   return satisfying;

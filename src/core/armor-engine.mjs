@@ -12,6 +12,7 @@ import {
   attachResultCertificate,
   createCanonicalId,
   createProblemSpec,
+  createProofEvidence,
   createResultCertificate,
   matchesExactTarget,
   satisfiesConstraintModel,
@@ -25,11 +26,12 @@ function certificateForWitness({
   witnessDomain,
   executionStatus,
   proof,
-  emptyStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED,
 }) {
   const verification = witness ? verifyWitness(problemSpec, witness) : null;
   const verifiedWitness = verification?.valid ? verification.witness : null;
-  let status = witness ? RESULT_STATUS.SEARCH_LIMIT_REACHED : emptyStatus;
+  // The builder, not this caller, decides whether an unsuccessful witness
+  // has an accompanying complete proof that can establish infeasibility.
+  let status = RESULT_STATUS.INFEASIBLE_PROVEN;
   if (!problemSpec.valid) status = RESULT_STATUS.INVALID_INPUT;
   else if (verifiedWitness && matchesExactTarget(
     verifiedWitness,
@@ -42,18 +44,12 @@ function certificateForWitness({
     witnessDomain,
   )) status = RESULT_STATUS.RULE_FEASIBLE_PROVEN;
 
-  // Infeasibility is a property of a trusted, operation-specific proof, not
-  // of a caller-provided Boolean. Producers that can prove an empty domain
-  // must opt in through emptyStatus; arbitrary `proof.exhaustive` metadata is
-  // never sufficient to upgrade a bounded miss into INFEASIBLE_PROVEN.
-
   return createResultCertificate({
     status,
     executionStatus,
     problemSpec,
-    witness: verifiedWitness,
+    witness,
     proof,
-    verification,
     message: problemSpec.valid ? null : problemSpec.errors.join("; "),
   });
 }
@@ -114,7 +110,7 @@ export function solveLoadout({
       witness: null,
       witnessDomain: targetDomain,
       executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
-      proof: { method: "input-validation", exhaustive: false },
+      proof: createProofEvidence(problemSpec, { method: "input-validation" }),
     }));
   }
   const solutions = annotateWitnesses(runSolver(problemSpec), problemSpec);
@@ -123,12 +119,7 @@ export function solveLoadout({
     witness: solutions[0] || null,
     witnessDomain: targetDomain,
     executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
-    proof: {
-      method: solutions.proofMethod || (solutions[0] && matchesExactTarget(
-        solutions[0], problemSpec.constraintModel, targetDomain,
-      ) ? "exact-target-oracle" : "bounded-fallback-search"),
-      exhaustive: Boolean(solutions.searchComplete),
-    },
+    proof: solutions.proof,
   }));
 }
 
@@ -164,7 +155,7 @@ export function calculateReachability({
         witness: null,
         witnessDomain: STAT_DOMAIN.VISIBLE,
         executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
-        proof: { method: "input-validation", exhaustive: false },
+        proof: createProofEvidence(problemSpec, { method: "input-validation" }),
       }),
     );
   }
@@ -183,6 +174,7 @@ export function calculateReachability({
     numPlus3,
     fragments,
     visibleTarget: probeTarget,
+    problemSpec,
   }) : null;
   if (probe) result.probe = probe;
   const probeVerification = probe?.witness
@@ -192,8 +184,9 @@ export function calculateReachability({
     ...Object.values(lockedTargets || {}),
     ...Object.values(probeTarget || {}),
   ].some(value => Number(value) === 0 || Number(value) === 200);
-  const hasIntervalProof = result.intervalProof === true || probe?.intervalProof === true;
-  const clampSearchLimited = hasClampBoundary && !hasIntervalProof;
+  // The current DP proves point rules only. A caller-supplied intervalProof
+  // Boolean is not an interval-complete producer.
+  const clampSearchLimited = hasClampBoundary;
   const probeStatus = probe?.witness && !probeVerification?.valid
     ? RESULT_STATUS.SEARCH_LIMIT_REACHED
     : probe?.status;
@@ -205,16 +198,16 @@ export function calculateReachability({
         : RESULT_STATUS.INFEASIBLE_PROVEN),
     executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
     problemSpec,
-    witness: probeVerification?.witness || null,
-    verification: probeVerification,
-    proof: {
-      method: "reachability-dynamic-programming",
-      exhaustive: clampSearchLimited ? false : (probe ? probe.exhaustive : true),
-      witnessProducing: Boolean(probe?.witness),
-      ...(clampSearchLimited ? {
-        limitation: "clamped boundary requires an interval-complete proof",
-      } : {}),
-    },
+    witness: probe?.witness || null,
+    proof: probe?.proof || createProofEvidence(problemSpec, {
+      producer: "reachability-dp",
+      method: "point-rule-dynamic-programming",
+      complete: !clampSearchLimited,
+      statesExamined: result.searchStats?.statesExamined ?? 0,
+      assumptions: ["known-data", "complete-catalog", "point-rules-only"],
+      outcome: result.feasible ? "feasible" : "infeasible",
+      limitation: clampSearchLimited ? "clamped boundary requires an interval-complete proof" : null,
+    }),
   }));
 }
 
@@ -254,7 +247,7 @@ export function analyzeUpgrade({
       witness: null,
       witnessDomain: STAT_DOMAIN.VISIBLE,
       executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
-      proof: { method: "input-validation", exhaustive: false },
+      proof: createProofEvidence(problemSpec, { method: "input-validation" }),
     }));
   }
   const result = analyzeUpgradeCandidates(
@@ -282,10 +275,11 @@ export function analyzeUpgrade({
     witness,
     witnessDomain: STAT_DOMAIN.VISIBLE,
     executionStatus: execution?.executionStatus || EXECUTION_STATUS.NOT_APPLICABLE,
-    proof: {
+    proof: createProofEvidence(problemSpec, {
+      producer: "upgrade-candidate-search",
       method: "upgrade-candidate-search",
-      exhaustive: false,
-    },
+      truncated: true,
+    }),
   }));
 }
 
@@ -297,6 +291,13 @@ export function solveInventory(payload) {
     constraints: payload?.userConstraints,
     targetDomain: STAT_DOMAIN.VISIBLE,
     pieces: payload?.items,
+    inventoryContext: {
+      setRequirement: payload?.setRequirement || null,
+      reassignModifiers: payload?.reassignModifiers !== false,
+      onlyPlus5Tuning: Boolean(payload?.onlyPlus5Tuning),
+      requiredStats: payload?.requiredStats || [],
+      currentPieces: payload?.currentPieces || null,
+    },
   });
   if (!problemSpec.valid) {
     return attachResultCertificate({
@@ -309,16 +310,11 @@ export function solveInventory(payload) {
       witness: null,
       witnessDomain: STAT_DOMAIN.VISIBLE,
       executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
-      proof: { method: "input-validation", exhaustive: false },
+      proof: createProofEvidence(problemSpec, { method: "input-validation" }),
     }));
   }
-  const result = solveInventoryLoadout(payload);
+  const result = solveInventoryLoadout(payload, problemSpec);
   if (!result) return result;
-  const hasUnknownCapabilityData = problemSpec.pieceCapabilities.some(
-    capability => !capability.executionKnown,
-  );
-  const canProveInventoryInfeasible = Boolean(result.searchComplete)
-    && !hasUnknownCapabilityData;
   const witness = result.results?.[0] || null;
   for (const entry of result.results || []) {
     entry.canonicalId = createCanonicalId(entry);
@@ -335,17 +331,6 @@ export function solveInventory(payload) {
     witnessDomain: STAT_DOMAIN.VISIBLE,
     executionStatus: witness?.execution?.executionStatus
       || EXECUTION_STATUS.NOT_APPLICABLE,
-    proof: {
-      method: canProveInventoryInfeasible
-        ? "inventory-equivalence-frontier"
-        : "inventory-frontier-with-legacy-assignment-evaluator",
-      exhaustive: canProveInventoryInfeasible,
-      ...(hasUnknownCapabilityData ? {
-        limitation: "one or more inventory capabilities contain unknown data",
-      } : {}),
-    },
-    emptyStatus: canProveInventoryInfeasible
-      ? RESULT_STATUS.INFEASIBLE_PROVEN
-      : RESULT_STATUS.SEARCH_LIMIT_REACHED,
+    proof: result.proof,
   }));
 }

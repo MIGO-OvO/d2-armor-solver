@@ -8,7 +8,9 @@ import {
 } from "./exact-target-oracle.mjs";
 import {
   createCanonicalId,
+  createProofEvidence,
   getArmorSolverInput,
+  satisfiesConstraintModel,
 } from "./solver-v3-contract.mjs";
 
 const modifierAllocationCache = new Map();
@@ -713,12 +715,14 @@ export function runSolver(problemSpec) {
   // falls through to the deterministic fuzzy/near-target search below.
   const exactTargetRank = scoreStatsRank(target, target, constraints);
   if (exactTargetRank.every(value => value === 0)) {
+    const searchStats = {};
     const exactWitnesses = findExactTargetWitnesses({
       target,
       numPlus5,
       numPlus10,
       numPlus3,
       fixedConfig: exoticSettings?.config || null,
+      searchStats,
     });
     if (exactWitnesses.length > 0) {
       const exactScore = scoreStats(target, target, constraints);
@@ -752,7 +756,15 @@ export function runSolver(problemSpec) {
       // presentation limit is applied. Truncation therefore cannot turn a
       // reachable target into a miss.
       const presented = exactSolutions.slice(0, maxExactSolutions);
-      presented.searchComplete = true;
+      presented.proof = createProofEvidence(problemSpec, {
+        producer: "exact-target-oracle",
+        method: "exact-target-oracle",
+        complete: true,
+        statesExamined: searchStats.statesExamined,
+        assumptions: ["known-data", "complete-catalog", "unrestricted-theoretical-tuning"],
+        scope: "target-point",
+        outcome: "feasible",
+      });
       return presented;
     }
   }
@@ -767,7 +779,15 @@ export function runSolver(problemSpec) {
       exoticSettings,
       runtimeOptions,
     );
-    if (relaxedProof) return relaxedProof;
+    if (relaxedProof) {
+      relaxedProof.proof = createProofEvidence(problemSpec, {
+        producer: "relaxed-k-best",
+        method: "relaxed-k-best-plus-exact-target-oracle",
+        truncated: true,
+        limitation: "K-best targets do not cover the complete Armor value domain",
+      });
+      return relaxedProof;
+    }
   }
 
   const solutionMap = new Map();
@@ -950,18 +970,28 @@ export function runSolver(problemSpec) {
     ? perfectOnes
     : solutions.slice(0, 60);
   if (runtimeOptions.fastMode) {
-    incumbentSolutions.searchComplete = false;
+    incumbentSolutions.proof = createProofEvidence(problemSpec, {
+      producer: "heuristic-solver",
+      method: "bounded-fallback-search",
+      truncated: true,
+      statesExamined: stagedCandidates.length,
+    });
     return incumbentSolutions;
   }
 
   const incumbent = incumbentSolutions[0] || null;
 
   if (!runtimeOptions.proveFuzzy) {
-    incumbentSolutions.searchComplete = false;
-    incumbentSolutions.proofMethod = "relaxed-candidate-limit";
+    incumbentSolutions.proof = createProofEvidence(problemSpec, {
+      producer: "heuristic-solver",
+      method: "relaxed-candidate-limit",
+      truncated: true,
+      statesExamined: stagedCandidates.length,
+    });
     return incumbentSolutions;
   }
 
+  const searchStats = {};
   const provenBest = findBestGlobalWitness({
     target,
     numPlus5,
@@ -977,9 +1007,19 @@ export function runSolver(problemSpec) {
     ),
     compareRanks: compareScoreRanks,
     initialBest: incumbent,
+    searchStats,
+  });
+  const globalProof = createProofEvidence(problemSpec, {
+    producer: "global-fuzzy-enumeration",
+    method: "complete-global-fuzzy-enumeration",
+    complete: true,
+    statesExamined: searchStats.statesExamined,
+    assumptions: ["known-data", "complete-catalog", "admissible-hard-rule-lower-bound"],
+    outcome: provenBest && satisfiesConstraintModel(provenBest, problemSpec.constraintModel)
+      ? "feasible" : "infeasible",
   });
   if (!provenBest) {
-    incumbentSolutions.searchComplete = true;
+    incumbentSolutions.proof = globalProof;
     return incumbentSolutions;
   }
   provenBest.score = scoreStats(provenBest.totals, target, constraints);
@@ -992,7 +1032,7 @@ export function runSolver(problemSpec) {
     secondaryPerkName: exoticSettings.secondaryPerkName,
   } : null;
   const proven = [provenBest];
-  proven.searchComplete = true;
+  proven.proof = globalProof;
   return proven;
 }
 
@@ -1051,8 +1091,6 @@ function tryRelaxedProof(
     // The relaxed target list is K-best and does not cover the full Armor
     // value domain. A witness found here is useful, but a miss against the
     // user's hard rules is not an infeasibility proof.
-    proven.searchComplete = false;
-    proven.proofMethod = "relaxed-k-best-plus-exact-target-oracle";
     return proven;
   }
   return null;

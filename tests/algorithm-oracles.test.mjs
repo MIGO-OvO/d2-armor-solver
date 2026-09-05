@@ -328,5 +328,7 @@ test("six-per-slot inventory frontier matches independent exhaustive enumeration
     compareUpgradeMetrics(result.results[0].metrics, exhaustiveBest.metrics),
     0,
   );
-  assert.equal(result.searchComplete, true);
+  assert.equal(result.searchStats.frontierComplete, true);
+  assert.equal(result.searchStats.assignmentComplete, true);
+  assert.equal(result.proof.truncated, false);
 });
