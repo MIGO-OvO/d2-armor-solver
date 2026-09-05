@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { BASE_CONFIGS, STATS } from "../src/core/armor-model.mjs";
 
 import {
   EXECUTION_STATUS,
@@ -13,9 +14,11 @@ import {
   createPieceCapability,
   createProblemSpec,
   createResultCertificate,
+  getArmorSolverInput,
   matchesExactTarget,
   satisfiesConstraintModel,
   visibleStatFromArmor,
+  verifyWitness,
 } from "../src/core/solver-v3-contract.mjs";
 
 test("Solver V3 exposes only the specified result and execution statuses", () => {
@@ -127,6 +130,74 @@ test("ProblemSpec validates integer budgets and carries the same constraint mode
   assert.equal(valid.constraintModel.domain, STAT_DOMAIN.ARMOR);
   assert.equal(invalid.valid, false);
   assert.match(invalid.errors.join("\n"), /numPlus5/);
+  const invalidVisible = createProblemSpec({
+    target: { health: 201 },
+    targetDomain: STAT_DOMAIN.VISIBLE,
+  });
+  assert.equal(invalidVisible.valid, false);
+  assert.match(invalidVisible.errors.join("\n"), /target\.health.*0 and 200/);
+});
+
+test("visible 0/1/199/200 rules convert to Armor intervals for fragment +/-10/20", () => {
+  const exact = Object.fromEntries(STATS.map(stat => [stat, true]));
+  const tuningAssignments = STATS.slice(0, 5).map((stat, index) => ({
+    mode: "+5-5",
+    from: stat,
+    to: STATS[(index + 1) % 5],
+  }));
+
+  for (const fragment of [-20, -10, 10, 20]) {
+    for (const visible of [0, 1, 199, 200]) {
+      const armor = visible - fragment;
+      const target = Object.fromEntries(STATS.map(stat => [stat, visible]));
+      const fragments = Object.fromEntries(STATS.map(stat => [stat, fragment]));
+      const problemSpec = createProblemSpec({
+        operation: "verify-test",
+        target,
+        fragments,
+        constraints: { exact },
+        targetDomain: STAT_DOMAIN.VISIBLE,
+      });
+      const witness = {
+        // Deliberately false: verification must rebuild from the assignments.
+        totals: Object.fromEntries(STATS.map(stat => [stat, 999])),
+        config: Array.from({ length: 5 }, (_, index) => ({
+          archetype: "Siegebreaker",
+          tertiary: "melee",
+          baseStats: Object.fromEntries(STATS.map(stat => [
+            stat,
+            index === 0 ? armor : 0,
+          ])),
+        })),
+        tuningAssignments,
+        modAssignments: Object.fromEntries(STATS.slice(0, 5).map((_, index) => [index, null])),
+      };
+      const verification = verifyWitness(problemSpec, witness);
+      const solverInput = getArmorSolverInput(problemSpec);
+
+      assert.equal(verification.valid, true, verification.errors.join("; "));
+      assert.deepEqual(verification.armorTotals,
+        Object.fromEntries(STATS.map(stat => [stat, armor])));
+      assert.deepEqual(verification.visibleTotals, target);
+      assert.equal(satisfiesConstraintModel(
+        verification.witness,
+        problemSpec.constraintModel,
+        STAT_DOMAIN.VISIBLE,
+      ), true);
+      assert.equal(solverInput.target.health, armor);
+      if (visible === 0) {
+        assert.equal(solverInput.constraints.exact.health, false);
+        assert.equal(solverInput.constraints.maximums.health, armor);
+      } else if (visible === 200) {
+        assert.equal(solverInput.constraints.exact.health, false);
+        assert.equal(solverInput.constraints.minimums.health, armor);
+      } else {
+        assert.equal(solverInput.constraints.exact.health, true);
+        assert.equal(solverInput.constraints.minimums.health, undefined);
+        assert.equal(solverInput.constraints.maximums.health, undefined);
+      }
+    }
+  }
 });
 
 test("canonical ordering uses integer tuples and a deterministic witness id", () => {
@@ -148,11 +219,31 @@ test("canonical ordering uses integer tuples and a deterministic witness id", ()
 });
 
 test("result certificates survive legacy array containers and structured clone", () => {
-  const problemSpec = createProblemSpec({ operation: "solve", target: {} });
+  const config = Array.from({ length: 5 }, () => BASE_CONFIGS[0]);
+  const tuningAssignments = config.map(() => ({
+    mode: "+5-5",
+    from: "health",
+    to: "melee",
+  }));
   const witness = {
+    // The certificate must ignore these caller-provided totals.
     totals: { health: 0, melee: 0, grenade: 0, super: 0, class: 0, weapons: 0 },
-    config: [],
+    config,
+    tuningAssignments,
+    modAssignments: Object.fromEntries(config.map((_, index) => [index, null])),
   };
+  const expectedArmorTotals = {
+    health: 125,
+    melee: 125,
+    grenade: 125,
+    super: 25,
+    class: 25,
+    weapons: 25,
+  };
+  const problemSpec = createProblemSpec({
+    operation: "solve",
+    target: expectedArmorTotals,
+  });
   const certificate = createResultCertificate({
     status: RESULT_STATUS.EXACT_TARGET_PROVEN,
     executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
@@ -165,5 +256,11 @@ test("result certificates survive legacy array containers and structured clone",
 
   assert.equal(cloned.length, 1);
   assert.equal(cloned.status, RESULT_STATUS.EXACT_TARGET_PROVEN);
-  assert.equal(cloned.certificate.canonicalId, createCanonicalId(witness));
+  assert.deepEqual(cloned.certificate.witnessVerification.armorTotals, expectedArmorTotals);
+  assert.equal(cloned.certificate.canonicalId, createCanonicalId({
+    ...witness,
+    totals: expectedArmorTotals,
+    armorTotals: expectedArmorTotals,
+    visibleTotals: expectedArmorTotals,
+  }));
 });

@@ -15,12 +15,23 @@ import {
   scoreStatsRank,
 } from "../src/core/solver.mjs";
 import {
+  createProblemSpec,
+  STAT_DOMAIN,
+} from "../src/core/solver-v3-contract.mjs";
+import {
   compareUpgradeMetrics,
   createUpgradePieceFromItem,
   evaluateUpgradePieces,
 } from "../src/core/upgrade-optimizer.mjs";
 
 const ZERO = Object.fromEntries(STATS.map(stat => [stat, 0]));
+
+test("runSolver accepts only a normalized ProblemSpec", () => {
+  assert.throws(
+    () => runSolver({ ...ZERO }),
+    /normalized ProblemSpec/,
+  );
+});
 
 function rebuildSolverTotals(solution) {
   const totals = { ...ZERO };
@@ -186,7 +197,14 @@ test("exact-target oracle recovers a generated witness missed by heuristic refin
   }, "fixture must be reachable by construction");
 
   const exact = Object.fromEntries(STATS.map(stat => [stat, true]));
-  const solutions = runSolver(target, 0, 5, 3, { exact });
+  const solutions = runSolver(createProblemSpec({
+    target,
+    constraints: { exact },
+    targetDomain: STAT_DOMAIN.ARMOR,
+    numPlus5: 0,
+    numPlus10: 5,
+    numPlus3: 3,
+  }));
   const witness = solutions.find(solution =>
     STATS.every(stat => solution.totals[stat] === target[stat]));
 

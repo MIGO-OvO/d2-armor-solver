@@ -1,4 +1,4 @@
-import { STATS } from "./armor-model.mjs";
+import { ARCHETYPES, STATS } from "./armor-model.mjs";
 
 export const SOLVER_V3_SCHEMA_VERSION = 3;
 
@@ -89,11 +89,26 @@ function createStatRule(stat, target, fragment, constraints, targetDomain, error
   const exact = Boolean(constraints.exact?.[stat]);
   const forceZero = Boolean(constraints.force0?.[stat]);
   const legacyCap = Boolean(constraints.le100?.[stat]);
+  const visibleLimits = targetDomain === STAT_DOMAIN.VISIBLE
+    ? { minimum: 0, maximum: 200 }
+    : {};
   let minimum = own(constraints.minimums, stat)
-    ? normalizeInteger(constraints.minimums[stat], 0, `constraints.minimums.${stat}`, errors)
+    ? normalizeInteger(
+      constraints.minimums[stat],
+      0,
+      `constraints.minimums.${stat}`,
+      errors,
+      visibleLimits,
+    )
     : null;
   let maximum = own(constraints.maximums, stat)
-    ? normalizeInteger(constraints.maximums[stat], 200, `constraints.maximums.${stat}`, errors)
+    ? normalizeInteger(
+      constraints.maximums[stat],
+      200,
+      `constraints.maximums.${stat}`,
+      errors,
+      visibleLimits,
+    )
     : null;
 
   if (exact) {
@@ -160,6 +175,13 @@ export function createConstraintModel({
   }
   const normalizedTarget = normalizeStatObject(target, 0, "target", errors);
   const normalizedFragments = normalizeStatObject(fragments, 0, "fragments", errors);
+  if (targetDomain === STAT_DOMAIN.VISIBLE) {
+    for (const stat of STATS) {
+      if (normalizedTarget[stat] < 0 || normalizedTarget[stat] > 200) {
+        errors.push(`target.${stat} must be between 0 and 200 in the visible domain`);
+      }
+    }
+  }
   const rules = STATS.map(stat => createStatRule(
     stat,
     normalizedTarget,
@@ -289,6 +311,7 @@ export function createProblemSpec({
   numPlus3 = 0,
   pieces = [],
   runtimeOptions = {},
+  exoticSettings = null,
 } = {}) {
   const errors = [];
   const constraintModel = createConstraintModel({
@@ -308,6 +331,10 @@ export function createProblemSpec({
   }
   const pieceCapabilities = (pieces || []).map(createPieceCapability);
   for (const capability of pieceCapabilities) errors.push(...capability.errors);
+  const exoticSelection = exoticSettings
+    ? Object.fromEntries(Object.entries(exoticSettings)
+      .filter(([key]) => key !== "config"))
+    : null;
 
   return {
     schemaVersion: SOLVER_V3_SCHEMA_VERSION,
@@ -316,8 +343,51 @@ export function createProblemSpec({
     pieceCapabilities,
     budget,
     runtimeOptions: { ...runtimeOptions },
+    solverContext: {
+      fixedConfig: exoticSettings?.config || null,
+      exoticSelection,
+    },
     valid: errors.length === 0,
     errors,
+  };
+}
+
+export function getArmorSolverInput(problemSpec) {
+  if (!problemSpec?.constraintModel) {
+    throw new TypeError("runSolver requires a normalized ProblemSpec");
+  }
+  const { constraintModel } = problemSpec;
+  const target = Object.fromEntries(constraintModel.rules.map(rule => [
+    rule.stat,
+    rule.preferredArmor,
+  ]));
+  const isArmorPointExact = rule => rule.exact
+    && rule.armorMinimum !== null
+    && rule.armorMinimum === rule.armorMaximum;
+  const constraints = {
+    minimums: Object.fromEntries(constraintModel.rules
+      .filter(rule => rule.armorMinimum !== null && !isArmorPointExact(rule))
+      .map(rule => [rule.stat, rule.armorMinimum])),
+    maximums: Object.fromEntries(constraintModel.rules
+      .filter(rule => rule.armorMaximum !== null && !isArmorPointExact(rule))
+      .map(rule => [rule.stat, rule.armorMaximum])),
+    exact: Object.fromEntries(constraintModel.rules.map(rule => [
+      rule.stat,
+      isArmorPointExact(rule),
+    ])),
+    priorityLevels: Object.fromEntries(constraintModel.rules.map(rule => [
+      rule.stat,
+      rule.priority,
+    ])),
+    priorityOrder: [...constraintModel.priorityOrder],
+  };
+  return {
+    target,
+    constraints,
+    budget: { ...problemSpec.budget },
+    runtimeOptions: { ...(problemSpec.runtimeOptions || {}) },
+    fixedConfig: problemSpec.solverContext?.fixedConfig || null,
+    exoticSelection: problemSpec.solverContext?.exoticSelection || null,
   };
 }
 
@@ -362,12 +432,18 @@ export function createCanonicalId(witness) {
   });
 }
 
-function getTotals(witness) {
+function getTotals(witness, domain) {
+  if (domain === STAT_DOMAIN.VISIBLE && witness?.visibleTotals) {
+    return witness.visibleTotals;
+  }
+  if (domain === STAT_DOMAIN.ARMOR && witness?.armorTotals) {
+    return witness.armorTotals;
+  }
   return witness?.totals || witness?.finalTotals || witness?.evaluation?.finalTotals || null;
 }
 
 export function matchesExactTarget(witness, constraintModel, domain = STAT_DOMAIN.ARMOR) {
-  const totals = getTotals(witness);
+  const totals = getTotals(witness, domain);
   if (!totals) return false;
   return constraintModel.rules.every(rule => {
     const actual = Number(totals[rule.stat]);
@@ -379,7 +455,7 @@ export function matchesExactTarget(witness, constraintModel, domain = STAT_DOMAI
 }
 
 export function satisfiesConstraintModel(witness, constraintModel, domain = STAT_DOMAIN.ARMOR) {
-  const totals = getTotals(witness);
+  const totals = getTotals(witness, domain);
   if (!totals) return false;
   return constraintModel.rules.every(rule => {
     const actual = Number(totals[rule.stat]);
@@ -395,12 +471,131 @@ export function satisfiesConstraintModel(witness, constraintModel, domain = STAT
   });
 }
 
+function resolveMasterworkStats(piece) {
+  if (Array.isArray(piece?.masterworkStats)) {
+    const stats = [...new Set(piece.masterworkStats)].filter(stat => STATS.includes(stat));
+    if (stats.length === 3) return stats;
+  }
+  const archetypeId = piece?.archetype || piece?.archetypeId;
+  const archetype = ARCHETYPES.find(candidate => candidate.id === archetypeId);
+  if (!archetype || !STATS.includes(piece?.tertiary)) return null;
+  return STATS.filter(stat =>
+    stat !== archetype.primary
+    && stat !== archetype.secondary
+    && stat !== piece.tertiary);
+}
+
+function witnessAssignments(witness) {
+  return {
+    tuning: witness?.tuningAssignments || witness?.evaluation?.tuningAssignments || null,
+    mods: witness?.modAssignments || witness?.evaluation?.modAssignments || null,
+  };
+}
+
+export function verifyWitness(problemSpec, witness) {
+  const errors = [];
+  const pieces = witness?.config || witness?.pieces;
+  const { tuning, mods } = witnessAssignments(witness);
+  if (!problemSpec?.constraintModel) errors.push("problemSpec.constraintModel is required");
+  if (!Array.isArray(pieces) || pieces.length !== 5) {
+    errors.push("witness must contain exactly five pieces");
+  }
+  if (!Array.isArray(tuning) || tuning.length !== 5) {
+    errors.push("witness must contain exactly five tuning assignments");
+  }
+
+  const armorTotals = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  let plus3Count = 0;
+  let plus5ModCount = 0;
+  let plus10ModCount = 0;
+  if (Array.isArray(pieces) && pieces.length === 5) {
+    for (let index = 0; index < pieces.length; index++) {
+      const piece = pieces[index];
+      for (const stat of STATS) {
+        const value = finiteInteger(piece?.baseStats?.[stat]);
+        if (value === null) {
+          errors.push(`witness.pieces[${index}].baseStats.${stat} must be a safe integer`);
+        } else {
+          armorTotals[stat] += value;
+        }
+      }
+
+      const assignment = Array.isArray(tuning) ? tuning[index] : null;
+      const mode = assignment?.mode;
+      if (mode === "+3" || mode === "plus3") {
+        const masterworkStats = resolveMasterworkStats(piece);
+        if (!masterworkStats) {
+          errors.push(`witness tuning ${index} has no verifiable Balanced stat set`);
+        } else {
+          for (const stat of masterworkStats) armorTotals[stat] += 1;
+          plus3Count++;
+        }
+      } else if (mode === "+5-5" || mode === "shift") {
+        if (!STATS.includes(assignment?.from)
+            || !STATS.includes(assignment?.to)
+            || assignment.from === assignment.to) {
+          errors.push(`witness tuning ${index} has an invalid directional assignment`);
+        } else {
+          armorTotals[assignment.from] -= 5;
+          armorTotals[assignment.to] += 5;
+        }
+      } else {
+        errors.push(`witness tuning ${index} is missing or unknown`);
+      }
+
+      const mod = mods?.[index] ?? mods?.[String(index)] ?? null;
+      if (mod !== null && mod !== undefined) {
+        const size = finiteInteger(mod.size);
+        if (![5, 10].includes(size) || !STATS.includes(mod.stat)) {
+          errors.push(`witness armor mod ${index} is invalid`);
+        } else {
+          armorTotals[mod.stat] += size;
+          if (size === 5) plus5ModCount++;
+          else plus10ModCount++;
+        }
+      }
+    }
+  }
+
+  if (["solve", "calculateReachability"].includes(problemSpec?.operation)) {
+    if (plus3Count !== problemSpec.budget?.numPlus3) {
+      errors.push("witness Balanced tuning count does not match ProblemSpec budget");
+    }
+    if (plus5ModCount !== problemSpec.budget?.numPlus5
+        || plus10ModCount !== problemSpec.budget?.numPlus10) {
+      errors.push("witness armor mod count does not match ProblemSpec budget");
+    }
+  }
+
+  const fragments = problemSpec?.constraintModel?.fragments
+    || Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const visibleTotals = Object.fromEntries(STATS.map(stat => [
+    stat,
+    visibleStatFromArmor(armorTotals[stat], fragments[stat]),
+  ]));
+  const valid = errors.length === 0;
+  const verifiedWitness = valid ? {
+    ...witness,
+    totals: { ...armorTotals },
+    armorTotals: { ...armorTotals },
+    visibleTotals: { ...visibleTotals },
+  } : null;
+  return {
+    valid,
+    errors,
+    armorTotals,
+    visibleTotals,
+    witness: verifiedWitness,
+  };
+}
+
 export function createResultCertificate({
   status,
   executionStatus = EXECUTION_STATUS.NOT_APPLICABLE,
   problemSpec,
   witness = null,
   proof = {},
+  verification = null,
   message = null,
 } = {}) {
   if (!RESULT_STATUS_VALUES.has(status)) {
@@ -409,17 +604,45 @@ export function createResultCertificate({
   if (!EXECUTION_STATUS_VALUES.has(executionStatus)) {
     throw new TypeError(`unknown Solver V3 execution status: ${executionStatus}`);
   }
+  const resolvedVerification = verification
+    || (witness ? verifyWitness(problemSpec, witness) : null);
+  const verifiedWitness = resolvedVerification?.valid
+    ? resolvedVerification.witness
+    : null;
+  let verifiedStatus = status;
+  if (status === RESULT_STATUS.EXACT_TARGET_PROVEN
+      && (!verifiedWitness || !matchesExactTarget(
+        verifiedWitness,
+        problemSpec?.constraintModel,
+        problemSpec?.constraintModel?.targetDomain,
+      ))) {
+    verifiedStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED;
+  } else if (status === RESULT_STATUS.RULE_FEASIBLE_PROVEN
+      && witness
+      && (!verifiedWitness || !satisfiesConstraintModel(
+        verifiedWitness,
+        problemSpec?.constraintModel,
+        problemSpec?.constraintModel?.targetDomain,
+      ))) {
+    verifiedStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED;
+  }
   return {
     schemaVersion: SOLVER_V3_SCHEMA_VERSION,
-    status,
+    status: verifiedStatus,
     executionStatus,
-    canonicalId: createCanonicalId(witness),
+    canonicalId: createCanonicalId(verifiedWitness),
     problem: {
       operation: problemSpec?.operation || null,
       constraintModel: problemSpec?.constraintModel || null,
       budget: problemSpec?.budget || null,
     },
     proof: { ...proof },
+    witnessVerification: resolvedVerification ? {
+      valid: resolvedVerification.valid,
+      errors: [...resolvedVerification.errors],
+      armorTotals: { ...resolvedVerification.armorTotals },
+      visibleTotals: { ...resolvedVerification.visibleTotals },
+    } : null,
     message,
   };
 }

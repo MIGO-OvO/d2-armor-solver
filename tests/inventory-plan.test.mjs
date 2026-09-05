@@ -4,6 +4,7 @@ import test from "node:test";
 import { ARCHETYPES, BASE_CONFIGS, createExoticConfig } from "../src/core/armor-model.mjs";
 import { rankInventoryPlans, assignmentCanReachExact } from "../src/core/inventory-plan.mjs";
 import { runSolver } from "../src/core/solver.mjs";
+import { createProblemSpec } from "../src/core/solver-v3-contract.mjs";
 import { normalizeDimItem, parseCsv } from "../src/core/dim-csv.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
@@ -222,7 +223,14 @@ const EXOTIC_SETTINGS = {
 const SOLVE_TARGET = { health: 90, melee: 60, grenade: 45, super: 75, class: 60, weapons: 120 };
 
 function solveExoticSolution() {
-  return runSolver(SOLVE_TARGET, 0, 0, 0, {}, EXOTIC_SETTINGS)[0];
+  return runSolver(createProblemSpec({
+    target: SOLVE_TARGET,
+    numPlus5: 0,
+    numPlus10: 0,
+    numPlus3: 0,
+    pieces: [EXOTIC_SETTINGS.config],
+    exoticSettings: EXOTIC_SETTINGS,
+  }))[0];
 }
 
 const DIM_HEADER = [

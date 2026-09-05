@@ -53,6 +53,36 @@ test("solver returns a reproducible candidate through the engine interface", () 
   assert.equal(solutions.certificate.canonicalId, best.canonicalId);
 });
 
+test("visible-domain solving certifies recomputed Armor and visible totals", () => {
+  const fragments = {
+    health: 10,
+    melee: -10,
+    grenade: 20,
+    super: -20,
+    class: 10,
+    weapons: -10,
+  };
+  const target = Object.fromEntries(STATS.map(stat => [
+    stat,
+    Math.max(0, Math.min(200, DEFAULT_TARGETS[stat] + fragments[stat])),
+  ]));
+  const solutions = solveLoadout({
+    target,
+    fragments,
+    targetDomain: "visible",
+    constraints: { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+    numPlus5: 0,
+    numPlus10: 5,
+    numPlus3: 0,
+  });
+
+  assert.equal(solutions.status, RESULT_STATUS.EXACT_TARGET_PROVEN);
+  assert.deepEqual(solutions[0].armorTotals, DEFAULT_TARGETS);
+  assert.deepEqual(solutions[0].visibleTotals, target);
+  assert.deepEqual(solutions.certificate.witnessVerification.armorTotals, DEFAULT_TARGETS);
+  assert.deepEqual(solutions.certificate.witnessVerification.visibleTotals, target);
+});
+
 test("inline Adapter and direct ArmorEngine return the same canonical witness", async () => {
   const payload = {
     target: DEFAULT_TARGETS,

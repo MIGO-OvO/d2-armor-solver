@@ -6,7 +6,10 @@ import {
   findBestGlobalWitness,
   findExactTargetWitnesses,
 } from "./exact-target-oracle.mjs";
-import { createCanonicalId } from "./solver-v3-contract.mjs";
+import {
+  createCanonicalId,
+  getArmorSolverInput,
+} from "./solver-v3-contract.mjs";
 
 const modifierAllocationCache = new Map();
 
@@ -663,7 +666,18 @@ export function farmabilityScore(config, exoticIndex = null) {
 const REFINEMENT_CANDIDATE_LIMIT = 192;
 const LOCAL_SEARCH_CANDIDATE_LIMIT = 12;
 
-export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, exoticSettings = null, runtimeOptions = {}) {
+export function runSolver(problemSpec) {
+  const {
+    target,
+    constraints,
+    budget: { numPlus5, numPlus10, numPlus3 },
+    runtimeOptions,
+    fixedConfig,
+    exoticSelection,
+  } = getArmorSolverInput(problemSpec);
+  const exoticSettings = fixedConfig
+    ? { ...(exoticSelection || {}), config: fixedConfig }
+    : null;
   // Search the exact target independently of all heuristic ranking and
   // refinement limits. A returned witness proves reachability; only a miss
   // falls through to the deterministic fuzzy/near-target search below.

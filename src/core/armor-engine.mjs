@@ -15,6 +15,7 @@ import {
   createResultCertificate,
   matchesExactTarget,
   satisfiesConstraintModel,
+  verifyWitness,
 } from "./solver-v3-contract.mjs";
 import { analyzeUpgradeCandidates } from "./upgrade-optimizer.mjs";
 
@@ -26,15 +27,17 @@ function certificateForWitness({
   proof,
   emptyStatus = RESULT_STATUS.SEARCH_LIMIT_REACHED,
 }) {
-  let status = emptyStatus;
+  const verification = witness ? verifyWitness(problemSpec, witness) : null;
+  const verifiedWitness = verification?.valid ? verification.witness : null;
+  let status = witness ? RESULT_STATUS.SEARCH_LIMIT_REACHED : emptyStatus;
   if (!problemSpec.valid) status = RESULT_STATUS.INVALID_INPUT;
-  else if (witness && matchesExactTarget(
-    witness,
+  else if (verifiedWitness && matchesExactTarget(
+    verifiedWitness,
     problemSpec.constraintModel,
     witnessDomain,
   )) status = RESULT_STATUS.EXACT_TARGET_PROVEN;
-  else if (witness && satisfiesConstraintModel(
-    witness,
+  else if (verifiedWitness && satisfiesConstraintModel(
+    verifiedWitness,
     problemSpec.constraintModel,
     witnessDomain,
   )) status = RESULT_STATUS.RULE_FEASIBLE_PROVEN;
@@ -48,16 +51,23 @@ function certificateForWitness({
     status,
     executionStatus,
     problemSpec,
-    witness,
+    witness: verifiedWitness,
     proof,
+    verification,
     message: problemSpec.valid ? null : problemSpec.errors.join("; "),
   });
 }
 
-function annotateWitnesses(witnesses) {
+function annotateWitnesses(witnesses, problemSpec) {
   for (const witness of witnesses || []) {
     if (witness && typeof witness === "object") {
-      witness.canonicalId = createCanonicalId(witness);
+      const verification = verifyWitness(problemSpec, witness);
+      if (verification.valid) {
+        witness.totals = { ...verification.armorTotals };
+        witness.armorTotals = { ...verification.armorTotals };
+        witness.visibleTotals = { ...verification.visibleTotals };
+        witness.canonicalId = createCanonicalId(verification.witness);
+      }
     }
   }
   return witnesses;
@@ -96,6 +106,7 @@ export function solveLoadout({
     numPlus3,
     pieces: exoticSettings?.config ? [exoticSettings.config] : [],
     runtimeOptions,
+    exoticSettings,
   });
   if (!problemSpec.valid) {
     return attachResultCertificate([], certificateForWitness({
@@ -106,15 +117,7 @@ export function solveLoadout({
       proof: { method: "input-validation", exhaustive: false },
     }));
   }
-  const solutions = annotateWitnesses(runSolver(
-    target,
-    numPlus5,
-    numPlus10,
-    numPlus3,
-    constraints,
-    exoticSettings,
-    runtimeOptions,
-  ));
+  const solutions = annotateWitnesses(runSolver(problemSpec), problemSpec);
   return attachResultCertificate(solutions, certificateForWitness({
     problemSpec,
     witness: solutions[0] || null,
@@ -138,12 +141,13 @@ export function calculateReachability({
   lockedTargets,
   probeTarget = null,
 }) {
+  const targetForSpec = probeTarget || lockedTargets;
   const constraints = {
-    exact: Object.fromEntries(Object.keys(lockedTargets || {}).map(stat => [stat, true])),
+    exact: Object.fromEntries(Object.keys(targetForSpec || {}).map(stat => [stat, true])),
   };
   const problemSpec = createProblemSpec({
     operation: "calculateReachability",
-    target: lockedTargets,
+    target: targetForSpec,
     fragments,
     constraints,
     targetDomain: STAT_DOMAIN.VISIBLE,
@@ -181,20 +185,28 @@ export function calculateReachability({
     visibleTarget: probeTarget,
   }) : null;
   if (probe) result.probe = probe;
+  const probeVerification = probe?.witness
+    ? verifyWitness(problemSpec, probe.witness)
+    : null;
   const hasClampBoundary = [
     ...Object.values(lockedTargets || {}),
     ...Object.values(probeTarget || {}),
   ].some(value => Number(value) === 0 || Number(value) === 200);
   const hasIntervalProof = result.intervalProof === true || probe?.intervalProof === true;
   const clampSearchLimited = hasClampBoundary && !hasIntervalProof;
+  const probeStatus = probe?.witness && !probeVerification?.valid
+    ? RESULT_STATUS.SEARCH_LIMIT_REACHED
+    : probe?.status;
   return attachResultCertificate(result, createResultCertificate({
     status: clampSearchLimited
       ? RESULT_STATUS.SEARCH_LIMIT_REACHED
-      : probe?.status || (result.feasible
+      : probeStatus || (result.feasible
         ? RESULT_STATUS.RULE_FEASIBLE_PROVEN
         : RESULT_STATUS.INFEASIBLE_PROVEN),
     executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
     problemSpec,
+    witness: probeVerification?.witness || null,
+    verification: probeVerification,
     proof: {
       method: "reachability-dynamic-programming",
       exhaustive: clampSearchLimited ? false : (probe ? probe.exhaustive : true),
@@ -254,7 +266,10 @@ export function analyzeUpgrade({
     onlyPlus5Tuning,
     constraints,
   );
-  const witness = result.plan || result.baseline || null;
+  const witness = result.plan || (result.baseline ? {
+    pieces: result.pieces,
+    evaluation: result.baseline,
+  } : null);
   if (result.plan) result.plan.canonicalId = createCanonicalId(result.plan);
   const execution = assessExecution(
     result.plan?.pieces || result.pieces,

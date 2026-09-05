@@ -8,6 +8,8 @@ import {
 import {
   compareIntegerTuples,
   createCanonicalId,
+  createProblemSpec,
+  STAT_DOMAIN,
 } from "./solver-v3-contract.mjs";
 import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
 
@@ -927,10 +929,19 @@ function findFromScratchUpgradeWitness(
   const exoticSettings = exoticIndex === undefined
     ? null
     : { config: getUpgradeConfig(pieces[exoticIndex]) };
-  const solutions = runSolver(
-    scoringTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3,
-    constraints, exoticSettings, { maxExactSolutions: 1 }
-  );
+  const solverProblem = createProblemSpec({
+    operation: "solve",
+    target: scoringTarget,
+    constraints,
+    targetDomain: STAT_DOMAIN.ARMOR,
+    numPlus5: budget.numPlus5,
+    numPlus10: budget.numPlus10,
+    numPlus3: budget.numPlus3,
+    pieces: exoticSettings?.config ? [exoticSettings.config] : [],
+    exoticSettings,
+    runtimeOptions: { maxExactSolutions: 1 },
+  });
+  const solutions = runSolver(solverProblem);
   let bestPlan = null;
 
   for (const solution of solutions) {
