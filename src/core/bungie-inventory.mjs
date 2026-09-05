@@ -339,6 +339,7 @@ export function normalizeApiItem(apiItem, context = {}) {
     // plugs (DIM getArmor3TuningStat). null does NOT mean "guess": confidence
     // "unknown" means the data could not establish it and the solver must not
     // pretend it knows (upgrade-optimizer no longer falls back to a guess).
+    tunedStat: tuningInfo.fixedTuningStat,
     tuningStat: tuningInfo.fixedTuningStat,
     allowedTuningStats: tuningInfo.allowedTuningStats,
     dataConfidence,

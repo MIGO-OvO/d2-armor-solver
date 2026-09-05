@@ -292,6 +292,7 @@ export function normalizeDimItem(record) {
     exotic: EXOTIC_RARITY_NAMES.has(String(record.Rarity || "").trim().toLowerCase()) || Boolean(exoticClassItem),
     archetypeId,
     tertiary,
+    tunedStat: tuningStat,
     tuningStat,
     baseStats,
     masterworkTier: parseInt(record["Masterwork Tier"], 10) || 0,

@@ -17,6 +17,7 @@ import {
 import { ARCHETYPES, STATS } from "./armor-model.mjs";
 import { getEffectiveBaseStats } from "./dim-csv.mjs";
 import { SOCKET_ROLE, CANDIDATE_STATE } from "./armor-sockets.mjs";
+import { EXECUTION_STATUS } from "./solver-v3-contract.mjs";
 
 export const STAT_MOD_ENERGY_COST = { 5: 1, 10: 3 };
 
@@ -105,6 +106,7 @@ function assignPiece({
   availablePlugHashes,
 }) {
   const unassigned = [];
+  const unverified = [];
   const operations = [];
   const currentStatHash = currentStatModHash(item);
   const currentTuning = currentTuningHash(item);
@@ -158,6 +160,12 @@ function assignPiece({
       if (!insert.ok) {
         unassigned.push({ index, slot, kind: "stat", plugHash: desiredStatHash, reason: "plugUnavailable" });
       } else {
+        if (insert.unverified) {
+          unverified.push({
+            index, slot, kind: "stat", plugHash: desiredStatHash,
+            reason: "candidateAvailabilityUnknown",
+          });
+        }
         const capacity = Number(item?.energy?.capacity) || 0;
         const used = Number(item?.energy?.used) || 0;
         const currentCost = STAT_MOD_ENERGY_COST[item?.armorModSize] || 0;
@@ -189,6 +197,14 @@ function assignPiece({
         if (!insert.ok) {
           unassigned.push({ index, slot, kind: "tuning", plugHash: desiredTuningHash, reason: "plugUnavailable" });
         } else {
+          if (compatible.unverified || insert.unverified) {
+            unverified.push({
+              index, slot, kind: "tuning", plugHash: desiredTuningHash,
+              reason: compatible.unverified
+                ? "tuningCapabilityUnknown"
+                : "candidateAvailabilityUnknown",
+            });
+          }
           operations.push({
             itemId: String(item.id), socketIndex: tuningSocket.socketIndex,
             plugItemHash: desiredTuningHash, previousPlugHash: currentTuning || null,
@@ -202,7 +218,7 @@ function assignPiece({
   // established: the tuning socket is left untouched (no write, no clear), and
   // the executor reports the unverified tuning separately.
 
-  return { operations, unassigned };
+  return { operations, unassigned, unverified };
 }
 
 // Order the per-piece operations deterministically: stat socket writes first,
@@ -255,6 +271,7 @@ export function assignArmorMods({
   const getMod = index => Array.isArray(modList) ? modList[index] : modList[index] ?? null;
   const operationsByPiece = [];
   const unassignedMods = [];
+  const unverifiedMods = [];
   const actualTotals = Object.fromEntries(STATS.map(stat => [stat, 0]));
   const projectedTotals = Object.fromEntries(STATS.map(stat => [stat, 0]));
   const resolvedCounts = { stat: 0, tuning: 0 };
@@ -284,6 +301,7 @@ export function assignArmorMods({
     });
     operationsByPiece.push(result.operations);
     unassignedMods.push(...result.unassigned);
+    unverifiedMods.push(...result.unverified);
     if (statAssignment?.size > 0) resolvedCounts.stat++;
     if (tuningAssignment) resolvedCounts.tuning++;
 
@@ -302,6 +320,12 @@ export function assignArmorMods({
   return {
     valid: unassignedMods.length === 0,
     unassignedMods,
+    unverifiedMods,
+    executionStatus: unassignedMods.length > 0
+      ? EXECUTION_STATUS.BLOCKED
+      : unverifiedMods.length > 0
+        ? EXECUTION_STATUS.UNVERIFIED
+        : EXECUTION_STATUS.VERIFIED,
     // One plug write per changed socket, in stat-then-tuning order. Writes are
     // direct socket replacements (InsertSocketPlugFree is atomic per socket,
     // so no empty-first pass is needed for armor stat/tuning sockets; add one

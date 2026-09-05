@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   analyzeUpgradeCandidates,
+  applyUpgradeEvaluationToPieces,
   applyManualUpgradeModifiers,
   compareUpgradeMetrics,
   compareUpgradePlans,
@@ -11,6 +12,7 @@ import {
   evaluateUpgradePieces,
   getUpgradeConfig,
   getUpgradeMetrics,
+  getUpgradeModifierBudget,
   getUpgradePieceIdentity,
   getUpgradeReplacements,
   normalizeUpgradePiece,
@@ -214,13 +216,22 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
     )
     : piece);
 
-  const analysis = analyzeUpgradeCandidates(broken, target, fragments, true);
+  const exactRules = { exact: Object.fromEntries(STATS.map(stat => [stat, true])) };
+  const analysis = analyzeUpgradeCandidates(
+    broken, target, fragments, true, [], false, exactRules,
+  );
   assert.ok(analysis.plan, "a two-piece swap exists and must be reported");
   assert.equal(analysis.plan.metrics.allReached, true);
   assert.equal(
     analysis.plan.replacementCount, 2,
     `expected the exact 2-swap plan, got ${analysis.plan.replacementCount} replacements`
   );
+  assert.deepEqual(analysis.plan.replacementProof, {
+    method: "replacement-count-iterative-deepening",
+    examinedThrough: 2,
+    complete: true,
+    minimal: true,
+  });
   assert.equal(
     analysis.plan.evaluation.finalTotals.weapons, target.weapons,
     "the plan must land exactly on the target"
@@ -228,7 +239,7 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
 
   for (const requiredStats of [["health"], STATS]) {
     const requiredAnalysis = analyzeUpgradeCandidates(
-      broken, target, fragments, true, requiredStats
+      broken, target, fragments, true, requiredStats, false, exactRules,
     );
     const label = requiredStats.length === STATS.length ? "all stats" : requiredStats[0];
     assert.ok(requiredAnalysis.plan,
@@ -240,6 +251,56 @@ test("a two-piece swap that exactly reaches the target is found, not over-replac
       `${label} required: expected 2 replacements, got ${requiredAnalysis.plan.replacementCount}`
     );
   }
+});
+
+test("corrected Tuning reassignment lowers the cooperating fixture to two replacements", () => {
+  const target = {
+    health: 26, melee: 70, grenade: 101, super: 46, class: 130, weapons: 110,
+  };
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const specs = [
+    ["Demolitionist", "weapons", "melee", "grenade", 10, "class", true],
+    ["Powerhouse", "melee", "super", "melee", 0, "class", true],
+    ["Brawler", "grenade", "super", "health", 10, "super", false],
+    ["Reaver", "health", "health", "grenade", 5, "weapons", false],
+    ["Gunner", "class", "melee", "health", 5, "super", false],
+  ];
+  const pieces = specs.map(([
+    archetypeId, tertiary, tuningFrom, tuningTo,
+    armorModSize, armorModStat, locked,
+  ], index) => {
+    const config = BASE_CONFIGS.find(candidate =>
+      candidate.archetype === archetypeId && candidate.tertiary === tertiary);
+    return normalizeUpgradePiece({
+      archetypeId,
+      tertiary,
+      tuningMode: index === 4 ? "plus3" : "shift",
+      tuningFrom,
+      tuningTo,
+      armorModSize,
+      armorModStat,
+      locked,
+      baseStats: { ...config.baseStats },
+    }, index);
+  });
+  const analysis = analyzeUpgradeCandidates(
+    pieces,
+    target,
+    fragments,
+    true,
+    STATS,
+    false,
+    { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+  );
+
+  assert.equal(analysis.plan?.metrics.allReached, true);
+  assert.equal(analysis.plan.replacementCount, 2);
+  assert.deepEqual(analysis.plan.replacementProof, {
+    method: "replacement-count-iterative-deepening",
+    examinedThrough: 2,
+    complete: true,
+    minimal: true,
+  });
 });
 
 // Regression for the real DIM-import scenario reported in the UI. The current
@@ -279,7 +340,13 @@ test("upgrade planning uses full-masterwork projections for kept DIM pieces", ()
   };
 
   const analysis = analyzeUpgradeCandidates(
-    pieces, targets, fragments, true, [], true
+    pieces,
+    targets,
+    fragments,
+    true,
+    [],
+    true,
+    { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
   );
 
   assert.deepEqual(analysis.enteredBaseline.finalTotals, {
@@ -291,6 +358,8 @@ test("upgrade planning uses full-masterwork projections for kept DIM pieces", ()
     analysis.plan.replacementCount, 2,
     "only legs and class item need farming after retained pieces are projected"
   );
+  assert.notEqual(analysis.plan.replacementProof?.minimal, true,
+    "a visible target at the 0 clamp boundary is not a point proof");
   assert.deepEqual(
     analysis.plan.replacements.map(replacement => replacement.slotIndex).sort(),
     [3, 4]
@@ -413,6 +482,123 @@ test("Exotic tuning stays free while Legendary +5 destinations stay fixed", () =
   assert.equal(legendaryResult.metrics.allReached, false,
     "the same +5 destination remains fixed on Legendary armor");
   assert.equal(legendaryResult.tuningAssignments[0].to, "class");
+});
+
+function createReassignTuningFixture() {
+  return Array.from({ length: 5 }, (_, index) => normalizeUpgradePiece({
+    ...createDefaultUpgradePiece(index),
+    tunedStat: ["melee", "grenade", "super", "class", "weapons"][index],
+    tuningMode: "shift",
+    tuningFrom: "health",
+    tuningTo: ["melee", "grenade", "super", "class", "weapons"][index],
+    armorModSize: 0,
+  }, index));
+}
+
+function exactTotalsForAssignments(pieces) {
+  const zeroTarget = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  return evaluateUpgradePieces(
+    pieces,
+    zeroTarget,
+    zeroTarget,
+    false,
+  ).finalTotals;
+}
+
+test("reassigning existing Balanced armor to directional needs zero replacements", () => {
+  const directional = createReassignTuningFixture();
+  const current = directional.map((piece, index) => index === 0
+    ? normalizeUpgradePiece({ ...piece, tuningMode: "plus3" }, index)
+    : piece);
+  const target = exactTotalsForAssignments(directional);
+  const evaluation = evaluateUpgradePieces(
+    current,
+    target,
+    Object.fromEntries(STATS.map(stat => [stat, 0])),
+    true,
+    [],
+    false,
+    { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+  );
+  const configured = applyUpgradeEvaluationToPieces(current, evaluation);
+
+  assert.equal(evaluation.metrics.allReached, true);
+  assert.ok(evaluation.tuningAssignments.every(assignment => assignment.mode === "+5-5"));
+  assert.equal(getUpgradeReplacements(current, configured).length, 0);
+});
+
+test("reassigning existing directional armor to Balanced needs zero replacements", () => {
+  const current = createReassignTuningFixture();
+  const balanced = current.map((piece, index) => index === 0
+    ? normalizeUpgradePiece({ ...piece, tuningMode: "plus3" }, index)
+    : piece);
+  const target = exactTotalsForAssignments(balanced);
+  const evaluation = evaluateUpgradePieces(
+    current,
+    target,
+    Object.fromEntries(STATS.map(stat => [stat, 0])),
+    true,
+    [],
+    false,
+    { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+  );
+  const configured = applyUpgradeEvaluationToPieces(current, evaluation);
+
+  assert.equal(evaluation.metrics.allReached, true);
+  assert.ok(evaluation.tuningAssignments.some(assignment => assignment.mode === "+3"));
+  assert.equal(getUpgradeReplacements(current, configured).length, 0);
+});
+
+test("changing a Legendary tunedStat is a replacement", () => {
+  const [before] = createReassignTuningFixture();
+  const after = normalizeUpgradePiece({
+    ...before,
+    tunedStat: "grenade",
+    tuningMode: "plus3",
+  }, 0);
+  assert.equal(getUpgradeReplacements([before], [after]).length, 1);
+});
+
+test("changing an Exotic directional destination is assignment-only", () => {
+  const before = normalizeUpgradePiece({
+    ...createDefaultUpgradePiece(0),
+    exotic: true,
+    allowedTuningStats: [...STATS],
+    tuningMode: "shift",
+    tuningFrom: "health",
+    tuningTo: "melee",
+  }, 0);
+  const after = normalizeUpgradePiece({
+    ...before,
+    tuningFrom: "melee",
+    tuningTo: "grenade",
+  }, 0);
+  assert.equal(getUpgradeReplacements([before], [after]).length, 0);
+});
+
+test("reassign budget is not fixed by current Balanced count and onlyPlus5 forbids it", () => {
+  const pieces = createReassignTuningFixture().map((piece, index) => index < 3
+    ? normalizeUpgradePiece({ ...piece, tuningMode: "plus3" }, index)
+    : piece);
+  const flexible = getUpgradeModifierBudget(pieces, { reassignModifiers: true });
+  const onlyPlus5 = getUpgradeModifierBudget(pieces, {
+    reassignModifiers: true,
+    onlyPlus5Tuning: true,
+  });
+  assert.equal(flexible.numPlus3, null);
+  assert.deepEqual(flexible.allowedPlus3Counts, [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(onlyPlus5.allowedPlus3Counts, [0]);
+
+  const target = exactTotalsForAssignments(createReassignTuningFixture());
+  const evaluation = evaluateUpgradePieces(
+    pieces,
+    target,
+    Object.fromEntries(STATS.map(stat => [stat, 0])),
+    true,
+    [],
+    true,
+  );
+  assert.ok(evaluation.tuningAssignments.every(assignment => assignment.mode !== "+3"));
 });
 
 // "Only +5/-5" restricts every proposed plan and candidate, while the entered
@@ -552,8 +738,7 @@ test("plan refinement counts swaps against the equipped loadout, not its seed", 
   const seed = equipped.map((piece, index) => index < 2
     ? normalizeUpgradePiece({
       ...piece,
-      tuningTo: STATS.find(stat =>
-        stat !== piece.tuningFrom && stat !== piece.tuningTo),
+      tunedStat: STATS.find(stat => stat !== piece.tunedStat),
     }, index)
     : { ...piece });
 
@@ -590,8 +775,7 @@ test("plan refinement never reduces swaps by breaking a must-meet constraint", (
   const seed = equipped.map((piece, index) => index < 3
     ? normalizeUpgradePiece({
       ...piece,
-      tuningTo: STATS.find(stat =>
-        stat !== piece.tuningFrom && stat !== piece.tuningTo),
+      tunedStat: STATS.find(stat => stat !== piece.tunedStat),
     }, index)
     : { ...piece });
   const evaluateRequired = candidatePieces => {

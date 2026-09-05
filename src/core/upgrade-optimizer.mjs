@@ -5,6 +5,13 @@ import { getEffectiveBaseStats, inferArchetypeFromStats } from "./dim-csv.mjs";
 import {
   compareScoreRanks, evaluateConfig, runSolver, scoreStats, scoreStatsRank,
 } from "./solver.mjs";
+import {
+  compareIntegerTuples,
+  createCanonicalId,
+  createProblemSpec,
+  STAT_DOMAIN,
+} from "./solver-v3-contract.mjs";
+import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
 
 export const UPGRADE_SLOTS = [
   { id:'helmet', labels:['头盔','頭盔','Helmet'] },
@@ -14,6 +21,26 @@ export const UPGRADE_SLOTS = [
   { id:'classItem', labels:['职业物品','職業物品','Class Item'] },
 ];
 export const DEFAULT_UPGRADE_ARCHETYPES = ['Brawler', 'Grenadier', 'Paragon', 'Specialist', 'Gunner'];
+
+function normalizeTuningStats(values) {
+  if (!Array.isArray(values)) return null;
+  return [...new Set(values)]
+    .filter(stat => STATS.includes(stat))
+    .sort((left, right) => STATS.indexOf(left) - STATS.indexOf(right));
+}
+
+export function getUpgradeTuningCapability(piece, onlyPlus5Tuning = false) {
+  const allowedDirectionalStats = piece.exotic
+    ? normalizeTuningStats(piece.allowedTuningStats)
+    : STATS.includes(piece.tunedStat)
+      ? [piece.tunedStat]
+      : null;
+  return {
+    allowBalanced: !onlyPlus5Tuning,
+    allowedDirectionalStats,
+    complete: Array.isArray(allowedDirectionalStats),
+  };
+}
 
 export function createDefaultUpgradePiece(slotIndex) {
   const archetypeId = DEFAULT_UPGRADE_ARCHETYPES[slotIndex] || ARCHETYPES[slotIndex]?.id || ARCHETYPES[0].id;
@@ -28,6 +55,8 @@ export function createDefaultUpgradePiece(slotIndex) {
     tuningMode: 'shift',
     tuningFrom,
     tuningTo,
+    tunedStat: tuningTo,
+    allowedTuningStats: [tuningTo],
     armorModSize: 10,
     armorModStat: archetype.secondary,
     exotic: false,
@@ -62,30 +91,66 @@ export function normalizeUpgradePiece(piece, slotIndex) {
       (normalized.baseStats[stat] || 0) + (frameworkStats.has(stat) ? 0 : 5 - currentTier),
     ]));
   }
+  normalized.exotic = Boolean(normalized.exotic);
   if (!['shift', 'plus3'].includes(normalized.tuningMode)) normalized.tuningMode = 'shift';
+  const suppliedAllowedTuningStats = normalizeTuningStats(piece?.allowedTuningStats);
+  let legacyTunedStat = fallback.tunedStat;
+  if (Object.prototype.hasOwnProperty.call(piece || {}, "tunedStat")) {
+    legacyTunedStat = piece.tunedStat;
+  } else if (Object.prototype.hasOwnProperty.call(piece || {}, "tuningStat")) {
+    legacyTunedStat = piece.tuningStat;
+  } else if (!normalized.exotic && STATS.includes(piece?.tuningTo)) {
+    legacyTunedStat = piece.tuningTo;
+  }
+  normalized.tunedStat = !normalized.exotic && STATS.includes(legacyTunedStat)
+    ? legacyTunedStat
+    : null;
+  normalized.allowedTuningStats = normalized.exotic
+    ? suppliedAllowedTuningStats
+      ?? (normalized.dataConfidence?.tuning === "unknown" ? null : [...STATS])
+    : normalized.tunedStat
+      ? [normalized.tunedStat]
+      : null;
   // An imported piece whose fixed tuning stat could not be established keeps
   // null tuning fields (no fabricated direction); the manual totals skip it
   // and the equip path rejects it with "cannot confirm tuning" (handoff 3.4).
-  if (normalized.tuningUnknown) {
+  if (normalized.tuningMode === 'plus3') {
+    normalized.tuningUnknown = false;
+    normalized.tuningFrom = null;
+    normalized.tuningTo = null;
+  } else if (normalized.tuningUnknown
+      || (!normalized.exotic && !normalized.tunedStat)
+      || (normalized.exotic && !normalized.allowedTuningStats?.length)) {
+    normalized.tuningUnknown = true;
     normalized.tuningTo = null;
     normalized.tuningFrom = null;
   } else {
-    if (!STATS.includes(normalized.tuningFrom)) normalized.tuningFrom = archetype.primary;
-    if (!STATS.includes(normalized.tuningTo) || normalized.tuningTo === normalized.tuningFrom) {
-      normalized.tuningTo = STATS.find(stat => stat !== normalized.tuningFrom);
+    normalized.tuningUnknown = false;
+    if (!normalized.exotic) normalized.tuningTo = normalized.tunedStat;
+    if (!STATS.includes(normalized.tuningTo)
+        || (normalized.exotic && !normalized.allowedTuningStats.includes(normalized.tuningTo))) {
+      normalized.tuningTo = normalized.allowedTuningStats[0];
+    }
+    if (!STATS.includes(normalized.tuningFrom)
+        || normalized.tuningFrom === normalized.tuningTo) {
+      normalized.tuningFrom = STATS.find(stat => stat !== normalized.tuningTo);
     }
   }
   normalized.tuningUnknown = Boolean(normalized.tuningUnknown);
   normalized.armorModSize = [0, 5, 10].includes(Number(normalized.armorModSize))
     ? Number(normalized.armorModSize) : 10;
   if (!STATS.includes(normalized.armorModStat)) normalized.armorModStat = archetype.secondary;
-  normalized.exotic = Boolean(normalized.exotic);
   normalized.locked = normalized.exotic || Boolean(normalized.locked);
   // Exotic Class Item perks are a fixed roll on the item. Keep them on the
   // piece when known (Bungie API path); CSV-only imports leave them null and
   // the stat frame still distinguishes rolls.
   normalized.primaryPerkId = normalized.primaryPerkId || null;
   normalized.secondaryPerkId = normalized.secondaryPerkId || null;
+  normalized.tuningAssignment = Object.freeze({
+    mode: normalized.tuningMode,
+    from: normalized.tuningFrom,
+    to: normalized.tuningTo,
+  });
   return normalized;
 }
 
@@ -103,6 +168,7 @@ export function createUpgradePieceFromItem(item, slotIndex) {
   const tertiary = item.tertiary && item.tertiary !== archetype.primary && item.tertiary !== archetype.secondary
     ? item.tertiary
     : STATS.find(stat => stat !== archetype.primary && stat !== archetype.secondary);
+  const exotic = Boolean(item.exotic);
   const tuningMode = item.tuningMode === "plus3" ? "plus3" : "shift";
   // The +5 destination is rolled onto the piece. For the Bungie path it comes
   // from the installed plug (item.tuningTo) or the fixed tuning stat derived
@@ -110,8 +176,16 @@ export function createUpgradePieceFromItem(item, slotIndex) {
   // is the "Tuning Stat" column. When neither is known the piece must NOT fall
   // back to a fabricated direction (handoff 3.4) — it carries tuningUnknown so
   // the plan/equip path can reject "cannot confirm tuning" instead of guessing.
-  const tuningTo = item.tuningTo || item.tuningStat || null;
-  const tuningUnknown = !tuningTo;
+  const tunedStat = !exotic
+    ? item.tunedStat || item.tuningTo || item.tuningStat || null
+    : null;
+  const allowedTuningStats = exotic
+    ? normalizeTuningStats(item.allowedTuningStats)
+    : tunedStat ? [tunedStat] : null;
+  const tuningTo = tuningMode === "plus3"
+    ? null
+    : item.tuningTo || tunedStat || allowedTuningStats?.[0] || null;
+  const tuningUnknown = tuningMode !== "plus3" && !tuningTo;
   const tuningFrom = STATS.includes(item.tuningFrom)
     ? item.tuningFrom
     : (tuningTo ? STATS.find(stat => stat !== tuningTo) : null);
@@ -128,10 +202,11 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     tuningMode,
     tuningFrom,
     tuningTo,
+    tunedStat,
     tuningUnknown,
     armorModSize,
     armorModStat,
-    exotic: Boolean(item.exotic),
+    exotic,
     locked: false,
     baseStats: { ...(
       item.effectiveBaseStats
@@ -151,6 +226,10 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     hash: item.hash,
     primaryPerkId: item.primaryPerkId || null,
     secondaryPerkId: item.secondaryPerkId || null,
+    sockets: item.sockets || [],
+    energy: item.energy || null,
+    allowedTuningStats,
+    dataConfidence: item.dataConfidence || null,
   }, slotIndex);
 }
 
@@ -210,9 +289,17 @@ export function resolveCurrentLoadoutTotals(pieces, fragments, exactTotals = nul
   return finalizeUpgradeTotals(getManualUpgradeArmorTotals(pieces), fragments);
 }
 
-export function getUpgradeModifierBudget(pieces) {
+export function getUpgradeModifierBudget(
+  pieces,
+  { reassignModifiers = false, onlyPlus5Tuning = false } = {},
+) {
+  const currentNumPlus3 = pieces.filter(piece => piece.tuningMode === 'plus3').length;
   return {
-    numPlus3: pieces.filter(piece => piece.tuningMode === 'plus3').length,
+    numPlus3: reassignModifiers ? null : currentNumPlus3,
+    currentNumPlus3,
+    allowedPlus3Counts: reassignModifiers
+      ? onlyPlus5Tuning ? [0] : Array.from({ length: pieces.length + 1 }, (_, count) => count)
+      : [currentNumPlus3],
     numPlus5: pieces.filter(piece => piece.armorModSize === 5).length,
     numPlus10: pieces.filter(piece => piece.armorModSize === 10).length,
   };
@@ -398,7 +485,7 @@ export function compareUpgradeMetrics(left, right) {
     const scoreRankOrder = compareScoreRanks(left.scoreRank, right.scoreRank);
     if (scoreRankOrder !== 0) return scoreRankOrder;
   }
-  return left.score - right.score;
+  return 0;
 }
 
 export function evaluateUpgradePieces(
@@ -437,26 +524,36 @@ export function evaluateUpgradePieces(
   };
   let evaluation = manualEvaluation;
   if (reassignModifiers) {
-    const budget = getUpgradeModifierBudget(pieces);
-    // Legendary +5 destinations are rolled onto the instance and stay pinned.
-    // Exotic armor can freely select both sides of its directional tuning.
-    const fixedTuningTargets = pieces.map(piece =>
-      piece.tuningMode === 'plus3' ? null : piece.exotic ? undefined : piece.tuningTo);
+    const budget = getUpgradeModifierBudget(pieces, {
+      reassignModifiers: true,
+      onlyPlus5Tuning,
+    });
+    const tuningCapabilities = pieces.map(piece =>
+      getUpgradeTuningCapability(piece, onlyPlus5Tuning));
     const automaticEvaluation = evaluateConfig(
-      configs, scoringTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3, constraints,
-      fixedTuningTargets
+      configs, scoringTarget, budget.numPlus5, budget.numPlus10, 0, constraints,
+      null,
+      // The legacy Upgrade outer search evaluates many thousands of candidate
+      // sets. It is migrated separately to replacement-count iterative
+      // deepening; until then, do not multiply the exact fixed-five DP cost by
+      // the old seed/hill-climb loop.
+      { skipExactJointSearch: true, tuningCapabilities },
     );
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
-    const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
     const manualMetrics = getUpgradeMetrics(
       manualFinal, targets, manualEvaluation.score, normalizedRequiredStats,
       manualEvaluation.rank, userConstraints, fragments
     );
-    const automaticMetrics = getUpgradeMetrics(
-      automaticFinal, targets, automaticEvaluation.score, normalizedRequiredStats,
-      automaticEvaluation.rank, userConstraints, fragments
-    );
-    if (compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) evaluation = automaticEvaluation;
+    if (automaticEvaluation) {
+      const automaticFinal = finalizeUpgradeTotals(automaticEvaluation.totals, fragments);
+      const automaticMetrics = getUpgradeMetrics(
+        automaticFinal, targets, automaticEvaluation.score, normalizedRequiredStats,
+        automaticEvaluation.rank, userConstraints, fragments
+      );
+      if (compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
+        evaluation = automaticEvaluation;
+      }
+    }
   }
   const finalTotals = finalizeUpgradeTotals(evaluation.totals, fragments);
   return {
@@ -477,11 +574,15 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
     const key = pieces.map(piece => [
       piece.archetypeId,
       piece.tertiary,
-      piece.tuningMode,
-      piece.tuningFrom,
-      piece.tuningTo,
+      piece.tunedStat,
+      piece.allowedTuningStats?.join(',') || "unknown",
       piece.armorModSize,
-      piece.armorModStat,
+      ...(reassignModifiers ? [] : [
+        piece.tuningMode,
+        piece.tuningFrom,
+        piece.tuningTo,
+        piece.armorModStat,
+      ]),
       ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
     ].join(':')).join('|') + '#' + Number(reassignModifiers) + '#' + Number(onlyPlus5Tuning) + '#' + constraintsKey;
     const cached = cache.get(key);
@@ -515,6 +616,8 @@ function getFullTargetSearchKey(
     ...pieces.flatMap(piece => [
       piece.archetypeId,
       piece.tertiary,
+      piece.tunedStat,
+      piece.allowedTuningStats?.join(',') || "unknown",
       piece.tuningMode,
       piece.tuningFrom,
       piece.tuningTo,
@@ -544,11 +647,9 @@ export function getUpgradePieceIdentity(piece) {
   return {
     archetype: config.archetype,
     tertiary: config.tertiary,
-    // The +5 destination is a random fixed roll on Legendary armor. Exotic
-    // armor is the exception: both sides can be selected, so changing its +5
-    // destination must not be reported as farming a replacement.
-    tuningTo: piece.tuningMode === 'plus3' || piece.exotic ? null : piece.tuningTo,
-    tuningMode: piece.tuningMode,
+    // Current mode/source/destination belong to the assignment. Only the
+    // Legendary roll's immutable directional capability belongs to identity.
+    tunedStat: piece.exotic ? null : piece.tunedStat || null,
     primaryPerkId: piece.primaryPerkId || null,
     secondaryPerkId: piece.secondaryPerkId || null,
   };
@@ -557,8 +658,7 @@ export function getUpgradePieceIdentity(piece) {
 export function sameUpgradeIdentity(left, right) {
   return left.archetype === right.archetype &&
     left.tertiary === right.tertiary &&
-    left.tuningMode === right.tuningMode &&
-    left.tuningTo === right.tuningTo &&
+    left.tunedStat === right.tunedStat &&
     left.primaryPerkId === right.primaryPerkId &&
     left.secondaryPerkId === right.secondaryPerkId;
 }
@@ -580,6 +680,9 @@ export function setUpgradePieceConfig(piece, slotIndex, config) {
   delete hypothetical.hash;
   delete hypothetical.masterworkTier;
   delete hypothetical.modifierInference;
+  delete hypothetical.tunedStat;
+  delete hypothetical.tuningStat;
+  delete hypothetical.allowedTuningStats;
   // A farmed class item has no fixed perk roll, so the source piece's perks
   // must not carry into the replacement candidate's identity.
   delete hypothetical.primaryPerkId;
@@ -688,7 +791,7 @@ export function compareUpgradePlans(left, right) {
   const leftNonTuningOnly = (left.replacements || []).filter(r => !r.tuningOnly).length;
   const rightNonTuningOnly = (right.replacements || []).filter(r => !r.tuningOnly).length;
   if (leftNonTuningOnly !== rightNonTuningOnly) return leftNonTuningOnly - rightNonTuningOnly;
-  return left.evaluation.score - right.evaluation.score;
+  return createCanonicalId(left).localeCompare(createCanonicalId(right));
 }
 
 export function chooseUpgradeTertiaries(
@@ -703,21 +806,24 @@ export function chooseUpgradeTertiaries(
 
   for (const archetypeIndex of archetypeIndices) {
     let bestConfig = null;
-    let bestScore = Infinity;
+    let bestRank = null;
     for (let tertiaryIndex = 0; tertiaryIndex < 4; tertiaryIndex++) {
       const config = BASE_CONFIGS[archetypeIndex * 4 + tertiaryIndex];
       const completedCount = lockedConfigs.length + selected.length + 1;
-      const ratio = completedCount / 5;
-      let score = 0;
+      const rank = [0, 0];
       for (const stat of STATS) {
         const actual = partialTotals[stat] + config.baseStats[stat];
-        const difference = actual - armorTarget[stat] * ratio;
-        const requiredWeight = requiredSet.has(stat) ? 1e6 : 1;
-        score += (difference < 0 ? difference * difference * 3 : difference * difference)
-          * requiredWeight;
+        // Compare in fifths instead of multiplying the target by a fractional
+        // prefix ratio. Squaring scales every candidate at this depth equally
+        // while keeping the canonical tuple strictly integral.
+        const difference = actual * 5 - armorTarget[stat] * completedCount;
+        const penalty = difference < 0
+          ? difference * difference * 3
+          : difference * difference;
+        rank[requiredSet.has(stat) ? 0 : 1] += penalty;
       }
-      if (score < bestScore) {
-        bestScore = score;
+      if (!bestRank || compareIntegerTuples(rank, bestRank) < 0) {
+        bestRank = rank;
         bestConfig = config;
       }
     }
@@ -736,12 +842,21 @@ export function getUpgradeSlotVariants(piece, slotIndex, archetypeFilter, onlyPl
   for (const config of BASE_CONFIGS) {
     if (archetypeFilter && config.archetype !== archetypeFilter) continue;
     const configured = setUpgradePieceConfig(piece, slotIndex, config);
-    if (!onlyPlus5Tuning) {
-      variants.push(normalizeUpgradePiece({ ...configured, tuningMode: 'plus3' }, slotIndex));
-    }
-    for (const tuningTo of STATS) {
+    if (piece.exotic) {
       variants.push(normalizeUpgradePiece({
-        ...configured, tuningMode: 'shift', tuningTo,
+        ...configured,
+        tuningMode: onlyPlus5Tuning ? 'shift' : configured.tuningMode,
+        allowedTuningStats: normalizeTuningStats(piece.allowedTuningStats) || [...STATS],
+      }, slotIndex));
+      continue;
+    }
+    for (const tunedStat of STATS) {
+      variants.push(normalizeUpgradePiece({
+        ...configured,
+        tunedStat,
+        allowedTuningStats: [tunedStat],
+        tuningMode: 'shift',
+        tuningTo: tunedStat,
       }, slotIndex));
     }
   }
@@ -833,22 +948,28 @@ export function buildUpgradePlanSteps(
   )
 ) {
   const remaining = getUpgradeReplacements(originalPieces, finalPieces);
+  const replacementSlots = new Set(remaining.map(replacement => replacement.slotIndex));
   const steps = [];
   // The plan's final tuning/mod layout is slotted in from the start, so each
   // step's stats are exactly what the player sees after doing that one swap.
   // Re-optimizing the mods per step instead would print numbers that no
   // printed configuration can reproduce.
   const configuredFinal = applyUpgradeEvaluationToPieces(finalPieces, finalEvaluation);
-  // Slots not yet swapped keep the piece the player actually owns — its
-  // archetype, tertiary, tuning mode, and rolled +5 — and only inherit the
-  // freely-assignable parts: the -5 source and the armor mod.
-  let currentPieces = originalPieces.map((piece, index) => normalizeUpgradePiece({
-    ...configuredFinal[index],
-    archetypeId: piece.archetypeId,
-    tertiary: piece.tertiary,
-    tuningMode: piece.tuningMode,
-    tuningTo: piece.tuningTo,
-  }, index));
+  // Retained pieces can adopt the final assignment immediately. A slot still
+  // awaiting a physical replacement keeps its current Tuning assignment until
+  // the replacement is installed, because its old tunedStat may differ.
+  let currentPieces = originalPieces.map((piece, index) => {
+    const final = configuredFinal[index];
+    const assignment = replacementSlots.has(index) ? piece : final;
+    return normalizeUpgradePiece({
+      ...piece,
+      tuningMode: assignment.tuningMode,
+      tuningFrom: assignment.tuningFrom,
+      tuningTo: assignment.tuningTo,
+      armorModSize: final.armorModSize,
+      armorModStat: final.armorModStat,
+    }, index);
+  });
 
   while (remaining.length > 0) {
     let bestChoice = null;
@@ -872,14 +993,14 @@ export function buildUpgradePlanSteps(
   return steps;
 }
 
-// The from-scratch solver searches the complete five-piece state space and is
-// therefore a stronger feasibility oracle than the upgrade planner's fast
-// greedy seeds + one-slot refinement. Convert one of its complete witnesses
-// back into real upgrade pieces, while retaining owned Legendary armor only
-// when its frame, tertiary, tuning mode, and randomly rolled +5 stat all match.
+// The from-scratch solver has an independent exact-target oracle before its
+// fuzzy fallback, so an exact result is a valid feasibility witness. Convert
+// such a witness back into real upgrade pieces, while retaining owned
+// Legendary armor only when its frame, tertiary, and immutable tunedStat all
+// match. Installed mode/source/destination are assignment state.
 function findFromScratchUpgradeWitness(
   pieces, targets, fragments, reassignModifiers, requiredStats, userConstraints,
-  evaluatePieces
+  evaluatePieces, onlyPlus5Tuning = false,
 ) {
   if (!reassignModifiers) return null;
   // runSolver can pin one arbitrary-stat Exotic config. Additional locked
@@ -905,15 +1026,27 @@ function findFromScratchUpgradeWitness(
   const constraints = getUpgradeEvaluationConstraints(
     armorTarget, requiredStats, userConstraints
   );
-  const budget = getUpgradeModifierBudget(pieces);
+  const budget = getUpgradeModifierBudget(pieces, {
+    reassignModifiers: true,
+    onlyPlus5Tuning,
+  });
   const exoticIndex = exoticIndices[0];
   const exoticSettings = exoticIndex === undefined
     ? null
     : { config: getUpgradeConfig(pieces[exoticIndex]) };
-  const solutions = runSolver(
-    scoringTarget, budget.numPlus5, budget.numPlus10, budget.numPlus3,
-    constraints, exoticSettings
-  );
+  const solutions = budget.allowedPlus3Counts.flatMap(numPlus3 =>
+    runSolver(createProblemSpec({
+      operation: "solve",
+      target: scoringTarget,
+      constraints,
+      targetDomain: STAT_DOMAIN.ARMOR,
+      numPlus5: budget.numPlus5,
+      numPlus10: budget.numPlus10,
+      numPlus3,
+      pieces: exoticSettings?.config ? [exoticSettings.config] : [],
+      exoticSettings,
+      runtimeOptions: { maxExactSolutions: 1 },
+    })));
   let bestPlan = null;
 
   for (const solution of solutions) {
@@ -952,17 +1085,27 @@ function findFromScratchUpgradeWitness(
         const mod = solution.modAssignments[descriptorIndex];
         const tuningMode = tuning?.mode === '+3' ? 'plus3' : 'shift';
         const currentConfig = getUpgradeConfig(piece);
+        const capability = getUpgradeTuningCapability(piece, onlyPlus5Tuning);
         const keepsOwnedPiece = sameUpgradeConfig(currentConfig, config)
-          && (piece.exotic || (
-            piece.tuningMode === tuningMode
-            && (tuningMode === 'plus3' || piece.tuningTo === tuning?.to)
-          ));
+          && (tuningMode === 'plus3'
+            ? capability.allowBalanced
+            : capability.allowedDirectionalStats?.includes(tuning?.to));
         if (piece.locked && !keepsOwnedPiece) compatible = false;
         const configured = keepsOwnedPiece
           ? { ...piece }
           : setUpgradePieceConfig(piece, slotIndex, config);
         return normalizeUpgradePiece({
           ...configured,
+          tunedStat: configured.exotic
+            ? null
+            : keepsOwnedPiece
+              ? configured.tunedStat
+              : tuningMode === 'shift' ? tuning?.to : STATS[0],
+          allowedTuningStats: configured.exotic
+            ? configured.allowedTuningStats
+            : [keepsOwnedPiece
+              ? configured.tunedStat
+              : tuningMode === 'shift' ? tuning?.to : STATS[0]],
           tuningMode,
           tuningFrom: tuning?.from || configured.tuningFrom,
           tuningTo: tuning?.to || configured.tuningTo,
@@ -1000,6 +1143,176 @@ function findFromScratchUpgradeWitness(
   return bestPlan;
 }
 
+function replacementSubsets(indices, count) {
+  const result = [];
+  const chosen = [];
+  const visit = start => {
+    if (chosen.length === count) {
+      result.push([...chosen]);
+      return;
+    }
+    for (let index = start; index < indices.length; index++) {
+      chosen.push(indices[index]);
+      visit(index + 1);
+      chosen.pop();
+    }
+  };
+  visit(0);
+  return result;
+}
+
+function visitPermutations(values, visit, depth = 0) {
+  if (depth === values.length) {
+    visit(values);
+    return;
+  }
+  for (let index = depth; index < values.length; index++) {
+    [values[depth], values[index]] = [values[index], values[depth]];
+    visitPermutations(values, visit, depth + 1);
+    [values[depth], values[index]] = [values[index], values[depth]];
+  }
+}
+
+function findExactUpgradePlanIterative(
+  pieces, targets, fragments, reassignModifiers, evaluatePieces,
+  onlyPlus5Tuning, userConstraints = {},
+) {
+  if (!reassignModifiers) return null;
+  const exactPointModelComplete = STATS.every(stat =>
+    userConstraints.exact?.[stat] === true
+    && targets[stat] > 0
+    && targets[stat] < 200);
+  // This producer searches one exact Armor-domain point. Fuzzy rules and the
+  // visible 0/200 clamp describe intervals, so they belong to the bounded
+  // fallback until an interval-complete replacement oracle exists.
+  if (!exactPointModelComplete) return null;
+  const unlocked = pieces
+    .map((piece, index) => piece.locked ? -1 : index)
+    .filter(index => index >= 0);
+  const armorTarget = Object.fromEntries(STATS.map(stat => [
+    stat,
+    targets[stat] - (fragments[stat] || 0),
+  ]));
+  const budget = getUpgradeModifierBudget(pieces, {
+    reassignModifiers: true,
+    onlyPlus5Tuning,
+  });
+  const tuningModelComplete = pieces.every(piece =>
+    getUpgradeTuningCapability(piece, onlyPlus5Tuning).complete);
+  const proofModelComplete = tuningModelComplete && exactPointModelComplete;
+
+  for (let replacementDepth = 0; replacementDepth <= unlocked.length; replacementDepth++) {
+    let bestAtDepth = null;
+    for (const replacementSlots of replacementSubsets(unlocked, replacementDepth)) {
+      const replacementSet = new Set(replacementSlots);
+      const fixed = pieces
+        .map((piece, slotIndex) => ({ piece, slotIndex }))
+        .filter(({ slotIndex }) => !replacementSet.has(slotIndex));
+      const fixedEntries = fixed.map(({ piece }) => {
+        const capability = getUpgradeTuningCapability(piece, onlyPlus5Tuning);
+        return {
+          config: getUpgradeConfig(piece),
+          allowBalanced: capability.allowBalanced,
+          allowedDirectionalStats: capability.allowedDirectionalStats,
+        };
+      });
+      const allowedFreePlus3Counts = onlyPlus5Tuning
+        ? [0]
+        : Array.from({ length: replacementDepth + 1 }, (_, count) => count);
+      const witnesses = findExactPartialConfigWitnesses({
+        fixedEntries,
+        freePieceCount: replacementDepth,
+        target: armorTarget,
+        numPlus5: budget.numPlus5,
+        numPlus10: budget.numPlus10,
+        allowedFreePlus3Counts,
+        // This is an existential query at the current depth. One witness is
+        // sufficient; depths with no witness are still enumerated completely.
+        maxWitnesses: 1,
+      });
+
+      for (const witness of witnesses) {
+        const fixedCount = fixed.length;
+        const freeDescriptors = Array.from(
+          { length: replacementDepth },
+          (_, index) => fixedCount + index,
+        );
+        visitPermutations(freeDescriptors, descriptorOrder => {
+          const mapped = pieces.map(piece => ({ ...piece }));
+          const applyDescriptor = (slotIndex, descriptorIndex, keepOwned) => {
+            const config = witness.config[descriptorIndex];
+            const tuning = witness.tuningAssignments[descriptorIndex];
+            const mod = witness.modAssignments[descriptorIndex];
+            const configured = keepOwned
+              ? mapped[slotIndex]
+              : setUpgradePieceConfig(mapped[slotIndex], slotIndex, config);
+            mapped[slotIndex] = normalizeUpgradePiece({
+              ...configured,
+              tunedStat: configured.exotic
+                ? null
+                : keepOwned
+                  ? configured.tunedStat
+                  : tuning.mode === "+5-5" ? tuning.to : STATS[0],
+              allowedTuningStats: configured.exotic
+                ? configured.allowedTuningStats
+                : [keepOwned
+                  ? configured.tunedStat
+                  : tuning.mode === "+5-5" ? tuning.to : STATS[0]],
+              tuningMode: tuning.mode === "+3" ? "plus3" : "shift",
+              tuningFrom: tuning.from,
+              tuningTo: tuning.to,
+              tuningUnknown: false,
+              armorModSize: mod?.size || 0,
+              armorModStat: mod?.stat || configured.armorModStat,
+            }, slotIndex);
+          };
+          fixed.forEach(({ slotIndex }, descriptorIndex) =>
+            applyDescriptor(slotIndex, descriptorIndex, true));
+          replacementSlots.forEach((slotIndex, index) =>
+            applyDescriptor(slotIndex, descriptorOrder[index], false));
+
+          const evaluation = evaluatePieces(mapped, false);
+          if (!evaluation.metrics.allReached) return;
+          const replacements = getUpgradeReplacements(pieces, mapped);
+          if (replacements.length > replacementDepth) return;
+          const plan = {
+            pieces: mapped,
+            evaluation,
+            metrics: evaluation.metrics,
+            replacements,
+            replacementCount: replacements.length,
+            replacementProof: {
+              method: "replacement-count-iterative-deepening",
+              examinedThrough: replacementDepth,
+              complete: proofModelComplete,
+              ...(proofModelComplete ? { minimal: true } : {
+                limitation: !tuningModelComplete
+                  ? "one or more Tuning capabilities are unknown"
+                  : "minimum proof requires six exact, non-clamped visible rules",
+              }),
+            },
+          };
+          if (!bestAtDepth || compareUpgradePlans(plan, bestAtDepth) < 0) {
+            bestAtDepth = plan;
+          }
+        });
+      }
+    }
+    if (bestAtDepth) {
+      bestAtDepth.steps = buildUpgradePlanSteps(
+        pieces,
+        bestAtDepth.pieces,
+        targets,
+        fragments,
+        bestAtDepth.evaluation,
+        evaluatePieces,
+      );
+      return bestAtDepth;
+    }
+  }
+  return null;
+}
+
 export function findUpgradeCompletionPlan(
   pieces, targets, fragments, reassignModifiers, baseline, extraSeedPieces = [],
   requiredStats = [],
@@ -1028,8 +1341,9 @@ export function findUpgradeCompletionPlan(
   const getSeedKey = mappedPieces => mappedPieces.map(piece => [
     piece.archetypeId,
     piece.tertiary,
-    piece.tuningMode,
-    piece.tuningTo,
+    piece.tunedStat,
+    piece.allowedTuningStats?.join(',') || "unknown",
+    ...(reassignModifiers ? [] : [piece.tuningMode, piece.tuningFrom, piece.tuningTo]),
     ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
   ].join(':')).join('|');
 
@@ -1205,6 +1519,16 @@ export function analyzeUpgradeCandidates(
   let rankings = [];
   let plan = null;
   if (!baseline.metrics.allReached) {
+    plan = findExactUpgradePlanIterative(
+      pieces,
+      targets,
+      fragments,
+      reassignModifiers,
+      evaluatePieces,
+      onlyPlus5Tuning,
+      userConstraints,
+    );
+    if (!plan) {
     // Full-target feasibility is invariant under the UI's fallback-priority
     // checkboxes. Always run the same all-six-stats search first; only if it
     // cannot reach the complete target may selected required stats steer the
@@ -1237,7 +1561,7 @@ export function analyzeUpgradeCandidates(
       if (!fullTargetPlan?.metrics.allReached) {
         const scratchWitness = findFromScratchUpgradeWitness(
           pieces, targets, fragments, reassignModifiers, STATS, userConstraints,
-          fullTargetEvaluator
+          fullTargetEvaluator, onlyPlus5Tuning,
         );
         if (scratchWitness && compareUpgradePlans(scratchWitness, fullTargetPlan) < 0) {
           fullTargetPlan = scratchWitness;
@@ -1284,6 +1608,7 @@ export function analyzeUpgradeCandidates(
         pieces, targets, fragments, reassignModifiers, baseline, singleSwapSeeds,
         normalizedRequiredStats, evaluatePieces, onlyPlus5Tuning
       );
+    }
     }
   }
   const bestCandidate = rankings[0] || null;

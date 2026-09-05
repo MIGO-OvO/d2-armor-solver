@@ -1,6 +1,17 @@
 import {
   ARCHETYPES, BASE_CONFIGS, STATS,
 } from "./armor-model.mjs";
+import {
+  findBestFixedConfigWitness,
+  findBestGlobalWitness,
+  findExactTargetWitnesses,
+} from "./exact-target-oracle.mjs";
+import {
+  createCanonicalId,
+  createProofEvidence,
+  getArmorSolverInput,
+  satisfiesConstraintModel,
+} from "./solver-v3-contract.mjs";
 
 const modifierAllocationCache = new Map();
 
@@ -139,6 +150,12 @@ function chooseGreedyModifierAllocation(
 // stat is rolled with the piece and cannot be re-picked; only the -5 source is
 // free. Pass null (the from-scratch solver) to let both sides be chosen.
 export function applySingleTuning(totals, target, constraints, forcedFromHits, fixedTo = null) {
+  const allowedTargets = Array.isArray(fixedTo)
+    ? fixedTo.filter(stat => STATS.includes(stat))
+    : STATS.includes(fixedTo)
+      ? [fixedTo]
+      : STATS;
+  const pinnedTo = allowedTargets.length === 1 ? allowedTargets[0] : null;
   const hasAdvancedConstraints = (constraints?.priorityOrder?.length || 0) > 0 ||
     Object.values(constraints?.priorityLevels || {}).some(v => v > 0) ||
     Object.values(constraints?.minimums || {}).some(v => v > 0) ||
@@ -150,14 +167,14 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
     for (const s of STATS) gaps[s] = totals[s] - target[s];
     let fromStat = null;
     for (const s of STATS) {
-      if (s === fixedTo) continue;
+      if (s === pinnedTo) continue;
       if (hits[s] > 0 && gaps[s] > 0) { fromStat = s; hits[s]--; break; }
     }
     if (fromStat === null) {
       let bestExcess = -Infinity;
-      fromStat = STATS.find(s => s !== fixedTo);
+      fromStat = STATS.find(s => s !== pinnedTo);
       for (const s of STATS) {
-        if (s === fixedTo) continue;
+        if (s === pinnedTo) continue;
         const excess = gaps[s];
         const isPriority = constraints?.priorities && constraints.priorities[s];
         const adjustedExcess = isPriority ? excess - 999 : excess;
@@ -168,10 +185,10 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
         }
       }
     }
-    if (fixedTo) return { from: fromStat, to: fixedTo };
+    if (pinnedTo) return { from: fromStat, to: pinnedTo };
     let bestDeficit = Infinity;
     let toStat = null;
-    for (const s of STATS) {
+    for (const s of allowedTargets) {
       if (s === fromStat) continue;
       const deficit = gaps[s];
       const isPriority = constraints?.priorities && constraints.priorities[s];
@@ -188,8 +205,8 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
 
   const forcedCandidates = STATS.filter(s => (forcedFromHits[s] || 0) > 0 && totals[s] > target[s]);
   const fromCandidates = (forcedCandidates.length > 0 ? forcedCandidates : STATS)
-    .filter(s => s !== fixedTo);
-  const toCandidates = fixedTo ? [fixedTo] : STATS;
+    .filter(s => s !== pinnedTo);
+  const toCandidates = allowedTargets;
   let best = null;
   let bestRank = null;
   const currentRank = scoreStatsRank(totals, target, constraints);
@@ -218,17 +235,42 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
       }
     }
   }
-  return best || { from: STATS.find(s => s !== fixedTo), to: fixedTo || STATS[1] };
+  const fallbackTo = allowedTargets[0] || STATS[1];
+  return best || { from: STATS.find(s => s !== fallbackTo), to: fallbackTo };
 }
 
-// fixedTuningTargets describes armor you already own: a stat id pins a
-// Legendary piece's rolled +5 side, null marks +3 mode, and undefined keeps a
-// shift piece's +5 side free (Exotic armor). Pass null for fully farmed armor.
+// fixedTuningTargets preserves the legacy fixed-assignment API. New callers
+// pass runtimeOptions.tuningCapabilities to enumerate Balanced and every legal
+// directional destination independently from the piece's current assignment.
 export function evaluateConfig(
   baseConfigs, target, numPlus5, numPlus10, numPlus3, constraints,
   fixedTuningTargets = null, runtimeOptions = {}
 ) {
-  const allocateModifiers = !fixedTuningTargets && numPlus5 + numPlus10 <= 2
+  const tuningCapabilities = Array.isArray(runtimeOptions.tuningCapabilities)
+    ? runtimeOptions.tuningCapabilities
+    : null;
+  if (!runtimeOptions.skipExactJointSearch) {
+    const exactEvaluation = findBestFixedConfigWitness({
+      configs: baseConfigs,
+      target,
+      numPlus5,
+      numPlus10,
+      numPlus3,
+      fixedTuningTargets,
+      tuningCapabilities,
+      rankTotals: totals => scoreStatsRank(totals, target, constraints),
+      compareRanks: compareScoreRanks,
+    });
+    if (exactEvaluation) {
+      return {
+        ...exactEvaluation,
+        score: scoreStats(exactEvaluation.totals, target, constraints),
+      };
+    }
+  }
+
+  const allocateModifiers = !fixedTuningTargets && !tuningCapabilities
+      && numPlus5 + numPlus10 <= 2
     ? chooseBestModifierAllocation
     : chooseGreedyModifierAllocation;
   const baseTotals = {};
@@ -259,7 +301,18 @@ export function evaluateConfig(
   // per-piece mode is already known (null entry = that piece runs +3), so the
   // single matching mask is used instead of trying every distribution.
   const masks = [];
-  if (fixedTuningTargets) {
+  if (tuningCapabilities) {
+    for (let mask = 0; mask < 32; mask++) {
+      const allowed = tuningCapabilities.every((capability, index) => {
+        const balanced = Boolean((mask >> index) & 1);
+        return balanced
+          ? capability?.allowBalanced !== false
+          : Array.isArray(capability?.allowedDirectionalStats)
+            && capability.allowedDirectionalStats.some(stat => STATS.includes(stat));
+      });
+      if (allowed) masks.push(mask);
+    }
+  } else if (fixedTuningTargets) {
     let fixedMask = 0;
     for (let i = 0; i < 5; i++) {
       if (fixedTuningTargets[i] === null) fixedMask |= (1 << i);
@@ -272,7 +325,10 @@ export function evaluateConfig(
       if (bits === numPlus3) masks.push(m);
     }
   }
-  if (masks.length === 0) masks.push(0);
+  if (masks.length === 0) {
+    if (tuningCapabilities) return null;
+    masks.push(0);
+  }
 
   for (const mask of masks) {
     const totals = { ...baseTotals };
@@ -290,9 +346,11 @@ export function evaluateConfig(
     const hitsRemaining = { ...forcedFromHits };
     for (let i = 0; i < 5; i++) {
       if (tuningAssignments[i] !== null) continue;
-      const fixedTo = STATS.includes(fixedTuningTargets?.[i])
-        ? fixedTuningTargets[i]
-        : null;
+      const fixedTo = tuningCapabilities
+        ? tuningCapabilities[i].allowedDirectionalStats
+        : STATS.includes(fixedTuningTargets?.[i])
+          ? fixedTuningTargets[i]
+          : null;
       const t = applySingleTuning(
         totals, target, constraints, hitsRemaining, fixedTo
       );
@@ -324,8 +382,6 @@ export function evaluateConfig(
   const minimums = constraints?.minimums || {};
   const maximums = constraints?.maximums || {};
   const exact = constraints?.exact || {};
-  // Hard target constraints must still get a refinement pass when their
-  // large penalty pushes the score above the normal near-miss cutoff.
   const hasHardTargetConstraint = Object.values(minimums).some(value => value > 0)
     || Object.values(maximums).some(value => value !== undefined)
     || Object.values(exact).some(Boolean);
@@ -333,8 +389,8 @@ export function evaluateConfig(
     || (constraints?.priorityOrder?.length || 0) > 0
     || Object.values(constraints?.priorityLevels || {}).some(value => value > 0)
     || Object.values(constraints?.maximums || {}).some(value => value !== undefined);
-  if (!runtimeOptions.skipTuningRefinement && bestOverall && bestOverall.score > 0 &&
-      (bestOverall.score < 10000 || hasHardTargetConstraint)) {
+  if (!runtimeOptions.skipTuningRefinement && bestOverall &&
+      bestRank.some(value => value !== 0)) {
     let improved = true;
     while (improved) {
       improved = false;
@@ -344,13 +400,15 @@ export function evaluateConfig(
         const currentTo = bestOverall.tuningAssignments[i].to;
         // With a pinned +5 (owned armor) only the -5 source can be retried;
         // otherwise both sides of the shift must remain searchable.
-        const pinnedTo = STATS.includes(fixedTuningTargets?.[i])
-          ? fixedTuningTargets[i]
-          : null;
-        const variants = pinnedTo
-          ? STATS
-            .filter(stat => stat !== pinnedTo)
-            .map(altFrom => ({ from: altFrom, to: pinnedTo }))
+        const allowedTargets = tuningCapabilities
+          ? tuningCapabilities[i].allowedDirectionalStats
+          : STATS.includes(fixedTuningTargets?.[i])
+            ? [fixedTuningTargets[i]]
+            : STATS;
+        const variants = tuningCapabilities || allowedTargets.length === 1
+          ? allowedTargets.flatMap(altTo => STATS
+            .filter(altFrom => altFrom !== altTo)
+            .map(altFrom => ({ from: altFrom, to: altTo })))
           : searchFullTuningNeighborhood
             ? STATS.flatMap(altFrom => STATS
               .filter(altTo => altTo !== altFrom)
@@ -439,7 +497,7 @@ export function singlePenalty(actual, target, isPriority, le100, force0, priorit
 // the "至多/区间上限/必须达标" caps must not be treated as just one more
 // squared difference to the target, or the solver happily dumps the surplus
 // into the very stat the user asked to cap.
-function singleStatScoreRank(stat, actual, target, constraints) {
+export function singleStatScoreRank(stat, actual, target, constraints) {
   const priorities = constraints?.priorities || {};
   const le100 = constraints?.le100 || {};
   const force0 = constraints?.force0 || {};
@@ -494,6 +552,74 @@ export function scoreStatsRank(actual, target, constraints) {
     for (let index = 0; index < total.length; index++) total[index] += rank[index];
   }
   return total;
+}
+
+function scoreStatsLowerBound(baseTotals, adjustmentValueSets, target, constraints) {
+  const total = [0, 0, 0, 0, 0, 0];
+  for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
+    const stat = STATS[statIndex];
+    let best = null;
+    for (const units of adjustmentValueSets[statIndex]) {
+      const rank = singleStatScoreRank(
+        stat,
+        baseTotals[statIndex] + units * 5,
+        target[stat],
+        constraints,
+      );
+      if (!best || compareScoreRanks(rank, best) < 0) best = rank;
+    }
+    for (let index = 0; index < total.length; index++) total[index] += best[index];
+  }
+  return total;
+}
+
+function compareRelaxedEntries(left, right) {
+  const rankOrder = compareScoreRanks(left.rank, right.rank);
+  if (rankOrder !== 0) return rankOrder;
+  return compareScoreRanks(left.values, right.values);
+}
+
+function insertRelaxedEntry(bucket, entry, limit) {
+  let low = 0;
+  let high = bucket.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (compareRelaxedEntries(entry, bucket[middle]) < 0) high = middle;
+    else low = middle + 1;
+  }
+  if (low >= limit) return;
+  bucket.splice(low, 0, entry);
+  if (bucket.length > limit) bucket.pop();
+}
+
+function findBestRelaxedTargets(total, target, constraints, limit = 8, valueStep = 1) {
+  if (!Number.isSafeInteger(total) || total < 0 || total > 1200) return [];
+  const statRanks = STATS.map(stat => Array.from({ length: 201 }, (_, value) =>
+    singleStatScoreRank(stat, value, target[stat], constraints)));
+  let states = Array.from({ length: total + 1 }, () => []);
+  states[0].push({ rank: [0, 0, 0, 0, 0, 0], values: [] });
+
+  for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
+    const next = Array.from({ length: total + 1 }, () => []);
+    for (let sum = 0; sum <= total; sum++) {
+      if (states[sum].length === 0) continue;
+      const maximum = Math.min(200, total - sum);
+      for (const previous of states[sum]) {
+        for (let value = 0; value <= maximum; value += valueStep) {
+          const contribution = statRanks[statIndex][value];
+          insertRelaxedEntry(next[sum + value], {
+            rank: previous.rank.map((part, index) => part + contribution[index]),
+            values: [...previous.values, value],
+          }, limit);
+        }
+      }
+    }
+    states = next;
+  }
+  return states[total].map(entry => ({
+    ...entry,
+    target: Object.fromEntries(STATS.map((stat, index) => [stat, entry.values[index]])),
+  }));
 }
 
 export function compareScoreRanks(left, right) {
@@ -572,7 +698,98 @@ export function farmabilityScore(config, exoticIndex = null) {
 const REFINEMENT_CANDIDATE_LIMIT = 192;
 const LOCAL_SEARCH_CANDIDATE_LIMIT = 12;
 
-export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, exoticSettings = null, runtimeOptions = {}) {
+export function runSolver(problemSpec) {
+  const {
+    target,
+    constraints,
+    budget: { numPlus5, numPlus10, numPlus3 },
+    runtimeOptions,
+    fixedConfig,
+    exoticSelection,
+  } = getArmorSolverInput(problemSpec);
+  const exoticSettings = fixedConfig
+    ? { ...(exoticSelection || {}), config: fixedConfig }
+    : null;
+  // Search the exact target independently of all heuristic ranking and
+  // refinement limits. A returned witness proves reachability; only a miss
+  // falls through to the deterministic fuzzy/near-target search below.
+  const exactTargetRank = scoreStatsRank(target, target, constraints);
+  if (exactTargetRank.every(value => value === 0)) {
+    const searchStats = {};
+    const exactWitnesses = findExactTargetWitnesses({
+      target,
+      numPlus5,
+      numPlus10,
+      numPlus3,
+      fixedConfig: exoticSettings?.config || null,
+      searchStats,
+    });
+    if (exactWitnesses.length > 0) {
+      const exactScore = scoreStats(target, target, constraints);
+      const exactSolutions = exactWitnesses.map(witness => ({
+        ...witness,
+        totals: { ...target },
+        rank: [...exactTargetRank],
+        score: exactScore,
+        exoticIndex: exoticSettings?.config ? 0 : null,
+        exoticSelection: exoticSettings ? {
+          classId: exoticSettings.classId,
+          classLabel: exoticSettings.classLabel,
+          primaryPerkId: exoticSettings.primaryPerkId,
+          primaryPerkName: exoticSettings.primaryPerkName,
+          secondaryPerkId: exoticSettings.secondaryPerkId,
+          secondaryPerkName: exoticSettings.secondaryPerkName,
+        } : null,
+      }));
+      exactSolutions.sort((left, right) => {
+        const farmabilityOrder = farmabilityScore(left.config, left.exoticIndex)
+          - farmabilityScore(right.config, right.exoticIndex);
+        if (farmabilityOrder !== 0) return farmabilityOrder;
+        return archetypeKey(left.config, left.exoticIndex)
+          .localeCompare(archetypeKey(right.config, right.exoticIndex));
+      });
+      const requestedLimit = Number(runtimeOptions.maxExactSolutions);
+      const maxExactSolutions = Number.isInteger(requestedLimit)
+        ? Math.max(1, requestedLimit)
+        : 60;
+      // The exact oracle has already scanned the full target space before this
+      // presentation limit is applied. Truncation therefore cannot turn a
+      // reachable target into a miss.
+      const presented = exactSolutions.slice(0, maxExactSolutions);
+      presented.proof = createProofEvidence(problemSpec, {
+        producer: "exact-target-oracle",
+        method: "exact-target-oracle",
+        complete: true,
+        statesExamined: searchStats.statesExamined,
+        assumptions: ["known-data", "complete-catalog", "unrestricted-theoretical-tuning"],
+        scope: "target-point",
+        outcome: "feasible",
+      });
+      return presented;
+    }
+  }
+
+  if (!runtimeOptions.fastMode) {
+    const relaxedProof = tryRelaxedProof(
+      target,
+      numPlus5,
+      numPlus10,
+      numPlus3,
+      constraints,
+      exoticSettings,
+      runtimeOptions,
+    );
+    if (relaxedProof) {
+      relaxedProof.proof = createProofEvidence(problemSpec, {
+        producer: "relaxed-k-best",
+        method: "relaxed-k-best-plus-exact-target-oracle",
+        truncated: true,
+        limitation: "K-best targets do not cover the complete Armor value domain",
+      });
+      return relaxedProof;
+    }
+  }
+
   const solutionMap = new Map();
   const fixedExotic = exoticSettings?.config || null;
   const purpleCount = fixedExotic ? 4 : 5;
@@ -605,7 +822,8 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
   function refineAndStore(archIndices, config, initialResult, localSearch) {
     let bestConfig = [...config];
     let bestResult = initialResult || evaluateConfig(
-      bestConfig, target, numPlus5, numPlus10, numPlus3, constraints
+      bestConfig, target, numPlus5, numPlus10, numPlus3, constraints, null,
+      { skipExactJointSearch: true }
     );
 
     // Quick local search over tertiary choices (try swapping one piece's tertiary).
@@ -622,7 +840,8 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
             const trial = [...bestConfig];
             trial[configIndex] = alt;
             const result = evaluateConfig(
-              trial, target, numPlus5, numPlus10, numPlus3, constraints
+              trial, target, numPlus5, numPlus10, numPlus3, constraints, null,
+              { skipExactJointSearch: true }
             );
             if (compareScoreRanks(result.rank, bestResult.rank) < 0) {
               bestConfig = trial;
@@ -677,7 +896,7 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
 
         const coarseResult = evaluateConfig(
           config, target, numPlus5, numPlus10, numPlus3, constraints, null,
-          { skipTuningRefinement: true }
+          { skipTuningRefinement: true, skipExactJointSearch: true }
         );
         stagedCandidates.push({
           archIndices: [...archIndices],
@@ -708,7 +927,8 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
     const farmabilityOrder = farmabilityScore(left.config, fixedExotic ? 0 : null)
       - farmabilityScore(right.config, fixedExotic ? 0 : null);
     if (farmabilityOrder !== 0) return farmabilityOrder;
-    return left.coarseResult.score - right.coarseResult.score;
+    return createCanonicalId({ ...left.coarseResult, config: left.config })
+      .localeCompare(createCanonicalId({ ...right.coarseResult, config: right.config }));
   });
   // Preserve every coarse archetype result. Expensive Tuning refinement and
   // tertiary swaps are only useful near the top of the structural ranking.
@@ -721,8 +941,9 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
     const isAlreadyPerfect = candidate.coarseResult.rank.every(
       value => value === 0
     );
-    const result = isAlreadyPerfect ? candidate.coarseResult : evaluateConfig(
-        candidate.config, target, numPlus5, numPlus10, numPlus3, constraints
+      const result = isAlreadyPerfect ? candidate.coarseResult : evaluateConfig(
+        candidate.config, target, numPlus5, numPlus10, numPlus3, constraints, null,
+        { skipExactJointSearch: true }
       );
     refineAndStore(
       candidate.archIndices,
@@ -738,14 +959,141 @@ export function runSolver(target, numPlus5, numPlus10, numPlus3, constraints, ex
     if (rankOrder !== 0) return rankOrder;
     const aF = farmabilityScore(a.config, a.exoticIndex), bF = farmabilityScore(b.config, b.exoticIndex);
     if (aF !== bF) return aF - bF;
-    return a.score - b.score;
+    return createCanonicalId(a).localeCompare(createCanonicalId(b));
   });
 
-  // Show all perfect solutions, or top 20 imperfect ones
+  // The legacy search supplies an incumbent only. Its Top-N limits cannot
+  // decide global optimality or infeasibility.
   const perfectOnes = solutions.filter(solution =>
     solution.rank.every(value => value === 0));
-  if (perfectOnes.length > 0) return perfectOnes;
-  return solutions.slice(0, 60);
+  const incumbentSolutions = perfectOnes.length > 0
+    ? perfectOnes
+    : solutions.slice(0, 60);
+  if (runtimeOptions.fastMode) {
+    incumbentSolutions.proof = createProofEvidence(problemSpec, {
+      producer: "heuristic-solver",
+      method: "bounded-fallback-search",
+      truncated: true,
+      statesExamined: stagedCandidates.length,
+    });
+    return incumbentSolutions;
+  }
+
+  const incumbent = incumbentSolutions[0] || null;
+
+  if (!runtimeOptions.proveFuzzy) {
+    incumbentSolutions.proof = createProofEvidence(problemSpec, {
+      producer: "heuristic-solver",
+      method: "relaxed-candidate-limit",
+      truncated: true,
+      statesExamined: stagedCandidates.length,
+    });
+    return incumbentSolutions;
+  }
+
+  const searchStats = {};
+  const provenBest = findBestGlobalWitness({
+    target,
+    numPlus5,
+    numPlus10,
+    numPlus3,
+    fixedConfig: exoticSettings?.config || null,
+    rankTotals: totals => scoreStatsRank(totals, target, constraints),
+    lowerBoundRank: (baseTotals, adjustmentValueSets) => scoreStatsLowerBound(
+      baseTotals,
+      adjustmentValueSets,
+      target,
+      constraints,
+    ),
+    compareRanks: compareScoreRanks,
+    initialBest: incumbent,
+    searchStats,
+  });
+  const globalProof = createProofEvidence(problemSpec, {
+    producer: "global-fuzzy-enumeration",
+    method: "complete-global-fuzzy-enumeration",
+    complete: true,
+    statesExamined: searchStats.statesExamined,
+    assumptions: ["known-data", "complete-catalog", "admissible-hard-rule-lower-bound"],
+    outcome: provenBest && satisfiesConstraintModel(provenBest, problemSpec.constraintModel)
+      ? "feasible" : "infeasible",
+  });
+  if (!provenBest) {
+    incumbentSolutions.proof = globalProof;
+    return incumbentSolutions;
+  }
+  provenBest.score = scoreStats(provenBest.totals, target, constraints);
+  provenBest.exoticSelection = exoticSettings ? {
+    classId: exoticSettings.classId,
+    classLabel: exoticSettings.classLabel,
+    primaryPerkId: exoticSettings.primaryPerkId,
+    primaryPerkName: exoticSettings.primaryPerkName,
+    secondaryPerkId: exoticSettings.secondaryPerkId,
+    secondaryPerkName: exoticSettings.secondaryPerkName,
+  } : null;
+  const proven = [provenBest];
+  proven.proof = globalProof;
+  return proven;
+}
+
+function tryRelaxedProof(
+  target, numPlus5, numPlus10, numPlus3, constraints,
+  exoticSettings, runtimeOptions,
+) {
+  const fixedBaseTotal = exoticSettings?.config
+    ? STATS.reduce((sum, stat) =>
+      sum + (Number(exoticSettings.config.baseStats?.[stat]) || 0), 0) + 4 * 90
+    : 5 * 90;
+  const finalTotal = fixedBaseTotal
+    + numPlus3 * 3
+    + numPlus5 * 5
+    + numPlus10 * 10;
+  const relaxedTargets = findBestRelaxedTargets(
+    finalTotal,
+    target,
+    constraints,
+    Number.isInteger(runtimeOptions.relaxedCandidateLimit)
+      ? Math.max(1, runtimeOptions.relaxedCandidateLimit)
+      : 4,
+    numPlus3 === 0 ? 5 : 1,
+  );
+  for (const relaxed of relaxedTargets) {
+    const witnesses = findExactTargetWitnesses({
+      target: relaxed.target,
+      numPlus5,
+      numPlus10,
+      numPlus3,
+      fixedConfig: exoticSettings?.config || null,
+    });
+    if (witnesses.length === 0) continue;
+    const candidates = witnesses.map(witness => ({
+      ...witness,
+      totals: { ...relaxed.target },
+      rank: [...relaxed.rank],
+      score: scoreStats(relaxed.target, target, constraints),
+      exoticIndex: exoticSettings?.config ? 0 : null,
+      exoticSelection: exoticSettings ? {
+        classId: exoticSettings.classId,
+        classLabel: exoticSettings.classLabel,
+        primaryPerkId: exoticSettings.primaryPerkId,
+        primaryPerkName: exoticSettings.primaryPerkName,
+        secondaryPerkId: exoticSettings.secondaryPerkId,
+        secondaryPerkName: exoticSettings.secondaryPerkName,
+      } : null,
+    }));
+    candidates.sort((left, right) => {
+      const farmabilityOrder = farmabilityScore(left.config, left.exoticIndex)
+        - farmabilityScore(right.config, right.exoticIndex);
+      if (farmabilityOrder !== 0) return farmabilityOrder;
+      return createCanonicalId(left).localeCompare(createCanonicalId(right));
+    });
+    const proven = [candidates[0]];
+    // The relaxed target list is K-best and does not cover the full Armor
+    // value domain. A witness found here is useful, but a miss against the
+    // user's hard rules is not an infeasibility proof.
+    return proven;
+  }
+  return null;
 }
 
 export function shuffle(arr) {

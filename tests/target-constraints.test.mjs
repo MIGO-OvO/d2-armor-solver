@@ -9,6 +9,7 @@ import {
   satisfiesTargetConstraints,
 } from "../src/core/target-constraints.mjs";
 import { scoreStatsRank } from "../src/core/solver.mjs";
+import { RESULT_STATUS } from "../src/core/solver-v3-contract.mjs";
 
 const EXACT_ARMOR_TARGET = {
   health: 0,
@@ -59,13 +60,14 @@ test("minimum rules keep the remaining stats exact and accept surplus", () => {
     targetValues: target,
   });
 
-  const [solution] = solveLoadout({
+  const solutions = solveLoadout({
     target,
     numPlus5: 0,
     numPlus10: 5,
     numPlus3: 0,
     constraints,
   });
+  const [solution] = solutions;
 
   assert.equal(solution.totals.health, 0);
   assert.equal(solution.totals.super, 140);
@@ -75,6 +77,8 @@ test("minimum rules keep the remaining stats exact and accept surplus", () => {
   assert.ok(solution.totals.class >= 35);
   assert.equal(satisfiesTargetConstraints(solution.totals, target, constraints), true);
   assert.notEqual(solution.score, 0, "minimum surplus is valid despite a nonzero fit score");
+  assert.equal(solutions.status, RESULT_STATUS.RULE_FEASIBLE_PROVEN);
+  assert.equal(solutions.certificate.proof.complete, false);
 });
 
 test("maximum and range bounds participate in rule satisfaction", () => {
@@ -129,13 +133,14 @@ test("at-most cap stays hard even when surplus budget must be spilled", () => {
     targetValues: target,
   });
 
-  const [solution] = solveLoadout({
+  const solutions = solveLoadout({
     target,
     numPlus5: 0,
     numPlus10: 5,
     numPlus3: 0,
     constraints,
   });
+  const [solution] = solutions;
 
   assert.ok(
     solution.totals.melee <= constraints.maximums.melee,
@@ -146,6 +151,42 @@ test("at-most cap stays hard even when surplus budget must be spilled", () => {
     false,
     "the exact stats can no longer all be met once the surplus has to go somewhere, but the cap itself must hold",
   );
+  assert.equal(solutions.certificate.proof.complete, false);
+  assert.equal(solutions.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+});
+
+test("non-binding rule changes preserve the canonical exact witness", () => {
+  const exact = Object.fromEntries(STATS.map(stat => [stat, true]));
+  const common = {
+    target: EXACT_ARMOR_TARGET,
+    numPlus5: 0,
+    numPlus10: 5,
+    numPlus3: 0,
+  };
+  const baseline = solveLoadout({ ...common, constraints: { exact } });
+  const decorated = solveLoadout({
+    ...common,
+    constraints: {
+      exact,
+      priorityLevels: { weapons: 1, super: 2 },
+      minimums: { melee: 0 },
+      maximums: { weapons: 200 },
+    },
+  });
+  const repeated = solveLoadout({ ...common, constraints: { exact } });
+  const pointRange = solveLoadout({
+    ...common,
+    constraints: createTargetConstraints({
+      modes: Object.fromEntries(STATS.map(stat => [stat, "range"])),
+      targetValues: EXACT_ARMOR_TARGET,
+      maximumValues: EXACT_ARMOR_TARGET,
+    }),
+  });
+
+  assert.equal(baseline[0].canonicalId, decorated[0].canonicalId);
+  assert.equal(baseline[0].canonicalId, repeated[0].canonicalId);
+  assert.equal(baseline[0].canonicalId, pointRange[0].canonicalId,
+    "exact and range [T,T] must select the same canonical witness");
 });
 
 test("valid fuzzy solutions outrank score-zero classification", () => {
@@ -169,10 +210,16 @@ test("valid fuzzy solutions outrank score-zero classification", () => {
     totals: { health: 15, melee: 40, grenade: 40, super: 145, class: 55, weapons: 205 },
     score: 1125,
   };
+  const source = [invalid, valid];
+  source.status = "RULE_FEASIBLE_PROVEN";
+  source.certificate = { proof: { exhaustive: true } };
 
+  const preferred = preferConstraintSatisfyingSolutions(source, target, constraints);
   assert.deepEqual(
-    preferConstraintSatisfyingSolutions([invalid, valid], target, constraints),
+    [...preferred],
     [valid],
     "rule satisfaction must win even when its fit score is numerically larger",
   );
+  assert.equal(preferred.status, source.status);
+  assert.equal(preferred.certificate, source.certificate);
 });

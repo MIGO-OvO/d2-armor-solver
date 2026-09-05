@@ -488,6 +488,11 @@ async function checkInventoryPlanning(browser) {
     await page.locator("#inventoryFixedExoticName").selectOption(fixedExoticValue);
     await page.evaluate(() => window.solve());
     await page.locator("#ownedGearSection").waitFor({ state: "visible" });
+    assert.match(
+      await page.locator("#scoreDisplay").innerText(),
+      /(proven|Search limited|current-best witness)/i,
+      "Worker results should expose Solver V3 proof semantics in the UI",
+    );
     assert.equal(
       await page.locator("#piecesCard > h2").innerText(),
       "Solution details",

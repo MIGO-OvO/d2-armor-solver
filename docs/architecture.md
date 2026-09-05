@@ -10,7 +10,7 @@ Pages, Cloudflare Static Assets, or any equivalent static host.
 
 | Module | Interface | Implementation kept behind the Interface |
 | --- | --- | --- |
-| `ArmorEngine` | `solveLoadout`, `calculateReachability`, `analyzeUpgrade`, `solveInventory` | enumeration, scoring, tuning, range dynamic programming, inventory search, replacement planning |
+| `ArmorEngine` | `solveLoadout`, `calculateReachability`, `analyzeUpgrade`, `solveInventory` | Solver V3 `ProblemSpec`, constraint/capability normalization, certificates, exact/fallback search, replacement planning |
 | `Budget` | `createBalancedTargetPlan` | exact-budget dynamic programming and balanced tie-breaking |
 | `BuildRepository` | typed read/write methods for drafts, mode, language, and builds | storage keys, JSON parsing, schema version, storage errors |
 | `DIM CSV` | `parseCsv`, `normalizeDimItem`, inventory filters | CSV quoting/BOM handling, real-stat reconstruction, Tuning and Armor Mod inference |
@@ -24,6 +24,29 @@ Pages, Cloudflare Static Assets, or any equivalent static host.
 Interfaces while the search Implementation stays local. The Worker and inline
 fallback are two Adapters at the execution Seam. This creates Leverage for the
 UI and tests, and Locality for future rule changes.
+
+## Solver V3 correctness boundary
+
+`solver-v3-contract.mjs` owns `ProblemSpec`, the armor-domain `ConstraintModel`,
+`PieceCapability`, integer lexicographic comparison, canonical witness ids, and
+the five result statuses. Fragment bonuses are an explicit projection from the
+unclamped armor domain through `clamp(armor + fragment, 0, 200)`; clamp-boundary
+misses remain `SEARCH_LIMIT_REACHED` unless the full armor interval was proved.
+
+Exact-target search uses a bounded TypedArray residual index. Fixed-five
+evaluation jointly searches Tuning and stat mods. Scratch fuzzy search first
+solves an integer total-budget relaxation and sends candidates through the same
+exact-target oracle; legacy greedy/local search is only an incumbent. Inventory
+frontiers have no beam-width/Top-N correctness cutoff and merge only states with
+equivalent stats, Tuning/mod descriptors, set coverage, Exotic count, and
+execution capability. Upgrade exact completion iterates replacement counts
+from zero upward, so its first exact plan carries a minimum-replacement proof.
+
+Result proof status and execution status are orthogonal. `assignArmorMods`
+round-trips a concrete owned witness through sockets, energy, plug availability,
+and fixed Tuning. It returns `VERIFIED`, `UNVERIFIED`, or `BLOCKED`; Scratch and
+pure projection results use `NOT_APPLICABLE`. Worker and inline Adapters clone
+the same certificate and canonical id.
 
 ## Dependency Direction
 

@@ -1,4 +1,9 @@
 import { BASE_CONFIGS, STATS } from "./armor-model.mjs";
+import { findExactTargetWitnesses } from "./exact-target-oracle.mjs";
+import {
+  RESULT_STATUS, STAT_DOMAIN, createProblemSpec, createProofEvidence,
+  getArmorSolverInput, visibleStatFromArmor,
+} from "./solver-v3-contract.mjs";
 
 const reachableRangeCache = new Map();
 
@@ -109,8 +114,10 @@ export function addReachableValues(leftValues, rightValues) {
 }
 
 export function calculateReachableStatRange(
-  fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, objectiveStat
+  fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, objectiveStat,
+  searchStats = { statesExamined: 0 },
 ) {
+  searchStats.statesExamined++;
   const lockedStats = Object.keys(lockedTargets).sort();
   const armorTargets = lockedStats.map(stat =>
     lockedTargets[stat] - (fragments[stat] || 0)
@@ -157,6 +164,7 @@ export function calculateReachableStatRange(
           const usedPlus3 = state.usedPlus3 + mode;
           if (usedPlus3 > numPlus3) continue;
           for (const option of purpleOptions[mode]) {
+            searchStats.statesExamined++;
             const lockValues = state.lockValues.map((value, index) =>
               value + option.lockValues[index]
             );
@@ -188,6 +196,7 @@ export function calculateReachableStatRange(
       if (mode > numPlus3) continue;
       for (const option of fixedOptions[mode]) {
         for (const pair of purplePairStates.values()) {
+          searchStats.statesExamined++;
           const usedPlus3 = mode + pair.usedPlus3;
           if (usedPlus3 > numPlus3) continue;
           const lockValues = option.lockValues.map((value, index) =>
@@ -211,6 +220,7 @@ export function calculateReachableStatRange(
       const rightPlus3 = numPlus3 - left.usedPlus3;
       if (rightPlus3 < 0 || rightPlus3 > 2) continue;
       for (const modifier of modifierOptions) {
+        searchStats.statesExamined++;
         const rightLocks = armorTargets.map((targetValue, index) =>
           targetValue - left.lockValues[index] - modifier.lockValues[index]
         );
@@ -266,6 +276,7 @@ export function calculateReachableStatRange(
   for (let mode = 0; mode <= 1; mode++) {
     if (mode > numPlus3) continue;
     for (const option of fixedOptions[mode]) {
+      searchStats.statesExamined++;
       if (option.lockValues.some((value, index) => value > armorTargets[index])) continue;
       if (!canStillReachLocks(option.lockValues, mode, 4)) continue;
       const key = `${mode}|${option.lockValues.join(',')}`;
@@ -284,6 +295,7 @@ export function calculateReachableStatRange(
         const usedPlus3 = state.usedPlus3 + mode;
         if (usedPlus3 > numPlus3) continue;
         for (const option of purpleOptions[mode]) {
+          searchStats.statesExamined++;
           const lockValues = state.lockValues.map((value, index) =>
             value + option.lockValues[index]
           );
@@ -333,7 +345,8 @@ export function calculateReachableStatRange(
 }
 
 export function calculateDenseLockRanges(
-  fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets
+  fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets,
+  searchStats = { statesExamined: 0 },
 ) {
   const lockedStats = Object.keys(lockedTargets);
   const unlockedStats = STATS.filter(stat => !lockedStats.includes(stat));
@@ -350,7 +363,7 @@ export function calculateDenseLockRanges(
   const objective = unlockedStats[0] || null;
   const probe = calculateReachableStatRange(
     fixedPiece, numPlus5, numPlus10, numPlus3, fragments,
-    lockedTargets, objective
+    lockedTargets, objective, searchStats,
   );
   if (!probe) return { feasible: false, ranges: {} };
   if (unlockedStats.length === 0) return { feasible: true, ranges };
@@ -358,7 +371,8 @@ export function calculateDenseLockRanges(
 
   if (unlockedStats.length === 2) {
     const companion = unlockedStats[1];
-    const totalArmor = 450 + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
+    const totalArmor = STATS.reduce((sum, stat) => sum + fixedPiece.baseStats[stat], 360)
+      + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
     const lockedArmorSum = Object.values(lockedArmorTargets)
       .reduce((sum, value) => sum + value, 0);
     const remainingArmor = totalArmor - lockedArmorSum;
@@ -387,26 +401,29 @@ export function calculateReachableRanges(
     .map(stat => `${stat}:${lockedTargets[stat]}`)
     .join(',');
   const cacheKey = [
-    fixedKey, numPlus5, numPlus10, numPlus3, fragmentKey, lockKey,
+    fixedKey, fixedPiece.primary, fixedPiece.secondary, fixedPiece.tertiary,
+    numPlus5, numPlus10, numPlus3, fragmentKey, lockKey,
   ].join('|');
   const cached = reachableRangeCache.get(cacheKey);
   if (cached) return cached;
+  const searchStats = { statesExamined: 0 };
+  const finish = result => cacheReachableRange(cacheKey, { ...result, searchStats });
 
   const lockedStats = Object.keys(lockedTargets);
   if (lockedStats.length >= 4) {
     const result = calculateDenseLockRanges(
-      fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets
+      fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, searchStats,
     );
-    return cacheReachableRange(cacheKey, result);
+    return finish(result);
   }
   const unlockedStats = STATS.filter(stat => !lockedStats.includes(stat));
   const feasibilityProbe = calculateReachableStatRange(
     fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets,
-    unlockedStats[0] || null
+    unlockedStats[0] || null, searchStats,
   );
   if (!feasibilityProbe) {
     const result = { feasible: false, ranges: {} };
-    return cacheReachableRange(cacheKey, result);
+    return finish(result);
   }
 
   const ranges = {};
@@ -422,10 +439,81 @@ export function calculateReachableRanges(
   }
   for (const stat of unlockedStats.slice(1)) {
     ranges[stat] = calculateReachableStatRange(
-      fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, stat
+      fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, stat, searchStats,
     );
   }
 
   const result = { feasible: true, ranges };
-  return cacheReachableRange(cacheKey, result);
+  return finish(result);
+}
+
+export function findReachabilityWitness({
+  fixedPiece,
+  numPlus5,
+  numPlus10,
+  numPlus3,
+  fragments = {},
+  visibleTarget = {},
+  problemSpec = createProblemSpec({
+    operation: "calculateReachability",
+    target: visibleTarget,
+    constraints: { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+    targetDomain: STAT_DOMAIN.VISIBLE,
+    fragments, numPlus5, numPlus10, numPlus3,
+    pieces: fixedPiece ? [fixedPiece] : [],
+  }),
+}) {
+  if (!problemSpec.valid || !fixedPiece
+      || STATS.some(stat => !Number.isSafeInteger(Number(visibleTarget[stat])))) {
+    return {
+      status: RESULT_STATUS.INVALID_INPUT,
+      witness: null,
+      proof: createProofEvidence(problemSpec, { method: "input-validation" }),
+    };
+  }
+  const armorTarget = getArmorSolverInput(problemSpec).target;
+  const searchStats = {};
+  const witnesses = findExactTargetWitnesses({
+    target: armorTarget,
+    numPlus5,
+    numPlus10,
+    numPlus3,
+    fixedConfig: fixedPiece,
+    searchStats,
+  });
+  const witness = witnesses[0] || null;
+  const hasClampBoundary = STATS.some(stat =>
+    Number(visibleTarget[stat]) === 0 || Number(visibleTarget[stat]) === 200);
+  const proof = createProofEvidence(problemSpec, {
+    producer: "exact-target-oracle",
+    method: "exact-target-oracle",
+    complete: !hasClampBoundary,
+    scope: "target-point",
+    outcome: witness ? "feasible" : "infeasible",
+    statesExamined: searchStats.statesExamined,
+    assumptions: ["known-data", "complete-catalog", "point-target-only"],
+    limitation: hasClampBoundary ? "clamped boundary requires an interval-complete proof" : null,
+  });
+  if (witness) {
+    witness.totals = { ...armorTarget };
+    witness.visibleTotals = Object.fromEntries(STATS.map(stat => [
+      stat,
+      visibleStatFromArmor(armorTarget[stat], fragments[stat] || 0),
+    ]));
+    return {
+      status: hasClampBoundary ? RESULT_STATUS.SEARCH_LIMIT_REACHED : RESULT_STATUS.EXACT_TARGET_PROVEN,
+      witness,
+      proof,
+    };
+  }
+  return {
+    status: hasClampBoundary
+      ? RESULT_STATUS.SEARCH_LIMIT_REACHED
+      : RESULT_STATUS.INFEASIBLE_PROVEN,
+    witness: null,
+    proof,
+    reason: hasClampBoundary
+      ? "clamped boundary corresponds to an armor-domain interval"
+      : null,
+  };
 }

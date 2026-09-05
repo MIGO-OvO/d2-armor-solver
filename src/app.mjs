@@ -832,7 +832,8 @@ function hasNonExactTargetRules() {
 function solutionSatisfiesCurrentTargetRules(solution) {
   if (!solution) return false;
   if (!lastSolverTarget || !lastSolverConstraints?.targetRules) {
-    return solution.score === 0;
+    return Boolean(lastSolverTarget) && STATS.every(stat =>
+      solution.totals[stat] === lastSolverTarget[stat]);
   }
   return satisfiesTargetConstraints(
     solution.totals,
@@ -1751,9 +1752,13 @@ function renderSolutionStatRows(counts, prefix = '') {
 }
 
 function formatFarmTuning(piece) {
-  return piece.tuningMode === 'plus3'
-    ? l('+3模式', '+3模式', '+3 mode')
-    : l(`固定 +5 ${STAT_LABELS[piece.tuningTo]}`, `固定 +5 ${STAT_LABELS[piece.tuningTo]}`, `Fixed +5 ${STAT_LABELS[piece.tuningTo]}`);
+  if (piece.exotic) return l('异域可选调整', '異域可選調校', 'Exotic flexible Tuning');
+  const tunedStat = piece.tunedStat || piece.tuningTo;
+  return l(
+    `固有 +5 ${STAT_LABELS[tunedStat]}`,
+    `固有 +5 ${STAT_LABELS[tunedStat]}`,
+    `Intrinsic +5 ${STAT_LABELS[tunedStat]}`,
+  );
 }
 
 function renderFarmRequirements(result) {
@@ -1968,12 +1973,18 @@ function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
     rangeSummary.style.display = 'none';
   }
 
-  document.getElementById('scoreDisplay').innerHTML =
-    l(
-      `得分：<strong>${result.score.toFixed(0)}</strong>（0=完美）| 总属性：<strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`,
-      `得分：<strong>${result.score.toFixed(0)}</strong>（0=完美）| 總數值：<strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`,
-      `Score: <strong>${result.score.toFixed(0)}</strong> (0 = perfect) | Total stats: <strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`
-    );
+  const proofLabel = allSolutions.status === 'EXACT_TARGET_PROVEN'
+    ? l('精确目标已证明', '精確目標已證明', 'Exact target proven')
+    : allSolutions.status === 'RULE_FEASIBLE_PROVEN'
+      ? l('硬规则可行性已证明', '硬規則可行性已證明', 'Hard-rule feasibility proven')
+      : allSolutions.status === 'INFEASIBLE_PROVEN'
+        ? l('不可达已证明 · 显示最佳违反目标 witness', '不可達已證明 · 顯示最佳違反目標 witness', 'Infeasibility proven · best violating witness')
+        : l('搜索受限 · 当前最佳 witness', '搜尋受限 · 目前最佳 witness', 'Search limited · current-best witness');
+  document.getElementById('scoreDisplay').innerHTML = `${proofLabel} | ${l(
+    `总属性：<strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`,
+    `總數值：<strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`,
+    `Total stats: <strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`,
+  )}`;
 
   // "已有毕业装备" section
   buildOwnedGearSection(finalTotals, targets);
@@ -2086,16 +2097,23 @@ function appendImperfectWarning() {
         'Try changing the number of +3 Tuning pieces or adjusting target stats.'
       );
 
-  const warning = hasFuzzyRules
+  const searchLimited = allSolutions.status === 'SEARCH_LIMIT_REACHED';
+  const warning = searchLimited
     ? l(
-        '没有配装满足全部属性规则。以下方案<strong>按符合程度排序</strong>（越靠前越接近规则）。',
-        '沒有配裝滿足全部屬性規則。以下方案<strong>按符合程度排序</strong>（越前越接近規則）。',
-        'No loadout satisfies every stat rule. The solutions below are <strong>sorted by fit</strong>.'
+        '\u641c\u7d22\u8fbe\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u4ec5\u4e3a\u5f53\u524d\u6700\u4f73 witness\uff0c\u5c1a\u672a\u8bc1\u660e\u5168\u5c40\u6700\u4f18\u6216\u4e0d\u53ef\u8fbe\u3002',
+        '\u641c\u5c0b\u9054\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u50c5\u70ba\u76ee\u524d\u6700\u4f73 witness\uff0c\u5c1a\u672a\u8b49\u660e\u5168\u57df\u6700\u512a\u6216\u4e0d\u53ef\u9054\u3002',
+        'Search limit reached. The entries below are current-best witnesses; global optimality or infeasibility is not proven.'
+      )
+    : hasFuzzyRules
+    ? l(
+        '穷尽搜索已证明没有配装满足全部属性规则；以下是最佳违反规则 witness。',
+        '窮盡搜尋已證明沒有配裝滿足全部數值規則；以下是最佳違反規則 witness。',
+        'Exhaustive search proved that no loadout satisfies every stat rule. The best violating witness is shown below.'
       )
     : l(
-        '没有配装能精确达成全部目标。以下方案<strong>按符合程度排序</strong>（越靠前越接近目标）。',
-        '沒有配裝能精確達成全部目標。以下方案<strong>按符合程度排序</strong>（越前越接近目標）。',
-        'No loadout reaches every target exactly. The solutions below are <strong>sorted by fit</strong> (closer to the top is closer to target).'
+        '穷尽搜索已证明精确目标不可达；以下是最佳违反目标 witness。',
+        '窮盡搜尋已證明精確目標不可達；以下是最佳違反目標 witness。',
+        'Exhaustive search proved the exact target infeasible. The best violating witness is shown below.'
       );
   msgDiv.insertAdjacentHTML(
     'beforeend',
@@ -2130,7 +2148,13 @@ function renderSolutionNav() {
 
   navBar.style.display = 'block';
   const hasFuzzyRules = hasNonExactTargetRules();
-  const title = hasPerfect
+  const title = !hasPerfect && allSolutions.status === 'SEARCH_LIMIT_REACHED'
+    ? l(
+        `\u641c\u7d22\u53d7\u9650\uff1b\u663e\u793a ${total} \u4e2a\u5f53\u524d\u6700\u4f73 witness`,
+        `\u641c\u5c0b\u53d7\u9650\uff1b\u986f\u793a ${total} \u500b\u76ee\u524d\u6700\u4f73 witness`,
+        `Search limited; showing ${total} current-best witnesses`,
+      )
+    : hasPerfect
     ? hasFuzzyRules
       ? l(
           `共 ${total} 种满足全部规则的方案，按易刷程度排序`,
@@ -2144,14 +2168,14 @@ function renderSolutionNav() {
         )
     : hasFuzzyRules
       ? l(
-          `无完全满足方案，${total} 种近似方案，按符合程度排序`,
-          `無完全滿足方案，${total} 種近似方案，按符合程度排序`,
-          `No fully satisfying solution; ${total} approximate solutions sorted by fit`,
+          `已证明没有完全满足方案；显示 ${total} 个违反规则 witness`,
+          `已證明沒有完全滿足方案；顯示 ${total} 個違反規則 witness`,
+          `No fully satisfying solution was proven; ${total} violating witnesses shown`,
         )
       : l(
-          `无精确方案，${total} 种近似方案，按符合程度排序`,
-          `無精確方案，${total} 種近似方案，按符合程度排序`,
-          `No exact solution; ${total} approximate solutions sorted by fit`,
+          `已证明精确目标不可达；显示 ${total} 个最佳违反目标 witness`,
+          `已證明精確目標不可達；顯示 ${total} 個最佳違反目標 witness`,
+          `Exact target proven infeasible; ${total} best violating witnesses shown`,
         );
   const shownNote = truncated
     ? l(
@@ -4109,7 +4133,9 @@ function updateUpgradeTuningChoice(index, value) {
   }
   const [, tuningTo] = String(value).split(':');
   updateUpgradePiece(index, 'tuningMode', 'shift');
-  updateUpgradePiece(index, 'tuningTo', STATS.includes(tuningTo) ? tuningTo : STATS[0], true);
+  const tunedStat = STATS.includes(tuningTo) ? tuningTo : STATS[0];
+  updateUpgradePiece(index, 'tunedStat', tunedStat);
+  updateUpgradePiece(index, 'tuningTo', tunedStat, true);
 }
 
 function renderUpgradeBuildEditor(openIndex = null) {
@@ -4474,9 +4500,13 @@ function formatUpgradeConfigSummary(config) {
 // otherwise a "+5 stat only" replacement looks like no change at all.
 function formatUpgradePieceSummary(piece) {
   const config = getUpgradeConfig(piece);
-  const roll = piece.tuningMode === 'plus3'
-    ? l('调整 +3', '調校 +3', 'Tuning +3')
-    : l(`调整 +5${STAT_LABELS[piece.tuningTo]}`, `調校 +5${STAT_LABELS[piece.tuningTo]}`, `Tuning +5 ${STAT_LABELS[piece.tuningTo]}`);
+  const roll = piece.exotic
+    ? l('异域可选调整', '異域可選調校', 'Exotic flexible Tuning')
+    : l(
+      `固有 +5${STAT_LABELS[piece.tunedStat || piece.tuningTo]}`,
+      `固有 +5${STAT_LABELS[piece.tunedStat || piece.tuningTo]}`,
+      `Intrinsic +5 ${STAT_LABELS[piece.tunedStat || piece.tuningTo]}`,
+    );
   return `${formatUpgradeConfigSummary(config)} · ${roll}`;
 }
 
@@ -4713,24 +4743,25 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
     ${buildUpgradeBaselineNote(analysis)}
     ${buildUpgradeAssignments(analysis, analysis.baseline, true)}`;
   } else if (!analysis.plan) {
-    // No replacement beats the current armor: it is already the closest setup.
+    // The bounded fallback found no better witness. This is not an optimality
+    // or infeasibility proof, so the UI must keep that distinction explicit.
     const rearranged = analysis.reassignModifiers && analysis.enteredBaseline &&
       STATS.some(stat =>
         analysis.enteredBaseline.finalTotals[stat] !== analysis.baseline.finalTotals[stat]
       );
     body.innerHTML = `<div class="upgrade-hero">
       <div>
-        <div class="upgrade-eyebrow">${l('当前配装已是最接近目标','目前配裝已是最接近目標','Current loadout is already the closest')}</div>
+        <div class="upgrade-eyebrow">${l('搜索受限','搜尋受限','Search limited')}</div>
         <div class="upgrade-recommendation">${rearranged
-          ? l('重配模组后已是最接近的方案','重配模組後已是最接近的方案','Already the closest after rearranging the mods')
-          : l('当前已是最接近目标的方案','目前已是最接近目標的方案','Already the closest setup to your targets')}</div>
+          ? l('当前最佳 witness：重配模组','目前最佳 witness：重配模組','Current-best witness after rearranging mods')
+          : l('当前配装是目前最佳 witness','目前配裝是當前最佳 witness','Current loadout is the best witness found')}</div>
         <p class="upgrade-recommendation-copy">${l(
-          `所有能刷到的替换方案都无法缩小与目标的差距，当前这套就是最接近目标的选择（还差 ${analysis.baseline.metrics.shortfall} 点）。想完全达标，请降低一项目标，或放开一件固定护甲。`,
-          `所有能刷到的替換方案都無法縮小與目標的差距，目前這套就是最接近目標的選擇（還差 ${analysis.baseline.metrics.shortfall} 點）。想完全達標，請降低一項目標，或放開一件固定防具。`,
-          `Every replacement we could farm fails to close the gap to your targets — this loadout is already the closest (${analysis.baseline.metrics.shortfall} points short). To hit everything, lower a target or unlock one fixed piece.`
+          `受限搜索未找到更好的替换 witness；当前方案还差 ${analysis.baseline.metrics.shortfall} 点，但尚未证明全局最优或不可达。`,
+          `受限搜尋未找到更好的替換 witness；目前方案還差 ${analysis.baseline.metrics.shortfall} 點，但尚未證明全域最優或不可達。`,
+          `The bounded search found no better replacement witness. This setup is ${analysis.baseline.metrics.shortfall} points short; global optimality and infeasibility remain unproven.`
         )}</p>
       </div>
-      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('当前已是最接近 · 无需刷取','目前已是最接近 · 無需刷取','Closest available · no farming needed')}</span></div>
+      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('当前最佳 witness · 无需刷取','目前最佳 witness · 無需刷取','Current-best witness · no farming needed')}</span></div>
     </div>
     ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
     ${buildUpgradeBaselineNote(analysis)}`;
@@ -4748,8 +4779,10 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
     body.innerHTML = farmLabel + `<div class="upgrade-hero">
       <div>
         <div class="upgrade-eyebrow">${reached
-          ? l('推荐换法','推薦換法','Recommended swaps')
-          : l('最接近目标的换法','最接近目標的換法','Closest match found')}</div>
+          ? (plan.replacementProof?.minimal
+            ? l('已证明的最少替换方案','已證明的最少替換方案','Proven minimum-replacement plan')
+            : l('可行替换 witness','可行替換 witness','Feasible replacement witness'))
+          : l('当前最佳替换 witness','目前最佳替換 witness','Current-best replacement witness')}</div>
         <div class="upgrade-recommendation">${reached
           ? l(`换 ${plan.replacementCount} 件就能达标`, `換 ${plan.replacementCount} 件就能達標`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} to meet every target`)
           : l(`换 ${plan.replacementCount} 件后还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件後還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} and remain ${plan.metrics.shortfall} short`)}</div>
@@ -4760,9 +4793,9 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
             'The swaps are already prioritized. Follow the steps below. If you do not want to farm yet, keeping your current armor and rearranging tuning and mods works too, but leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below).'
           )
           : l(
-            '目前没有一套能把六项都补齐。下面这套差得最少，可以先参考；如果不想刷，保留现有护甲重排调整与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。想完全达标，还得降低目标或放开一件固定护甲。',
-            '目前沒有一套能把六項都補齊。下面這套差得最少，可以先參考；如果不想刷，保留目前防具重排調校與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。想完全達標，還得降低目標或放開一件固定防具。',
-            'Nothing we found fills all six targets. This is the closest setup; without farming, keeping your current armor and rearranging tuning and mods leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below). To hit everything, lower a target or unlock one fixed piece.'
+            '受限搜索尚未找到补齐六项的 witness。下面是当前最佳结果，不代表已证明全局最优或不可达；保留现有护甲重排调整与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点。',
+            '受限搜尋尚未找到補齊六項的 witness。下面是目前最佳結果，不代表已證明全域最優或不可達；保留目前防具重排調校與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點。',
+            'The bounded search has not found a witness meeting all six targets. The result below is current-best, not a proof of global optimality or infeasibility; keeping current armor leaves ' + analysis.baseline.metrics.shortfall + ' points short.'
           )}</p>
       </div>
       <div class="upgrade-outcome">
@@ -4898,7 +4931,17 @@ async function solveInventoryRequirement({
     lastInventoryConstraints = constraints;
     renderInventoryResults(result);
     if (result?.results?.length) {
-      return `<div class="msg info">${icon("check")}${requirementSnapshot.type === "none"
+      const proofLabel = result.status === 'EXACT_TARGET_PROVEN'
+        ? l('精确目标已证明', '精確目標已證明', 'Exact target proven')
+        : result.status === 'RULE_FEASIBLE_PROVEN'
+          ? l('规则可行性已证明', '規則可行性已證明', 'Rule feasibility proven')
+          : l('搜索受限：显示当前最佳 witness', '搜尋受限：顯示目前最佳 witness', 'Search limited: showing current-best witnesses');
+      const executionLabel = result.executionStatus === 'VERIFIED'
+        ? l('执行预检已验证', '執行預檢已驗證', 'Execution preflight verified')
+        : result.executionStatus === 'BLOCKED'
+          ? l('执行预检被阻止', '執行預檢被阻止', 'Execution preflight blocked')
+          : l('执行能力尚未完全验证', '執行能力尚未完全驗證', 'Execution capability unverified');
+      return `<div class="msg info">${icon("check")}<strong>${proofLabel}</strong> · ${executionLabel}<br>${requirementSnapshot.type === "none"
         ? l(
           `从已有护甲清单中找到 ${result.results.length} 个可行组合（无需刷取），可核对后导出 DIM 配装链接。`,
           `從已有防具清單中找到 ${result.results.length} 個可行組合（無需刷取），可核對後匯出 DIM 配裝連結。`,
@@ -5348,12 +5391,14 @@ async function analyzeArmorUpgrades() {
       });
       renderUpgradeAnalysis(analysis, true);
       messages.innerHTML = inventoryMessage + `<div class="msg info">${icon('check')}${analysis.baseline.metrics.allReached
-        ? l('算好了：现在这套不用换护甲。','算好了：目前這套不用換防具。','Done: you can keep the current armor.')
+        ? l('已证明：当前护甲无需替换。','已證明：目前防具無需替換。','Proven: the current armor needs no replacements.')
         : (analysis.plan
           ? (analysis.plan.metrics.allReached
-            ? l(`算好了：换 ${analysis.plan.replacementCount} 件就能达标。`, `算好了：換 ${analysis.plan.replacementCount} 件就能達標。`, `Done: replace ${analysis.plan.replacementCount} piece(s) to meet every target.`)
-            : l(`算好了：最接近的方案还差 ${analysis.plan.metrics.shortfall} 点。`, `算好了：最接近的方案還差 ${analysis.plan.metrics.shortfall} 點。`, `Done: the closest setup is still ${analysis.plan.metrics.shortfall} points short.`))
-          : l('没有找到能缩小缺口的替换方案。','沒有找到能縮小缺口的替換方案。','No replacement plan reduces the gap.'))}</div>`;
+            ? (analysis.plan.replacementProof?.minimal
+              ? l(`已证明：最少替换 ${analysis.plan.replacementCount} 件即可达标。`, `已證明：最少替換 ${analysis.plan.replacementCount} 件即可達標。`, `Proven minimum: replace ${analysis.plan.replacementCount} piece(s) to meet every target.`)
+              : l(`找到可行 witness：替换 ${analysis.plan.replacementCount} 件即可达标。`, `找到可行 witness：替換 ${analysis.plan.replacementCount} 件即可達標。`, `Feasible witness: replace ${analysis.plan.replacementCount} piece(s) to meet every target.`))
+            : l(`当前最佳 witness 还差 ${analysis.plan.metrics.shortfall} 点；未证明全局最优。`, `目前最佳 witness 還差 ${analysis.plan.metrics.shortfall} 點；未證明全域最優。`, `The current-best witness is ${analysis.plan.metrics.shortfall} points short; global optimality is not proven.`))
+          : l('搜索结束但没有改进 witness；不代表已证明不可达。','搜尋結束但沒有改進 witness；不代表已證明不可達。','Search ended without an improved witness; this is not an infeasibility proof.'))}</div>`;
     } catch (error) {
       console.error('Armor upgrade analysis failed', error);
       messages.innerHTML = inventoryMessage + '<div class="msg error">' + icon('block') + l(
