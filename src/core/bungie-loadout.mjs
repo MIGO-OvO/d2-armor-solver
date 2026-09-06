@@ -23,6 +23,9 @@ import {
 } from "./fragment-data.data.mjs";
 import { assignArmorMods } from "./armor-mod-assignment.mjs";
 import { buildSocketCapabilities } from "./armor-sockets.mjs";
+import { assertSolutionConsistency, createCanonicalId, createPieceCapability } from "./solver-v3-contract.mjs";
+import { STATS } from "./armor-model.mjs";
+import { buildArmorInventory } from "./bungie-inventory.mjs";
 
 export const CHARACTER_LOADOUTS_COMPONENT = "CharacterLoadouts";
 export const LOADOUT_WRITE_COMPONENTS = [
@@ -344,6 +347,7 @@ export function buildCustomLoadoutPlan({
   inventory,
   availablePlugHashes = null,
   targetCharacterInventory = null,
+  verifiedWitness = null,
 }) {
   const errors = [];
   const warnings = [];
@@ -406,6 +410,17 @@ export function buildCustomLoadoutPlan({
     modAssignments,
     availablePlugHashes,
   });
+  if (verifiedWitness) {
+    try {
+      const checked = assertSolutionConsistency(verifiedWitness.problemSpec, verifiedWitness);
+      assertSolutionConsistency({...verifiedWitness.problemSpec,
+        pieceCapabilities: resolvedItems.map(createPieceCapability)}, verifiedWitness);
+      if (createCanonicalId({...checked, pieces, config: undefined, tuningAssignments, modAssignments}) !== checked.canonicalId
+          || STATS.some(stat => checked.armorTotals[stat] !== assignment.actualTotals[stat])) {
+        errors.push({code: "witnessTotalsMismatch"});
+      }
+    } catch { errors.push({code: "unverifiedWitness"}); }
+  }
   for (const miss of assignment.unassignedMods) {
     errors.push({
       code: MISS_REASON_TO_ERROR_CODE[miss.reason] || "plugUnavailable",
@@ -510,6 +525,9 @@ export function buildCustomLoadoutPlan({
     classId,
     classType: characterClassType,
     assignment,
+    witnessCanonicalId: verifiedWitness?.canonicalId || null,
+    expectedArmorTotals: verifiedWitness?.armorTotals || null,
+    expectedSocketPlugs: assignment.expectedSocketPlugs,
     preparationTransfers,
     sourceEquips: [...sourceEquipByCharacter].map(([characterId, itemIds]) => ({
       characterId,
@@ -557,6 +575,7 @@ export async function verifyLoadoutApplication({
   targetCharacterId,
   equipItemIds,
   plugOperations,
+  expectedArmorTotals = null,
 }, { retries = 1, delayMs = 1500 } = {}) {
   if (!membershipId) {
     return { status: "failed", mismatches: [{ kind: "missingMembershipId" }], attempts: 1 };
@@ -589,6 +608,16 @@ export async function verifyLoadoutApplication({
           actual: Number(socket?.plugHash) || 0,
         });
       }
+    }
+    if (expectedArmorTotals) {
+      const inventory = buildArmorInventory(response).items;
+      const requested = new Set(equipItemIds.map(String));
+      const actual = Object.fromEntries(STATS.map(stat => [stat, 0]));
+      for (const item of inventory.filter(p => requested.has(String(p.id)))) {
+        for (const stat of STATS) actual[stat] += item.displayedStats[stat];
+      }
+      for (const stat of STATS) if (actual[stat] !== expectedArmorTotals[stat]) mismatches.push({kind: "armorTotalMismatch", stat,
+        expected: expectedArmorTotals[stat], actual: actual[stat]});
     }
     lastMismatches = mismatches;
     if (mismatches.length === 0) return { status: "verified", mismatches: [], attempts: attempt + 1 };
@@ -760,8 +789,9 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
         membershipType: plan.membershipType,
         membershipId: plan.membershipId,
         targetCharacterId: plan.targetCharacterId,
-        equipItemIds: [...equippedIds],
-        plugOperations: appliedPlugOperations,
+        equipItemIds: plan.equipItemIds,
+        plugOperations: plan.expectedSocketPlugs || plan.plugOperations,
+        expectedArmorTotals: plan.expectedArmorTotals,
       });
     }
 

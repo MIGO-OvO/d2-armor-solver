@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ARCHETYPES, BASE_CONFIGS, createExoticConfig } from "../src/core/armor-model.mjs";
+import { ARCHETYPES, BASE_CONFIGS, STATS as STAT_IDS, createExoticConfig } from "../src/core/armor-model.mjs";
 import { rankInventoryPlans, assignmentCanReachExact } from "../src/core/inventory-plan.mjs";
 import { runSolver } from "../src/core/solver.mjs";
 import { createProblemSpec } from "../src/core/solver-v3-contract.mjs";
@@ -18,7 +18,8 @@ function makeSolution(configs = BASE_CONFIGS.slice(0, 5), exoticIndex = null) {
       to: index % 2 === 0 ? "melee" : "grenade",
     })),
     modAssignments: Object.fromEntries(configs.map((_, index) => [index, null])),
-    totals: {},
+    totals: Object.fromEntries(STAT_IDS.map(stat => [stat, configs.reduce((sum, c, index) =>
+      sum + c.baseStats[stat] + (stat === 'health' ? -5 : stat === (index % 2 === 0 ? 'melee' : 'grenade') ? 5 : 0), 0)])),
     score: 0,
     exoticIndex,
   };
@@ -40,6 +41,11 @@ function makeItem(solution, index, overrides = {}) {
     tertiary: config.tertiary,
     tuningMode: tuning.mode === "+3" ? "plus3" : "shift",
     tuningTo: tuning.to,
+    tunedStat: tuning.to,
+    allowedTuningStats: [...STAT_IDS],
+    baseStats: {...config.baseStats},
+    effectiveBaseStats: {...config.baseStats},
+    optimizationBaseStats: {...config.baseStats},
     setHash: null,
     ...overrides,
   };
@@ -277,8 +283,10 @@ const DIM_HEADER = [
 const DIM_EXOTIC_CLASS_ITEM_ROW = [
   "Relativism", "2809120022", "relativism-1", "Exotic", "5", "猎人披风", "猎人",
   "", "", "", "5", "Vault", "false", "500",
-  "10", "20", "10", "20", "10", "35", "105",
-  "5", "25", "5", "20", "5", "30", "90",
+  // Raw non-framework values are 0; tier-5 masterwork raises them to 5.
+  // This fixture must physically match the solver's 90-point config, not 105.
+  "5", "20", "5", "20", "5", "35", "90",
+  "0", "25", "0", "20", "0", "30", "75",
 ].join(",");
 
 function makeExoticClassItemFromDIM() {

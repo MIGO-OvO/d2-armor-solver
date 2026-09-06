@@ -1,4 +1,10 @@
 import { STATS } from "./armor-model.mjs";
+import { createProblemSpec, getArmorSolverInput } from "./solver-v3-contract.mjs";
+
+export function visibleConstraintsToArmor(target, fragments, constraints) {
+  const problem = createProblemSpec({target, fragments, constraints, targetDomain: "visible"});
+  return {targetRules: true, ...getArmorSolverInput(problem).constraints};
+}
 
 export function createTargetConstraints({
   modes = {},
@@ -60,7 +66,8 @@ export function preferConstraintSatisfyingSolutions(
   constraints = {},
 ) {
   const satisfying = solutions.filter(solution =>
-    satisfiesTargetConstraints(solution.totals, target, constraints));
+    satisfiesTargetConstraints(solution.problemSpec?.constraintModel?.targetDomain === "visible"
+      ? solution.visibleTotals : solution.totals, target, constraints));
   if (satisfying.length === 0) return solutions;
   for (const key of ["certificate", "status", "executionStatus", "proof"]) {
     if (solutions[key] !== undefined) satisfying[key] = solutions[key];

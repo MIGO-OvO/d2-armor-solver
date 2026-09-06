@@ -11,6 +11,7 @@ import {
   createProofEvidence,
   getArmorSolverInput,
   satisfiesConstraintModel,
+  compareIntegerTuples,
 } from "./solver-v3-contract.mjs";
 
 const modifierAllocationCache = new Map();
@@ -179,7 +180,7 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
         const isPriority = constraints?.priorities && constraints.priorities[s];
         const adjustedExcess = isPriority ? excess - 999 : excess;
         if (adjustedExcess > bestExcess ||
-            (Math.abs(adjustedExcess - bestExcess) < 0.001 && target[s] < target[fromStat])) {
+            (adjustedExcess === bestExcess && target[s] < target[fromStat])) {
           bestExcess = adjustedExcess;
           fromStat = s;
         }
@@ -194,7 +195,7 @@ export function applySingleTuning(totals, target, constraints, forcedFromHits, f
       const isPriority = constraints?.priorities && constraints.priorities[s];
       const adjustedDeficit = isPriority ? deficit - 999 : deficit;
       if (toStat === null || adjustedDeficit < bestDeficit ||
-          (Math.abs(adjustedDeficit - bestDeficit) < 0.001 &&
+          (adjustedDeficit === bestDeficit &&
            (constraints?.priorities && constraints.priorities[s] && !constraints.priorities[toStat]))) {
         bestDeficit = adjustedDeficit;
         toStat = s;
@@ -510,7 +511,8 @@ export function singleStatScoreRank(stat, actual, target, constraints) {
     ? difference * difference * 3
     : difference * difference;
   if (priorities[stat]) fitPenalty *= 50;
-  const level = priorityLevels[stat] || 0;
+  const orderIndex = (constraints?.priorityOrder || []).indexOf(stat);
+  const level = priorityLevels[stat] || (orderIndex >= 0 ? Math.min(3, orderIndex + 1) : 0);
   const tier = [0, 0, 0];
   let softPenalty = 0;
   if (level >= 1 && level <= 3) tier[level - 1] = fitPenalty;
@@ -623,12 +625,7 @@ function findBestRelaxedTargets(total, target, constraints, limit = 8, valueStep
 }
 
 export function compareScoreRanks(left, right) {
-  const length = Math.max(left?.length || 0, right?.length || 0);
-  for (let index = 0; index < length; index++) {
-    const difference = (left?.[index] || 0) - (right?.[index] || 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
+  return compareIntegerTuples(left || [], right || []);
 }
 
 export function scoreStats(actual, target, constraints) {
@@ -874,17 +871,17 @@ export function runSolver(problemSpec) {
             const hypo = { ...partialTotals };
             for (const s of STATS) hypo[s] += piece.baseStats[s];
             const completedPieces = i + 1 + (fixedExotic ? 1 : 0);
-            const ratio = completedPieces / 5;
             const projectedTarget = Object.fromEntries(STATS.map(stat => [
-              stat, target[stat] * ratio,
+              stat, target[stat] * completedPieces,
             ]));
             const projectedConstraints = {
               ...constraints,
               minimums: Object.fromEntries(Object.entries(
                 constraints?.minimums || {}
-              ).map(([stat, value]) => [stat, value * ratio])),
+              ).map(([stat, value]) => [stat, value * completedPieces])),
+              maximums: Object.fromEntries(Object.entries(constraints?.maximums || {}).map(([stat, value]) => [stat, value * 5])),
             };
-            const rank = scoreStatsRank(hypo, projectedTarget, projectedConstraints);
+            const rank = scoreStatsRank(Object.fromEntries(STATS.map(stat => [stat, hypo[stat] * 5])), projectedTarget, projectedConstraints);
             if (!bestAfterRank || compareScoreRanks(rank, bestAfterRank) < 0) {
               bestAfterRank = rank;
               bestPiece = piece;

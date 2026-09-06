@@ -9,6 +9,9 @@ import {
   compareIntegerTuples,
   createCanonicalId,
   createProblemSpec,
+  samePhysicalPiece,
+  sameImmutableCapabilities,
+  stableSerialize,
   STAT_DOMAIN,
 } from "./solver-v3-contract.mjs";
 import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
@@ -94,7 +97,7 @@ export function normalizeUpgradePiece(piece, slotIndex) {
   normalized.exotic = Boolean(normalized.exotic);
   if (!['shift', 'plus3'].includes(normalized.tuningMode)) normalized.tuningMode = 'shift';
   const suppliedAllowedTuningStats = normalizeTuningStats(piece?.allowedTuningStats);
-  let legacyTunedStat = fallback.tunedStat;
+  let legacyTunedStat = piece?.sourceId || piece?.tuningUnknown ? null : fallback.tunedStat;
   if (Object.prototype.hasOwnProperty.call(piece || {}, "tunedStat")) {
     legacyTunedStat = piece.tunedStat;
   } else if (Object.prototype.hasOwnProperty.call(piece || {}, "tuningStat")) {
@@ -107,7 +110,7 @@ export function normalizeUpgradePiece(piece, slotIndex) {
     : null;
   normalized.allowedTuningStats = normalized.exotic
     ? suppliedAllowedTuningStats
-      ?? (normalized.dataConfidence?.tuning === "unknown" ? null : [...STATS])
+      ?? (normalized.sourceId || normalized.dataConfidence?.tuning === "unknown" ? null : [...STATS])
     : normalized.tunedStat
       ? [normalized.tunedStat]
       : null;
@@ -131,7 +134,9 @@ export function normalizeUpgradePiece(piece, slotIndex) {
         || (normalized.exotic && !normalized.allowedTuningStats.includes(normalized.tuningTo))) {
       normalized.tuningTo = normalized.allowedTuningStats[0];
     }
-    if (!STATS.includes(normalized.tuningFrom)
+    if (normalized.tuningInstalled === false) normalized.tuningFrom = null;
+    else if (normalized.sourceId && !STATS.includes(normalized.tuningFrom)) normalized.tuningFrom = null;
+    else if (!STATS.includes(normalized.tuningFrom)
         || normalized.tuningFrom === normalized.tuningTo) {
       normalized.tuningFrom = STATS.find(stat => stat !== normalized.tuningTo);
     }
@@ -146,11 +151,8 @@ export function normalizeUpgradePiece(piece, slotIndex) {
   // the stat frame still distinguishes rolls.
   normalized.primaryPerkId = normalized.primaryPerkId || null;
   normalized.secondaryPerkId = normalized.secondaryPerkId || null;
-  normalized.tuningAssignment = Object.freeze({
-    mode: normalized.tuningMode,
-    from: normalized.tuningFrom,
-    to: normalized.tuningTo,
-  });
+  // Legacy alias was an independent, easily stale copy of assignment state.
+  delete normalized.tuningAssignment;
   return normalized;
 }
 
@@ -177,7 +179,8 @@ export function createUpgradePieceFromItem(item, slotIndex) {
   // back to a fabricated direction (handoff 3.4) — it carries tuningUnknown so
   // the plan/equip path can reject "cannot confirm tuning" instead of guessing.
   const tunedStat = !exotic
-    ? item.tunedStat || item.tuningTo || item.tuningStat || null
+    ? Object.prototype.hasOwnProperty.call(item, "tunedStat")
+      ? item.tunedStat : item.tuningTo || item.tuningStat || null
     : null;
   const allowedTuningStats = exotic
     ? normalizeTuningStats(item.allowedTuningStats)
@@ -186,12 +189,12 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     ? null
     : item.tuningTo || tunedStat || allowedTuningStats?.[0] || null;
   const tuningUnknown = tuningMode !== "plus3" && !tuningTo;
-  const tuningFrom = STATS.includes(item.tuningFrom)
-    ? item.tuningFrom
-    : (tuningTo ? STATS.find(stat => stat !== tuningTo) : null);
+  const tuningInstalled = item.tuningInstalled ?? (item.modifierInference?.status === "exact"
+    ? tuningMode === "plus3" || Boolean(item.tuningFrom && item.tuningTo) : undefined);
+  const tuningFrom = STATS.includes(item.tuningFrom) ? item.tuningFrom : null;
   const armorModSize = [0, 5, 10].includes(Number(item.armorModSize))
     ? Number(item.armorModSize)
-    : 10;
+    : 0;
   const armorModStat = STATS.includes(item.armorModStat)
     ? item.armorModStat
     : archetype.secondary;
@@ -204,6 +207,7 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     tuningTo,
     tunedStat,
     tuningUnknown,
+    tuningInstalled,
     armorModSize,
     armorModStat,
     exotic,
@@ -230,6 +234,10 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     energy: item.energy || null,
     allowedTuningStats,
     dataConfidence: item.dataConfidence || null,
+    canEquip: item.canEquip,
+    cannotEquipReason: item.cannotEquipReason,
+    owner: item.owner,
+    equipped: item.equipped,
   }, slotIndex);
 }
 
@@ -253,7 +261,7 @@ export function applyManualUpgradeModifiers(config, piece) {
     for (const stat of STATS) {
       if (stat !== config.primary && stat !== config.secondary && stat !== config.tertiary) totals[stat] += 1;
     }
-  } else if (piece.tuningTo && piece.tuningFrom) {
+  } else if (piece.tuningInstalled !== false && piece.tuningTo && piece.tuningFrom) {
     // An unknown-tuned imported piece carries null tuning fields and simply
     // contributes its base stats — never a fabricated +5/-5 (handoff 3.4).
     totals[piece.tuningFrom] -= 5;
@@ -310,7 +318,10 @@ export function getUpgradeModifierBudget(
 // direction it carried; the budget and re-picking stay consistent.
 function coercePiecesToPlus5Only(pieces) {
   return pieces.map((piece, index) => piece.tuningMode === 'plus3'
-    ? normalizeUpgradePiece({ ...piece, tuningMode: 'shift' }, index)
+    ? normalizeUpgradePiece({ ...piece, tuningMode: 'shift', tuningInstalled: true,
+      // This is an explicit requested assignment change, not import inference.
+      tuningFrom: STATS.find(stat => stat !== (piece.tunedStat || piece.allowedTuningStats?.[0])),
+    }, index)
     : piece);
 }
 
@@ -510,7 +521,9 @@ export function evaluateUpgradePieces(
   const manualArmorTotals = getManualUpgradeArmorTotals(pieces);
   const manualEvaluation = {
     totals: manualArmorTotals,
-    tuningAssignments: pieces.map(piece => piece.tuningUnknown
+    tuningAssignments: pieces.map(piece => piece.tuningInstalled === false
+      ? { mode: 'none', from: null, to: null }
+      : piece.tuningUnknown
       ? null // no fabricated direction for an unknown-tuned imported piece
       : piece.tuningMode === 'plus3'
         ? { mode:'+3', from:null, to:null }
@@ -550,7 +563,9 @@ export function evaluateUpgradePieces(
         automaticFinal, targets, automaticEvaluation.score, normalizedRequiredStats,
         automaticEvaluation.rank, userConstraints, fragments
       );
-      if (compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
+      const manualKnown = manualEvaluation.tuningAssignments.every(tuning => tuning
+        && (tuning.mode === '+3' || tuning.mode === 'none' || tuning.from && tuning.to));
+      if (!manualKnown || compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
         evaluation = automaticEvaluation;
       }
     }
@@ -577,12 +592,15 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
       piece.tunedStat,
       piece.allowedTuningStats?.join(',') || "unknown",
       piece.armorModSize,
-      ...(reassignModifiers ? [] : [
+      piece.exotic,
+      piece.tuningUnknown,
+      piece.tuningInstalled,
+      ...[
         piece.tuningMode,
         piece.tuningFrom,
         piece.tuningTo,
         piece.armorModStat,
-      ]),
+      ],
       ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
     ].join(':')).join('|') + '#' + Number(reassignModifiers) + '#' + Number(onlyPlus5Tuning) + '#' + constraintsKey;
     const cached = cache.get(key);
@@ -597,7 +615,9 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
 
 function projectPiecesToFullMasterwork(pieces) {
   return pieces.map(piece => piece.optimizationBaseStats
-    ? { ...piece, baseStats: { ...piece.optimizationBaseStats } }
+    ? { ...piece, physicalBaseStats: { ...(piece.physicalBaseStats || getUpgradeConfig(piece).baseStats) },
+      requiresMasterwork: STATS.some(stat => piece.optimizationBaseStats[stat] !== getUpgradeConfig(piece).baseStats[stat]),
+      baseStats: { ...piece.optimizationBaseStats } }
     : { ...piece });
 }
 
@@ -607,30 +627,12 @@ const MAX_FULL_TARGET_CACHE_ENTRIES = 12;
 function getFullTargetSearchKey(
   pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning, userConstraints = {}
 ) {
-  return [
-    ...STATS.map(stat => targets[stat] || 0),
-    ...STATS.map(stat => fragments[stat] || 0),
-    Number(reassignModifiers),
-    Number(onlyPlus5Tuning),
-    JSON.stringify(userConstraints),
-    ...pieces.flatMap(piece => [
-      piece.archetypeId,
-      piece.tertiary,
-      piece.tunedStat,
-      piece.allowedTuningStats?.join(',') || "unknown",
-      piece.tuningMode,
-      piece.tuningFrom,
-      piece.tuningTo,
-      piece.armorModSize,
-      piece.armorModStat,
-      Number(Boolean(piece.locked)),
-      ...STATS.map(stat => piece.baseStats?.[stat] ?? "farm"),
-    ]),
-  ].join('|');
+  // Cached plans retain identities, locks, perks and actual/projected bases.
+  return stableSerialize({ pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning, userConstraints });
 }
 
 function cacheFullTargetSearch(key, result) {
-  fullTargetSearchCache.set(key, result);
+  fullTargetSearchCache.set(key, structuredClone(result));
   if (fullTargetSearchCache.size > MAX_FULL_TARGET_CACHE_ENTRIES) {
     fullTargetSearchCache.delete(fullTargetSearchCache.keys().next().value);
   }
@@ -647,6 +649,8 @@ export function getUpgradePieceIdentity(piece) {
   return {
     archetype: config.archetype,
     tertiary: config.tertiary,
+    sourceId: piece.sourceId || null,
+    baseStats: piece.sourceId ? { ...(piece.physicalBaseStats || config.baseStats) } : null,
     // Current mode/source/destination belong to the assignment. Only the
     // Legendary roll's immutable directional capability belongs to identity.
     tunedStat: piece.exotic ? null : piece.tunedStat || null,
@@ -657,6 +661,7 @@ export function getUpgradePieceIdentity(piece) {
 
 export function sameUpgradeIdentity(left, right) {
   return left.archetype === right.archetype &&
+    left.sourceId === right.sourceId && stableSerialize(left.baseStats) === stableSerialize(right.baseStats) &&
     left.tertiary === right.tertiary &&
     left.tunedStat === right.tunedStat &&
     left.primaryPerkId === right.primaryPerkId &&
@@ -683,6 +688,13 @@ export function setUpgradePieceConfig(piece, slotIndex, config) {
   delete hypothetical.tunedStat;
   delete hypothetical.tuningStat;
   delete hypothetical.allowedTuningStats;
+  delete hypothetical.physicalBaseStats;
+  delete hypothetical.requiresMasterwork;
+  delete hypothetical.sockets;
+  delete hypothetical.energy;
+  delete hypothetical.dataConfidence;
+  delete hypothetical.tuningInstalled;
+  delete hypothetical.tuningUnknown;
   // A farmed class item has no fixed perk roll, so the source piece's perks
   // must not carry into the replacement candidate's identity.
   delete hypothetical.primaryPerkId;
@@ -728,6 +740,10 @@ export function mapUpgradeConfigsToPieces(pieces, unlockedIndices, candidateConf
 export function getUpgradeReplacements(beforePieces, afterPieces) {
   const replacements = [];
   for (let slotIndex = 0; slotIndex < beforePieces.length; slotIndex++) {
+    if (samePhysicalPiece(beforePieces[slotIndex], afterPieces[slotIndex])
+        && !sameImmutableCapabilities(beforePieces[slotIndex], afterPieces[slotIndex])) {
+      throw new Error("UNVERIFIED: retained physical piece changed immutable capabilities");
+    }
     const beforeIdentity = getUpgradePieceIdentity(beforePieces[slotIndex]);
     const afterIdentity = getUpgradePieceIdentity(afterPieces[slotIndex]);
     if (!sameUpgradeIdentity(beforeIdentity, afterIdentity)) {
@@ -930,11 +946,17 @@ export function applyUpgradeEvaluationToPieces(pieces, evaluation) {
   return pieces.map((piece, index) => {
     const tuning = evaluation.tuningAssignments[index];
     const mod = evaluation.modAssignments[index];
+    if (tuning?.mode === '+5-5') {
+      const capability = getUpgradeTuningCapability(piece);
+      if (!capability.allowedDirectionalStats?.includes(tuning.to) || !STATS.includes(tuning.from)
+          || tuning.from === tuning.to) throw new Error("UNVERIFIED: assignment exceeds Tuning capability");
+    }
     return normalizeUpgradePiece({
       ...piece,
       tuningMode: tuning && tuning.mode === '+3' ? 'plus3' : 'shift',
       tuningFrom: tuning && tuning.from ? tuning.from : piece.tuningFrom,
       tuningTo: tuning && tuning.to ? tuning.to : piece.tuningTo,
+      tuningInstalled: tuning?.mode === 'none' ? false : tuning ? true : piece.tuningInstalled,
       armorModSize: mod ? mod.size : 0,
       armorModStat: mod ? mod.stat : piece.armorModStat,
     }, index);
@@ -985,6 +1007,8 @@ export function buildUpgradePlanSteps(
     }
     steps.push({
       ...bestChoice.replacement,
+      afterPiece: bestChoice.pieces[bestChoice.replacement.slotIndex],
+      pieces: bestChoice.pieces,
       evaluation: bestChoice.evaluation,
     });
     currentPieces = bestChoice.pieces;
@@ -1537,7 +1561,8 @@ export function analyzeUpgradeCandidates(
     const fullTargetCacheKey = getFullTargetSearchKey(
       pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning, userConstraints
     );
-    let fullTargetSearch = fullTargetSearchCache.get(fullTargetCacheKey);
+    let fullTargetSearch = fullTargetSearchCache.has(fullTargetCacheKey)
+      ? structuredClone(fullTargetSearchCache.get(fullTargetCacheKey)) : null;
     if (!fullTargetSearch) {
       const fullTargetEvaluator = allStatsRequired
         ? evaluatePieces

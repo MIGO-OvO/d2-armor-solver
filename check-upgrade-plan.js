@@ -8,6 +8,7 @@ const S = {
   ...(await import('./src/core/armor-model.mjs')),
   ...(await import('./src/core/upgrade-optimizer.mjs')),
 };
+const { createProblemSpec, assertSolutionConsistency } = await import('./src/core/solver-v3-contract.mjs');
 const STATS = S.STATS;
 const fmt = o => STATS.map(s => `${s}=${o[s]}`).join(' ');
 const totalsOf = (pieces, fragments) =>
@@ -60,6 +61,12 @@ for (const reassignModifiers of [false, true]) {
     // Headline totals must come out of the recommended pieces plus the printed
     // tuning and mod layout — nothing else.
     const configured = S.applyUpgradeEvaluationToPieces(plan.pieces, plan.evaluation);
+    const verificationSpec = createProblemSpec({operation: 'analyzeUpgrade', pieces, fragments});
+    assertSolutionConsistency(verificationSpec, {
+      pieces: configured.map(piece => ({...piece, baseStats: {...S.getUpgradeConfig(piece).baseStats}})),
+      tuningAssignments: plan.evaluation.tuningAssignments,
+      modAssignments: plan.evaluation.modAssignments,
+    }, plan.evaluation.finalTotals);
     assert.deepStrictEqual(
       totalsOf(configured, fragments), plan.evaluation.finalTotals,
       `${label}: plan totals unreachable\n  shown   ${fmt(plan.evaluation.finalTotals)}\n  rebuilt ${fmt(totalsOf(configured, fragments))}`
@@ -121,6 +128,7 @@ for (const reassignModifiers of [false, true]) {
         `${label}: step ${stepIndex + 1} prints a tuning it did not use`
       );
     });
+    if (trial % 10 === 9) console.log(`upgrade progress: reassign=${reassignModifiers} trial=${trial + 1}/40`);
 
     // The last step has to land exactly on the advertised result.
     const last = plan.steps[plan.steps.length - 1];

@@ -37,8 +37,10 @@ import {
   createTargetConstraints,
   preferConstraintSatisfyingSolutions,
   satisfiesTargetConstraints,
+  visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
+import { createSolutionDisplayModel, assertSolutionConsistency } from "./core/solver-v3-contract.mjs";
 import { buildRepository } from "./core/build-repository.mjs";
 import {
   BUILD_CHANNEL,
@@ -789,34 +791,9 @@ function buildExoticConstraints(settings, _fragments) {
 // Whether any stat carries a priority level or a non-exact fuzzy constraint.
 // When true the exact-budget validation is relaxed so the solver distributes
 // the surplus/deficit by priority instead of demanding an exact sum.
-function hasFuzzyOrPriority() {
-  return STATS.some(stat =>
-    (statPriority[stat] || 0) > 0 ||
-    (statFuzzyMode[stat] && statFuzzyMode[stat] !== '=')
-  );
-}
-
-// Build solver constraints from the per-stat priority badges and fuzzy modes.
-// minimums/maximums are expressed in the armor-needed domain (target minus
-// Fragment bonus), matching the adjTarget the solver already receives.
 function buildUserConstraints(fragments) {
-  const targetValues = {};
-  const maximumValues = {};
-  for (const stat of STATS) {
-    const value = getVal('target_' + stat);
-    const frag = fragments[stat] || 0;
-    targetValues[stat] = Math.max(0, value - frag);
-    maximumValues[stat] = Math.max(
-      0,
-      getVal('targetMax_' + stat) - frag,
-    );
-  }
-  return createTargetConstraints({
-    modes: statFuzzyMode,
-    priorityLevels: statPriority,
-    targetValues,
-    maximumValues,
-  });
+  const target = Object.fromEntries(STATS.map(stat => [stat, getVal("target_" + stat)]));
+  return visibleConstraintsToArmor(target, fragments, buildVisibleTargetConstraints());
 }
 
 // Use the same default-exact rules as the from-scratch solver. Required-stat
@@ -825,12 +802,20 @@ function buildUpgradeFuzzyConstraints(fragments) {
   return buildUserConstraints(fragments);
 }
 
+function buildVisibleTargetConstraints() {
+  return createTargetConstraints({modes: statFuzzyMode, priorityLevels: statPriority,
+    targetValues: Object.fromEntries(STATS.map(stat => [stat, getVal('target_' + stat)])),
+    maximumValues: Object.fromEntries(STATS.map(stat => [stat, getVal('targetMax_' + stat)])),
+  });
+}
+
 function hasNonExactTargetRules() {
   return STATS.some(stat => (statFuzzyMode[stat] || '=') !== '=');
 }
 
 function solutionSatisfiesCurrentTargetRules(solution) {
   if (!solution) return false;
+  if (solution.certificate) return ['EXACT_TARGET_PROVEN', 'RULE_FEASIBLE_PROVEN'].includes(solution.certificate.status);
   if (!lastSolverTarget || !lastSolverConstraints?.targetRules) {
     return Boolean(lastSolverTarget) && STATS.every(stat =>
       solution.totals[stat] === lastSolverTarget[stat]);
@@ -1089,7 +1074,7 @@ function updateInlineRangeHints(ranges, _lockedStats = [], invalidStats = []) {
 
 async function getNearestTargetSuggestion(exoticSettings, numPlus5, numPlus10, numPlus3, fragments) {
   const targets = Object.fromEntries(STATS.map(stat => [
-    stat, Math.max(0, getVal('target_' + stat) - (fragments[stat] || 0)),
+    stat, getVal('target_' + stat),
   ]));
   const cacheKey = [
     exoticSettings.config.baseStats ? STATS.map(stat => exoticSettings.config.baseStats[stat]).join(',') : '',
@@ -1097,16 +1082,19 @@ async function getNearestTargetSuggestion(exoticSettings, numPlus5, numPlus10, n
     STATS.map(stat => fragments[stat] || 0).join(','),
     STATS.map(stat => getVal('target_' + stat)).join(','),
     exoticSettings.priorityOrder.join(','),
+    JSON.stringify(buildUserConstraints(fragments)),
   ].join('|');
   const cached = nearestTargetCache.get(cacheKey);
   if (cached) return cached;
 
   const result = (await solveLoadoutAsync({
     target: targets,
+    fragments,
+    targetDomain: 'visible',
     numPlus5,
     numPlus10,
     numPlus3,
-    constraints: buildUserConstraints(fragments),
+    constraints: buildVisibleTargetConstraints(),
     exoticSettings,
     runtimeOptions: { fastMode: true },
   }))[0];
@@ -1271,7 +1259,6 @@ async function solve() {
   let numPlus10 = getVal('numPlus10');
   const numPlus3 = getEnabledPlus3Count();
   const exoticSettings = getExoticSettings();
-  const advancedTargets = hasFuzzyOrPriority();
   if (exoticSettings && !exoticSettings.config) {
     msgs.innerHTML = `<div class="msg error">${icon('block')}${l(
       '异域职业物品的属性框架无效，请重新选择特性。',
@@ -1305,123 +1292,10 @@ async function solve() {
     )}</div>`;
   }
 
-  // Compute adjusted target (armor must provide this)
-  // First pass: calculate raw adjTarget
-  const adjTarget = {};
-  const armorMinPerStat = numPlus3 * 6; // +3 pieces give each mw stat +1 (5->6), +5/-5 can tune to 0
-  let minViolations = [];
-
-  for (const s of STATS) {
-    let raw = targets[s] - (fragments[s] || 0);
-    if (targets[s] === 0 || raw < 0) raw = 0; // Game floors at 0
-
-    // Check against achievable minimum (final = armor + fragment, armor can't go below armorMinPerStat)
-    const finalMin = Math.max(0, armorMinPerStat + (fragments[s] || 0));
-    if (targets[s] < finalMin) {
-      minViolations.push({ stat: s, target: targets[s], min: finalMin });
-      adjTarget[s] = finalMin;
-    } else {
-      adjTarget[s] = raw;
-    }
-  }
-
-  if (minViolations.length > 0 && !exoticSettings && !advancedTargets) {
-    const vList = minViolations.map(v => l(
-      `${STAT_LABELS[v.stat]}：目标<strong>${v.target}</strong>，当前最低只能到<strong>${v.min}</strong>（${armorMinPerStat}点护甲基础 + 碎片${fragments[v.stat]||0}）。请改为${v.min}或以上。`,
-      `${STAT_LABELS[v.stat]}：目標<strong>${v.target}</strong>，目前最低只能到<strong>${v.min}</strong>（${armorMinPerStat}點防具基礎 + 碎片${fragments[v.stat]||0}）。請改為${v.min}或以上。`,
-      `${STAT_LABELS[v.stat]}: target <strong>${v.target}</strong>, but the current minimum is <strong>${v.min}</strong> (${armorMinPerStat} armor base + ${fragments[v.stat]||0} from Fragments). Set it to ${v.min} or higher.`
-    )
-    ).join('<br>');
-    msgs.innerHTML += `<div class="msg error">${icon('block')}
-      ${l('<strong>以下属性目标低于可达最低值，无法求解：</strong>','<strong>以下數值目標低於可達最低值，無法求解：</strong>','<strong>These target stats are below their reachable minimums:</strong>')}<br>
-      ${vList}
-    </div>`;
-    return; // Stop — user must fix values first
-  }
-
-  // Check tuning slot feasibility
-  // Stats below the "no-tuning" baseline need -5 slots. Sum must fit within available slots.
-  if (numPlus3 < 5 && !exoticSettings && !advancedTargets) {
-    const availSlots = 5 - numPlus3;
-    const noTuneBase = armorMinPerStat + availSlots * 5;
-    const slotDetails = [];
-    let totalSlotsNeeded = 0;
-
-    for (const s of STATS) {
-      if (adjTarget[s] < noTuneBase) {
-        const deficit = noTuneBase - adjTarget[s];
-        const needed = Math.ceil(deficit / 5);
-        totalSlotsNeeded += needed;
-        slotDetails.push({ stat: s, adj: adjTarget[s], deficit, needed, frag: fragments[s] || 0 });
-      }
-    }
-
-    if (totalSlotsNeeded > availSlots) {
-      const detailList = slotDetails.map(d => l(
-        `${STAT_LABELS[d.stat]}：目标${targets[d.stat]}（护甲需${d.adj}点），比基准${noTuneBase}低${d.deficit}，需${d.needed}个-5槽。`,
-        `${STAT_LABELS[d.stat]}：目標${targets[d.stat]}（防具需${d.adj}點），比基準${noTuneBase}低${d.deficit}，需${d.needed}個-5欄位。`,
-        `${STAT_LABELS[d.stat]}: target ${targets[d.stat]} (${d.adj} armor points), ${d.deficit} below baseline ${noTuneBase}; needs ${d.needed} -5 slot(s).`
-      )
-      ).join('<br>');
-      msgs.innerHTML += `<div class="msg error">${icon('block')}
-        ${l('<strong>调整槽不足，无法求解：</strong>','<strong>調校欄位不足，無法求解：</strong>','<strong>Not enough Tuning slots:</strong>')}<br>
-        ${l(
-          `只有<strong>${availSlots}</strong>个-5调整槽可用，但低于基准（${noTuneBase}点）的属性共需<strong>${totalSlotsNeeded}</strong>个：`,
-          `只有<strong>${availSlots}</strong>個-5調校欄位可用，但低於基準（${noTuneBase}點）的數值共需<strong>${totalSlotsNeeded}</strong>個：`,
-          `Only <strong>${availSlots}</strong> -5 Tuning slots are available, but stats below baseline ${noTuneBase} require <strong>${totalSlotsNeeded}</strong>:`
-        )}<br>
-        ${detailList}<br><br>
-        ${l('请提高低属性目标、增加+3件数（会提高基准但释放槽位），或降低高属性目标。','請提高低數值目標、增加+3件數（會提高基準但釋放欄位），或降低高數值目標。','Raise low targets, use more +3 pieces (raising the baseline but freeing slots), or lower high targets.')}
-      </div>`;
-      return;
-    }
-  }
-
-  let adjSum = 0;
-  for (const s of STATS) adjSum += adjTarget[s];
-
-  const totalBudget = 450 + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
-  const fragSumVal = Object.values(fragments).reduce((a,b)=>a+b,0);
-
-  // Validation: total sum
-  const diff = adjSum - totalBudget;
-  if (diff > 0 && !exoticSettings && !advancedTargets) {
-    msgs.innerHTML += `<div class="msg error">${icon('block')}
-      ${l(
-        `<strong>目标总和超出预算</strong><br>护甲需提供<strong>${adjSum}</strong>点（目标${Object.values(targets).reduce((a,b)=>a+b,0)} - 碎片${fragSumVal}），但护甲上限为<strong>${totalBudget}</strong>点（基础450 + 模组${numPlus5*5+numPlus10*10}）。<br>超出<strong>${diff}</strong>点，请降低目标或增加模组。`,
-        `<strong>目標總和超出預算</strong><br>防具需提供<strong>${adjSum}</strong>點（目標${Object.values(targets).reduce((a,b)=>a+b,0)} - 碎片${fragSumVal}），但防具上限為<strong>${totalBudget}</strong>點（基礎450 + 模組${numPlus5*5+numPlus10*10}）。<br>超出<strong>${diff}</strong>點，請降低目標或增加模組。`,
-        `<strong>Target total exceeds the budget.</strong><br>Armor must provide <strong>${adjSum}</strong> (${Object.values(targets).reduce((a,b)=>a+b,0)} target minus ${fragSumVal} from Fragments), but the maximum is <strong>${totalBudget}</strong> (450 base + ${numPlus5*5+numPlus10*10} from mods).<br>Lower targets or add ${diff} points of mods.`
-      )}
-    </div>`;
-    return;
-  } else if (diff < 0 && !exoticSettings && !advancedTargets) {
-    msgs.innerHTML += `<div class="msg warn">${icon('warn')}
-      ${l(
-        `<strong>目标总和（${adjSum}点）低于护甲产出（${totalBudget}点），相差${-diff}点。</strong><br>多余点数无法消除。请将目标总和调整为<strong>${totalBudget}</strong>再求解。`,
-        `<strong>目標總和（${adjSum}點）低於防具產出（${totalBudget}點），相差${-diff}點。</strong><br>多餘點數無法消除。請將目標總和調整為<strong>${totalBudget}</strong>再求解。`,
-        `<strong>The target total (${adjSum}) is ${-diff} below armor output (${totalBudget}).</strong><br>Those points cannot be removed. Set the total to <strong>${totalBudget}</strong> and solve again.`
-      )}
-    </div>`;
-    return;
-  }
-  if ((exoticSettings || advancedTargets) && diff !== 0) {
-    const priorityStats = [];
-    for (let level = 1; level <= 3; level++) {
-      for (const stat of STATS) {
-        if ((statPriority[stat] || 0) === level) priorityStats.push(stat);
-      }
-    }
-    const priorityText = priorityStats.length > 0
-      ? priorityStats.map(s => STAT_LABELS[s]).join(' → ')
-      : l('综合接近目标', '綜合接近目標', 'overall closeness to targets');
-    msgs.innerHTML += `<div class="msg warn">${icon('warn')}
-      ${l(
-        `当前模式允许目标超出或低于预算。求解器按<strong>${priorityText}</strong>的顺序计算可达极限，再兼顾其余属性。`,
-        `目前模式允許目標超出或低於預算。求解器依<strong>${priorityText}</strong>的順序計算可達極限，再兼顧其餘數值。`,
-        `This mode allows targets above or below the budget. The solver maximizes reachable values in this order: <strong>${priorityText}</strong>, then balances the remaining stats.`
-      )}
-    </div>`;
-  }
+  // Only the core may interpret visible targets and clamp intervals.
+  const adjTarget = { ...targets };
+  lastNumPlus5 = numPlus5;
+  lastNumPlus10 = numPlus10;
 
   // Run solver
   loading.classList.add('show');
@@ -1429,11 +1303,13 @@ async function solve() {
   document.getElementById('btnSolve').disabled = true;
 
   try {
-    const solverConstraints = buildUserConstraints(fragments);
+    const solverConstraints = buildVisibleTargetConstraints();
     lastSolverTarget = { ...adjTarget };
     lastSolverConstraints = solverConstraints;
     const solvedSolutions = await solveLoadoutAsync({
       target: adjTarget,
+      fragments,
+      targetDomain: 'visible',
       numPlus5,
       numPlus10,
       numPlus3,
@@ -1466,7 +1342,7 @@ async function solve() {
     // Count +3 pieces in best result
     const plus3Count = bestResult.tuningAssignments.filter(t => t.mode === '+3').length;
     const targetRulesSatisfied = satisfiesTargetConstraints(
-      bestResult.totals,
+      bestResult.visibleTotals,
       adjTarget,
       solverConstraints,
     );
@@ -1639,6 +1515,7 @@ async function refineWithPriorities() {
   try {
     const newSolutions = await solveLoadoutAsync({
       target: adjTarget,
+      fragments: lastFragments,
       numPlus5: lastNumPlus5,
       numPlus10: lastNumPlus10,
       numPlus3: lastNumPlus3,
@@ -1670,9 +1547,8 @@ async function refineWithPriorities() {
     displayAllResults(newResult, lastTargets, lastFragments);
 
     // Add before/after cost analysis on top
-    const newFinal = { ...newResult.totals };
-    const oldFinal = { ...prevResult.totals };
-    for (const s of STATS) { newFinal[s] += (lastFragments[s] || 0); oldFinal[s] += (lastFragments[s] || 0); }
+    const newFinal = createSolutionDisplayModel(newResult).visibleTotals;
+    const oldFinal = createSolutionDisplayModel(prevResult).visibleTotals;
 
     const costLines = [];
     for (const st of STATS) {
@@ -1906,6 +1782,7 @@ function displayPieceResults(result, _fragments) {
       </div>
     </section>
 
+    ${renderWitnessBreakdown(result)}
     ${renderFarmRequirements(result)}
   `;
 
@@ -1915,12 +1792,27 @@ function displayPieceResults(result, _fragments) {
   exoticCard.style.display = 'block';
 }
 
+function renderWitnessBreakdown(witness) {
+  const model = createSolutionDisplayModel(witness);
+  return `<details class="upgrade-assignment-details witness-breakdown" data-canonical-id="${escapeHtml(model.canonicalId)}">
+    <summary>${l('逐件复算数据', '逐件重算資料', 'Per-piece verification data')}</summary>
+    ${model.pieces.map((piece, index) => `<div class="witness-piece" data-source-id="${escapeHtml(String(piece.sourceId || ''))}" data-tuning="${escapeHtml(JSON.stringify(model.tuningAssignments[index]))}" data-mod="${escapeHtml(JSON.stringify(model.modAssignments[index] || null))}" data-archetype="${escapeHtml(piece.archetype || piece.archetypeId || '')}" data-tertiary="${piece.tertiary}">
+      <strong>${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot))} · ${escapeHtml(piece.itemName || piece.archetype || piece.archetypeId || '')}</strong>
+      <span>${formatUpgradeTuning(model.tuningAssignments[index])} · ${formatUpgradeArmorMod(model.modAssignments[index])}</span>
+      <div>${STATS.map(stat => `<span data-base-stat="${stat}" data-value="${piece.baseStats[stat]}">${STAT_LABELS[stat]} ${piece.baseStats[stat]} </span>`).join('')}</div>
+      ${piece.requiresMasterwork ? `<small>${l('需先完成大师杰作', '需先完成大師之作', 'Full masterwork required')}</small>` : ''}
+    </div>`).join('')}
+    <div class="witness-fragments">${l('碎片', '碎片', 'Fragments')}: ${STATS.map(stat => `<span data-fragment-stat="${stat}" data-value="${model.fragments[stat]}">${STAT_LABELS[stat]} ${model.fragments[stat]} </span>`).join('')}</div>
+    <div class="witness-totals">${STATS.map(stat => `<span data-total-stat="${stat}" data-value="${model.visibleTotals[stat]}">${STAT_LABELS[stat]} ${model.visibleTotals[stat]} </span>`).join('')}</div>
+  </details>`;
+}
+
 function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
   const results = document.getElementById('results');
   results.classList.add('show');
   document.getElementById('floatJump').style.display = 'flex';
-  const finalTotals = { ...result.totals };
-  for (const s of STATS) finalTotals[s] += (fragments[s] || 0);
+  const display = createSolutionDisplayModel(result);
+  const finalTotals = display.visibleTotals;
 
   renderSolutionNav();
 
@@ -3197,6 +3089,7 @@ function bungiePlanErrorMessage(error) {
 }
 
 function getInventorySolutionEquipState(entry) {
+  if (!entry?.verified) return { available: false, reason: 'UNVERIFIED: witness' };
   if (!__BUNGIE_OAUTH_CLIENT_ID__) return { available: false, hidden: true };
   if (!hasToken()) return { available: false, reason: l("请先登录 Bungie。", "請先登入 Bungie。", "Sign in to Bungie first.") };
   if (importSource !== "bungie" || !bungieProfileState) {
@@ -3227,10 +3120,13 @@ function getInventorySolutionEquipState(entry) {
     inventory: importedInventory,
     availablePlugHashes: bungieProfileState.availablePlugHashesByCharacter?.[bungieTargetCharacterId],
     targetCharacterInventory: bungieProfileState.characterInventories?.[bungieTargetCharacterId],
+    verifiedWitness: entry,
   });
   if (!plan.valid) {
     return { available: false, reason: bungiePlanErrorMessage(plan.errors[0]), plan };
   }
+  if (plan.assignment.executionStatus !== 'VERIFIED') return {available: false, plan,
+    reason: l('UNVERIFIED：执行证据不足。', 'UNVERIFIED：執行證據不足。', 'UNVERIFIED: execution evidence is incomplete.')};
   return {
     available: !isBungieApplying,
     plan,
@@ -3328,10 +3224,8 @@ async function equipInventorySolution(index) {
       return;
     }
     const verification = result.verification;
-    const realMismatches = verification?.mismatches?.filter(
-      match => match.kind !== "missingMembershipId",
-    ) || [];
-    if (verification?.status === "failed" && realMismatches.length > 0) {
+    const realMismatches = verification?.mismatches || [];
+    if (verification?.status !== "verified" || plugFailures.length > 0) {
       const missingPlugs = realMismatches
         .filter(match => match.kind === "plugMismatch").length;
       showBungieEquipMessage(
@@ -4270,6 +4164,12 @@ function handleUpgradeDrop(event, targetIndex) {
 
 function updateUpgradePiece(index, field, value, rerender = false) {
   if (!upgradeBuildState[index]) return;
+  if (upgradeBuildState[index].sourceId && ['archetypeId', 'tertiary', 'tunedStat', 'exotic'].includes(field)
+      && upgradeBuildState[index][field] !== value) {
+    // Editing a roll creates a hypothetical replacement, not a changed instance.
+    for (const key of ['sourceId', 'hash', 'baseStats', 'physicalBaseStats', 'optimizationBaseStats',
+      'requiresMasterwork', 'sockets', 'energy', 'dataConfidence', 'tuningInstalled']) delete upgradeBuildState[index][key];
+  }
   upgradeBuildState[index][field] = value;
   if (field === 'locked') manualLocked[index] = Boolean(value);
   upgradeBuildState[index] = normalizeUpgradePiece(upgradeBuildState[index], index);
@@ -4480,7 +4380,8 @@ function initializeUpgradeOptimizer() {
 
 
 function formatUpgradeTuning(assignment) {
-  if (!assignment) return t('none');
+  if (!assignment) return l('未知调整', '未知調校', 'Unknown Tuning');
+  if (assignment.mode === 'none') return t('none');
   if (assignment.mode === '+3') return '+3';
   const from = STAT_LABELS[assignment.from];
   const to = STAT_LABELS[assignment.to];
@@ -4668,7 +4569,7 @@ function buildUpgradePlanFlow(analysis, plan) {
 }
 
 function buildUpgradeAssignments(analysis, evaluation, open = false) {
-  return `<details class="upgrade-assignment-details" ${open ? 'open' : ''}>
+  return renderWitnessBreakdown(evaluation) + `<details class="upgrade-assignment-details" ${open ? 'open' : ''}>
     <summary>${l('最终调整与模组配置','最終調校與模組配置','Final Tuning and stat mods')}</summary>
     <div class="upgrade-assignment-list">${evaluation.configs.map((config, index) => `
       <div class="upgrade-assignment-row">
@@ -4712,6 +4613,10 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
   const section = document.getElementById('upgradeResults');
   const body = document.getElementById('upgradeResultsBody');
   section.hidden = calculatorMode !== 'upgrade';
+  if (!analysis.verified) {
+    body.innerHTML = `<div class="msg error">${l('UNVERIFIED：护甲或调整资料不足，无法证明此方案。', 'UNVERIFIED：防具或調校資料不足，無法證明此方案。', 'UNVERIFIED: Armor or Tuning data is incomplete; this plan cannot be proved.')}</div>`;
+    return;
+  }
   let displayedEvaluation = analysis.baseline;
 
   if (analysis.baseline.metrics.allReached) {
@@ -5030,18 +4935,7 @@ function renderInventoryResults(result) {
 //     verify against) stay as the display source.
 // Fragments are added here the same way the solver's finalTotals include them.
 function getDisplayedFinalTotals(entry) {
-  if (importSource === "bungie" && bungieProfileState) {
-    const equipState = getInventorySolutionEquipState(entry);
-    const actual = equipState.plan?.assignment?.actualTotals;
-    if (actual) {
-      const fragments = getUpgradeFragments();
-      return Object.fromEntries(STATS.map(stat => [
-        stat,
-        Math.max(0, (actual[stat] || 0) + (fragments[stat] || 0)),
-      ]));
-    }
-  }
-  return entry.finalTotals;
+  return createSolutionDisplayModel(entry).visibleTotals;
 }
 
 function getInventoryResultSummary(entry) {
@@ -5149,6 +5043,7 @@ function renderInventoryResultDetail(entry, index) {
       </div>
     </div>
     ${renderInventoryBungieEquip(entry, index)}
+    ${renderWitnessBreakdown(entry)}
     <div class="inventory-result-stats" role="list">
       ${STATS.map(stat => {
         const actual = finalTotals[stat] || 0;
@@ -5168,12 +5063,13 @@ function renderInventoryResultDetail(entry, index) {
       }).join("")}
     </div>
     <div class="inventory-result-pieces" role="list">
-      ${entry.pieces.map(piece => {
+      ${entry.pieces.map((piece, pieceIndex) => {
         const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
         const set = piece.setHash ? getArmorSetByHash(piece.setHash) : null;
         return `<div class="inventory-result-piece" role="listitem">
           <span class="inventory-result-piece-slot">${getUpgradeSlotLabel(slotIndex)}</span>
           <span class="inventory-result-piece-name">${escapeHtml(piece.itemName || "—")}</span>
+          <span>${formatUpgradeTuning(entry.tuningAssignments[pieceIndex])} · ${formatUpgradeArmorMod(entry.modAssignments[pieceIndex])}</span>
           ${set ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(set))}</span>` : `<span></span>`}
           ${piece.locked ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${piece.exotic
             ? l("异域固定", "異域固定", "Fixed Exotic")
@@ -5306,6 +5202,7 @@ async function copyDimExportLink() {
 async function exportInventorySolution(index) {
   const entry = lastInventoryResult?.results?.[index];
   if (!entry) return;
+  assertSolutionConsistency(entry.problemSpec, entry, entry.finalTotals);
   const { url, count, modCount } = getDimLoadoutExport(
     entry.pieces, entry.tuningAssignments, entry.modAssignments
   );
@@ -5428,6 +5325,8 @@ function saveBuildsToStorage(builds) {
 
 function saveBuild() {
   if (allSolutions.length === 0) { alert(l('请先求解配装再保存。','請先求解配裝再儲存。','Solve a loadout before saving it.')); return; }
+  const witness = allSolutions[currentSolutionIdx];
+  assertSolutionConsistency(witness.problemSpec, witness);
 
   const targets = {};
   const fragments = {};
@@ -5461,7 +5360,7 @@ function saveBuild() {
       secondaryPerkId: exoticSettings.secondaryPerkId,
       priorityOrder: exoticSettings.priorityOrder,
     } : null,
-    result: allSolutions[currentSolutionIdx],
+    result: structuredClone(witness),
     savedAt: Date.now(),
   };
 
@@ -5516,7 +5415,14 @@ function loadBuild(build) {
   }
   updateBudget();
   if (build.result) {
+    try { assertSolutionConsistency(build.result.problemSpec, build.result); }
+    catch {
+      document.getElementById('messages').innerHTML = '<div class="msg warn">UNVERIFIED: ' + l('旧方案缺少可验证 witness，请重新求解。', '舊方案缺少可驗證 witness，請重新求解。', 'This saved plan has no valid witness. Solve it again.') + '</div>';
+      return;
+    }
     allSolutions = [build.result];
+    allSolutions.status = build.result.status;
+    allSolutions.certificate = build.result.certificate;
     currentSolutionIdx = 0;
     lastTargets = build.targets;
     lastFragments = build.fragments;

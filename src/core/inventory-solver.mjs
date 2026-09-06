@@ -29,6 +29,7 @@ export function solveInventoryLoadout({
   onlyPlus5Tuning = false,
   maxResults = 12,
   userConstraints = {},
+  searchLimits = {},
 }, problemSpec = createProblemSpec({
   operation: "solveInventory", targets, fragments, constraints: userConstraints,
   targetDomain: STAT_DOMAIN.VISIBLE, pieces: items,
@@ -58,6 +59,11 @@ export function solveInventoryLoadout({
     .join("|");
 
   const results = [];
+  const limit = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
+  const searchStats = { frontierComplete: true, assignmentComplete: !reassignModifiers,
+    statesExamined: 0, equivalentItems: 0, mergedStates: 0, peakStates: 0,
+    maxStates: limit(searchLimits.maxStates, 50000),
+    maxEvaluations: limit(searchLimits.maxEvaluations, 50000) };
   const seen = new Set();
   const push = (pieces, evaluation) => {
     if (!isLegalArmorLoadout(pieces)) return;
@@ -77,6 +83,7 @@ export function solveInventoryLoadout({
     );
     if (exhaustivePieces) {
       for (const pieces of exhaustivePieces) {
+        if (examined >= searchStats.maxEvaluations) { searchStats.frontierComplete = false; break; }
         if (!isLegalArmorLoadout(pieces)) continue;
         if (!satisfiesRequirement(pieces, setRequirement)) continue;
         push(pieces, evaluate(pieces));
@@ -87,8 +94,10 @@ export function solveInventoryLoadout({
     const exactPieces = searchAssignmentExact(
       bySlot, constrainedAssignment, lockedPiecesBySlot, setRequirement,
       reassignModifiers, onlyPlus5Tuning,
+      searchStats,
     );
     for (const pieces of exactPieces) {
+      if (examined >= searchStats.maxEvaluations) { searchStats.frontierComplete = false; break; }
       if (!isLegalArmorLoadout(pieces)) continue;
       if (!satisfiesRequirement(pieces, setRequirement)) continue;
       push(pieces, evaluate(pieces));
@@ -109,6 +118,7 @@ export function solveInventoryLoadout({
     && satisfiesRequirement(entry.pieces, setRequirement));
   validResults.sort((left, right) =>
     compareUpgradeMetrics(left.evaluation.metrics, right.evaluation.metrics)
+    || left.key.localeCompare(right.key)
   );
   const hasUnknownCapabilityData = problemSpec.pieceCapabilities.some(
     capability => !capability.executionKnown,
@@ -117,18 +127,18 @@ export function solveInventoryLoadout({
     requirement: setRequirement,
     requiredStats: normalizedRequiredStats,
     examined,
-    searchStats: { frontierComplete: true, assignmentComplete: !reassignModifiers },
+    searchStats,
     proof: createProofEvidence(problemSpec, {
       producer: "inventory-frontier",
       method: "complete-inventory-frontier",
-      complete: !reassignModifiers && !hasUnknownCapabilityData,
-      truncated: reassignModifiers,
+      complete: searchStats.frontierComplete && !reassignModifiers && !hasUnknownCapabilityData,
+      truncated: reassignModifiers || !searchStats.frontierComplete,
       statesExamined: examined,
       assumptions: hasUnknownCapabilityData ? [] : ["known-data", "fixed-modifier-assignments"],
       outcome: validResults.some(entry => satisfiesConstraintModel(
         entry.evaluation, problemSpec.constraintModel, STAT_DOMAIN.VISIBLE,
       )) ? "feasible" : "infeasible",
-      limitation: hasUnknownCapabilityData
+      limitation: !searchStats.frontierComplete ? "inventory resource limit reached" : hasUnknownCapabilityData
         ? "one or more inventory capabilities contain unknown data"
         : reassignModifiers ? "modifier assignment evaluator is bounded" : null,
     }),
@@ -187,7 +197,9 @@ function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot
 
 function projectInventoryPiece(piece) {
   return piece?.optimizationBaseStats
-    ? { ...piece, baseStats: { ...piece.optimizationBaseStats } }
+    ? { ...piece, physicalBaseStats: { ...piece.baseStats },
+      requiresMasterwork: STATS.some(stat => piece.optimizationBaseStats[stat] !== piece.baseStats[stat]),
+      baseStats: { ...piece.optimizationBaseStats } }
     : { ...piece };
 }
 
@@ -244,8 +256,17 @@ function getStateKey(state, includeCoverage = true) {
 function searchAssignmentExact(
   bySlot, assignment, lockedPiecesBySlot, requirement,
   reassignModifiers, onlyPlus5Tuning,
+  searchStats,
 ) {
   const candidatesBySlot = [];
+  // Exact interning, not a hash: different full capability strings cannot
+  // collide. State keys need the equality class, not thousands of repeated
+  // characters. Scope is one search so IDs cannot leak into a cache/witness.
+  const capabilityIds = new Map();
+  const internCapability = key => {
+    if (!capabilityIds.has(key)) capabilityIds.set(key, capabilityIds.size + 1);
+    return capabilityIds.get(key);
+  };
   for (const slot of SLOT_ORDER) {
     const slotIndex = SLOT_ORDER.indexOf(slot);
     const lockedPiece = lockedPiecesBySlot.get(slot);
@@ -264,7 +285,7 @@ function searchAssignmentExact(
         piece, reassignModifiers, onlyPlus5Tuning
       );
       const coverage = getRequirementCoverage(piece, requirement);
-      const capabilityKey = createPieceCapability(piece, slotIndex).equivalenceKey;
+      const capabilityKey = internCapability(createPieceCapability(piece, slotIndex).equivalenceKey);
       const key = [
         ...STATS.map(stat => contribution.stats[stat]),
         contribution.descriptor,
@@ -273,6 +294,7 @@ function searchAssignmentExact(
       ].join(":");
       const candidate = { piece, contribution, coverage, capabilityKey };
       const existing = compressed.get(key);
+      if (existing) searchStats.equivalentItems++;
       if (!existing || getPieceInstanceKey(piece).localeCompare(
         getPieceInstanceKey(existing.piece),
       ) < 0) {
@@ -307,6 +329,7 @@ function searchAssignmentExact(
     const next = new Map();
     for (const state of states.values()) {
       for (const candidate of candidates) {
+        searchStats.statesExamined++;
         const exoticCount = state.exoticCount + Number(Boolean(candidate.piece.exotic));
         if (exoticCount > 1) continue;
         const pieces = [...state.pieces];
@@ -338,13 +361,20 @@ function searchAssignmentExact(
         };
         const key = getStateKey(nextState);
         const previous = next.get(key);
+        if (previous) searchStats.mergedStates++;
         if (!previous || identityKeys.join("|").localeCompare(
           previous.identityKeys.join("|"),
         ) < 0) {
           next.set(key, nextState);
         }
+        if (next.size >= searchStats.maxStates) {
+          searchStats.frontierComplete = false;
+          break;
+        }
       }
+      if (!searchStats.frontierComplete) break;
     }
+    searchStats.peakStates = Math.max(searchStats.peakStates, next.size);
     states = next;
     if (states.size === 0) return [];
   }

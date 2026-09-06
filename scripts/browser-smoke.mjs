@@ -14,6 +14,24 @@ import {
   TUNING_MOD_HASH_BY_TUNING,
 } from "../src/core/armor-mods.data.mjs";
 import { channelStorageKey } from "../src/core/build-channel.mjs";
+import { BASE_CONFIGS } from "../src/core/armor-model.mjs";
+import { rebuildReference } from "../tests/helpers/reference-witness.mjs";
+
+async function checkWitnessDomRoundTrip(page) {
+  const models = await page.locator('.witness-breakdown').evaluateAll(elements => elements.map(element => {
+    const rows = [...element.querySelectorAll('.witness-piece')];
+    const values = selector => Object.fromEntries([...element.querySelectorAll(selector)].map(span => [span.dataset.totalStat || span.dataset.fragmentStat, Number(span.dataset.value)]));
+    return {pieces: rows.map(row => ({archetype: row.dataset.archetype, tertiary: row.dataset.tertiary,
+      baseStats: Object.fromEntries([...row.querySelectorAll('[data-base-stat]')].map(span => [span.dataset.baseStat, Number(span.dataset.value)]))})),
+      tuning: rows.map(row => JSON.parse(row.dataset.tuning)), mods: rows.map(row => JSON.parse(row.dataset.mod)),
+      fragments: values('[data-fragment-stat]'), visible: values('[data-total-stat]')};
+  }));
+  assert.ok(models.length > 0, 'the UI must expose concrete verification rows');
+  for (const model of models) {
+    assert.equal(model.pieces.length, 5);
+    assert.deepEqual(rebuildReference(model.pieces, model.tuning, model.mods, model.fragments).visible, model.visible);
+  }
+}
 
 async function findChrome() {
   const candidates = [
@@ -157,7 +175,9 @@ function createWritableProfileFixture() {  const fixture = structuredClone(synth
         4244567218: { statHash: 4244567218, value: 20 }, // melee
         144602215: { statHash: 144602215, value: 10 },   // super
         1943323491: { statHash: 1943323491, value: 10 }, // class
-        2996146975: { statHash: 2996146975, value: 5 },  // weapons
+        // Make the vault roll strictly better for the test's Weapons target;
+        // deterministic identity ties must not be used to force vault transfers.
+        2996146975: { statHash: 2996146975, value: equippedArmor.includes(item) ? 0 : 5 },
       },
     };
     data.itemComponents.sockets.data[item.itemInstanceId] = {
@@ -389,7 +409,7 @@ async function checkInventoryPlanning(browser) {
       true,
       "the owned-armor import panel should start collapsed without an import",
     );
-    await page.evaluate(storageKeys => {
+    await page.evaluate(({storageKeys, configs}) => {
       const slots = ["helmet", "arms", "chest", "legs", "classItem"];
       const archetypes = [
         "Siegebreaker", "Bulwark", "Brawler", "Skirmisher", "Grenadier", "Demolitionist",
@@ -401,6 +421,8 @@ async function checkInventoryPlanning(browser) {
       for (const slot of slots) {
         for (const archetypeId of archetypes) {
           for (const tertiary of stats) {
+            const config = configs.find(c => c.archetype === archetypeId && c.tertiary === tertiary);
+            if (!config) continue;
             for (const tuningTo of stats) {
               inventory.push({
                 id: `plan-regression-${id++}`,
@@ -417,7 +439,10 @@ async function checkInventoryPlanning(browser) {
                 tuningTo,
                 armorModSize: 10,
                 armorModStat: "weapons",
-                baseStats: {},
+                baseStats: {...config.baseStats},
+                effectiveBaseStats: {...config.baseStats},
+                optimizationBaseStats: {...config.baseStats},
+                masterworkTier: 5,
                 setHash: null,
               });
             }
@@ -453,7 +478,7 @@ async function checkInventoryPlanning(browser) {
         reassignModifiers: true,
       }));
       localStorage.setItem(storageKeys.calculatorMode, "solve");
-    }, TEST_STORAGE_KEYS);
+    }, {storageKeys: TEST_STORAGE_KEYS, configs: BASE_CONFIGS});
     await page.reload({ waitUntil: "networkidle" });
     assert.equal(
       await page.locator("#upgradeImportBody").isVisible(),
@@ -488,6 +513,7 @@ async function checkInventoryPlanning(browser) {
     await page.locator("#inventoryFixedExoticName").selectOption(fixedExoticValue);
     await page.evaluate(() => window.solve());
     await page.locator("#ownedGearSection").waitFor({ state: "visible" });
+    await checkWitnessDomRoundTrip(page);
     assert.match(
       await page.locator("#scoreDisplay").innerText(),
       /(proven|Search limited|current-best witness)/i,
@@ -663,6 +689,7 @@ async function checkUpgradeTargetSync(browser) {
     });
     await page.evaluate(() => window.analyzeArmorUpgrades());
     await page.locator("#upgradeResults:not([hidden])").waitFor();
+    await checkWitnessDomRoundTrip(page);
     await page.evaluate(() => window.exportInventorySolution(0));
     const exportedMods = await page.locator(".dim-export-actions a").evaluate(element => {
       const encoded = new URL(element.href).searchParams.get("loadout");
@@ -813,6 +840,7 @@ async function checkSetRequirementSnapshot(browser) {
 
     await page.evaluate(() => window.analyzeArmorUpgrades());
     await page.locator("#inventoryResults:not([hidden])").waitFor();
+    await checkWitnessDomRoundTrip(page);
     assert.match(await page.locator(".inventory-results-req").innerText(), /埃希恩记忆\s*4\s*件套/);
     assert.equal(
       await page.locator(".inventory-result-detail .upgrade-set-badge", { hasText: "埃希恩记忆" }).count(),

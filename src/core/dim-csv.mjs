@@ -304,8 +304,23 @@ export function normalizeDimItem(record) {
     setHash: set ? set.hash : null,
   };
   const normalized = { ...item, ...inferInstalledModifiers(item, displayedStats, tuningStat) };
+  const exactAssignment = normalized.modifierInference.status === "exact";
+  const knownDestination = tuningStat || (exactAssignment ? normalized.tuningTo : null);
   return {
     ...normalized,
+    tunedStat: item.exotic ? null : knownDestination,
+    tuningStat: item.exotic ? null : knownDestination,
+    // DIM's Exotic roll model supports any directional destination. The
+    // mathematical rule is explicit here; socket executability is still unknown.
+    allowedTuningStats: item.exotic ? [...STATS] : knownDestination ? [knownDestination] : null,
+    tuningInstalled: exactAssignment
+      ? normalized.tuningMode === "plus3" || Boolean(normalized.tuningFrom && normalized.tuningTo) : undefined,
+    dataConfidence: {
+      tuning: knownDestination || item.exotic ? "exact" : "unknown",
+      stats: DIM_STAT_COLUMNS.every(([, column]) => String(record[`${column} (Base)`] ?? "").trim() !== "") ? "exact" : "unknown",
+      sockets: "unknown",
+      assignment: exactAssignment ? "exact" : "unknown",
+    },
     // Optimization assumes every candidate will be fully masterworked, while
     // modifier inference above still uses the actual tier exported by DIM.
     optimizationBaseStats: getEffectiveBaseStats({ ...normalized, masterworkTier: 5 }),

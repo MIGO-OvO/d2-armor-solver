@@ -62,8 +62,11 @@ function getFrameworkStats(item) {
 //   - known multi (exotic): any destination in the allowed set
 //   - unknown: cannot verify -> allowed but flagged unverified (never rejects)
 function tuningCompatibility(item, assignment) {
-  if (!assignment) return { ok: true, unverified: false };
+  if (!assignment) return { ok: true, unverified: true };
+  if (assignment.mode === "none") return { ok: true, unverified: false };
   if (assignment.mode === "+3") return { ok: true, unverified: false };
+  const fixed = item?.tunedStat ?? item?.tuningStat ?? item?.fixedTuningStat;
+  if (!item?.exotic && fixed && assignment.to !== fixed) return { ok: false, unverified: false };
   const allowed = item?.allowedTuningStats;
   if (item?.dataConfidence?.tuning === "unknown" || !Array.isArray(allowed)) {
     return { ok: true, unverified: true };
@@ -108,6 +111,14 @@ function assignPiece({
   const unassigned = [];
   const unverified = [];
   const operations = [];
+  const compatibility = tuningCompatibility(item, desiredTuningAssignment);
+  if (!compatibility.ok) {
+    unassigned.push({ index, slot, kind: "tuning", reason: "tuningMismatch" });
+    return { operations, unassigned, unverified };
+  }
+  if (compatibility.unverified) unverified.push({ index, slot, kind: "tuning", reason: "tuningCapabilityUnknown" });
+  if (desiredStatAssignment && !desiredStatHash) unassigned.push({ index, slot, kind: "stat", reason: "invalidAssignment" });
+  if (desiredTuningAssignment && desiredTuningAssignment.mode !== "none" && !desiredTuningHash) unassigned.push({ index, slot, kind: "tuning", reason: "invalidAssignment" });
   const currentStatHash = currentStatModHash(item);
   const currentTuning = currentTuningHash(item);
   const statSocket = desiredStatHash ? itemSocket(item, SOCKET_ROLE.STAT) : null;
@@ -214,6 +225,9 @@ function assignPiece({
       }
     }
   }
+  if (desiredTuningAssignment?.mode === "none" && currentTuning) {
+    clearOperation(itemSocket(item, SOCKET_ROLE.TUNING), "tuning", currentTuning);
+  }
   // A null tuning assignment means the fixed tuning stat could not be
   // established: the tuning socket is left untouched (no write, no clear), and
   // the executor reports the unverified tuning separately.
@@ -272,9 +286,12 @@ export function assignArmorMods({
   const operationsByPiece = [];
   const unassignedMods = [];
   const unverifiedMods = [];
+  if (pieces.length !== 5) unassignedMods.push({ kind: "item", reason: "missingPieces" });
   const actualTotals = Object.fromEntries(STATS.map(stat => [stat, 0]));
   const projectedTotals = Object.fromEntries(STATS.map(stat => [stat, 0]));
   const resolvedCounts = { stat: 0, tuning: 0 };
+  const seenIds = new Set();
+  const expectedSocketPlugs = [];
 
   for (let index = 0; index < 5; index++) {
     const piece = pieces[index];
@@ -282,12 +299,22 @@ export function assignArmorMods({
     const statAssignment = getMod(index);
     const tuningAssignment = tuningAssignments[index] ?? null;
     if (!piece || !item) {
-      if (piece) {
+      {
         unassignedMods.push({
-          index, slot: piece.slot || "", kind: "item", plugHash: 0, reason: "notOwnedInstance",
+          index, slot: piece?.slot || "", kind: "item", plugHash: 0, reason: "notOwnedInstance",
         });
       }
       continue;
+    }
+    if (seenIds.has(String(item.id)) || (piece.hash && Number(piece.hash) !== Number(item.hash))
+        || piece.slot !== item.slot) unassignedMods.push({ index, kind: "item", reason: "physicalMismatch" });
+    seenIds.add(String(item.id));
+    if (!tuningAssignment) unverifiedMods.push({ index, kind: "tuning", reason: "tuningCapabilityUnknown" });
+    if (!item.energy || !Number.isSafeInteger(item.energy.capacity) || !Number.isSafeInteger(item.energy.used)) {
+      unverifiedMods.push({ index, kind: "stat", reason: "energyUnknown" });
+    }
+    if (item.dataConfidence?.stats !== "exact" || item.dataConfidence?.tuning === "unknown") {
+      unverifiedMods.push({ index, kind: "item", reason: "physicalEvidenceUnknown" });
     }
     const result = assignPiece({
       item,
@@ -300,6 +327,11 @@ export function assignArmorMods({
       availablePlugHashes,
     });
     operationsByPiece.push(result.operations);
+    for (const [kind, hash] of [[SOCKET_ROLE.STAT, statModHashFor(statAssignment)], [SOCKET_ROLE.TUNING, tuningHashFor(tuningAssignment)]]) {
+      const socket = itemSocket(item, kind);
+      const expected = hash || socket?.emptyPlugHash || socket?.currentPlugHash;
+      if (socket && expected) expectedSocketPlugs.push({itemId: String(item.id), socketIndex: socket.socketIndex, plugItemHash: expected});
+    }
     unassignedMods.push(...result.unassigned);
     unverifiedMods.push(...result.unverified);
     if (statAssignment?.size > 0) resolvedCounts.stat++;
@@ -331,6 +363,7 @@ export function assignArmorMods({
     // so no empty-first pass is needed for armor stat/tuning sockets; add one
     // only if a future socket type enforces plug-group mutual exclusion).
     plugOperations: orderOperations(operationsByPiece),
+    expectedSocketPlugs,
     actualTotals,
     projectedTotals,
     resolvedCounts,

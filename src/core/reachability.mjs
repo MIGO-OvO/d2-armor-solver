@@ -8,7 +8,7 @@ import {
 const reachableRangeCache = new Map();
 
 function cacheReachableRange(key, result) {
-  reachableRangeCache.set(key, result);
+  reachableRangeCache.set(key, structuredClone(result));
   while (reachableRangeCache.size > 24) {
     reachableRangeCache.delete(reachableRangeCache.keys().next().value);
   }
@@ -140,9 +140,7 @@ export function calculateReachableStatRange(
   );
   if (lockedStats.length >= 4) {
     const stateKey = (usedPlus3, lockValues) => {
-      let key = usedPlus3;
-      for (const value of lockValues) key = key * 256 + value;
-      return key;
+      return `${usedPlus3}|${lockValues.join(',')}`;
     };
     const mergeState = (map, usedPlus3, lockValues, values) => {
       const key = stateKey(usedPlus3, lockValues);
@@ -405,7 +403,7 @@ export function calculateReachableRanges(
     numPlus5, numPlus10, numPlus3, fragmentKey, lockKey,
   ].join('|');
   const cached = reachableRangeCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) return structuredClone(cached);
   const searchStats = { statesExamined: 0 };
   const finish = result => cacheReachableRange(cacheKey, { ...result, searchStats });
 

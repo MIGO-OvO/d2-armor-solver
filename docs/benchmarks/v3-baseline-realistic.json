@@ -1,0 +1,83 @@
+{
+  "root": "D:\\GitHub projects\\d2-armor-solver-v3-baseline",
+  "node": "v24.14.0",
+  "seed": 318819070,
+  "rows": [
+    {
+      "name": "easy-exact",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.3303999999999974,
+      "searchMs": 73.90639999999999,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "states": {
+        "frontierComplete": true,
+        "assignmentComplete": true
+      },
+      "heapUsed": 19560568,
+      "arrayBuffers": 10515,
+      "maxRSS": 74252288,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "hard-exact",
+      "outcome": "RESOURCE_LIMIT",
+      "elapsedMs": 2684.0474,
+      "exitCode": 134,
+      "reason": "heap limit"
+    },
+    {
+      "name": "no-exact",
+      "outcome": "RESOURCE_LIMIT",
+      "elapsedMs": 2692.9395000000004,
+      "exitCode": 134,
+      "reason": "heap limit"
+    },
+    {
+      "name": "hard-rules",
+      "outcome": "RESOURCE_LIMIT",
+      "elapsedMs": 2581.9381000000003,
+      "exitCode": 134,
+      "reason": "heap limit"
+    },
+    {
+      "name": "exotic-set",
+      "outcome": "RESOURCE_LIMIT",
+      "elapsedMs": 2595.5604999999996,
+      "exitCode": 134,
+      "reason": "heap limit"
+    },
+    {
+      "name": "equivalent",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.214500000000001,
+      "searchMs": 68.9026,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "states": {
+        "frontierComplete": true,
+        "assignmentComplete": true
+      },
+      "heapUsed": 19477992,
+      "arrayBuffers": 10515,
+      "maxRSS": 74055680,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "upgrade",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.226600000000005,
+      "searchMs": 8.050400000000003,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 0,
+      "states": {},
+      "heapUsed": 9501528,
+      "arrayBuffers": 10515,
+      "maxRSS": 45211648,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    }
+  ]
+}

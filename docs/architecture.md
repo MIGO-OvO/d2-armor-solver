@@ -27,6 +27,14 @@ UI and tests, and Locality for future rule changes.
 
 ## Solver V3 correctness boundary
 
+The PR #3 consistency follow-up is documented in
+[v3-consistency-audit.md](v3-consistency-audit.md), including reproduced bugs,
+reference test domains and remaining limits. `sealWitness` and
+`assertSolutionConsistency` form the serialization/presentation boundary;
+`createSolutionDisplayModel` provides concrete per-piece data and recomputed
+armor/visible totals. UI display and execution projections are not alternate
+sources of Solver totals. Upgrade steps carry full verified snapshots.
+
 `solver-v3-contract.mjs` owns `ProblemSpec`, the armor-domain `ConstraintModel`,
 `PieceCapability`, integer lexicographic comparison, canonical witness ids, and
 the five result statuses. Fragment bonuses are an explicit projection from the
@@ -37,7 +45,7 @@ Exact-target search uses a bounded TypedArray residual index. Fixed-five
 evaluation jointly searches Tuning and stat mods. Scratch fuzzy search first
 solves an integer total-budget relaxation and sends candidates through the same
 exact-target oracle; legacy greedy/local search is only an incumbent. Inventory
-frontiers have no beam-width/Top-N correctness cutoff and merge only states with
+frontiers use a deterministic resource ceiling (incomplete on exhaustion) and merge only states with
 equivalent stats, Tuning/mod descriptors, set coverage, Exotic count, and
 execution capability. Upgrade exact completion iterates replacement counts
 from zero upward, so its first exact plan carries a minimum-replacement proof.
