@@ -5,6 +5,7 @@ import {
   findBestFixedConfigWitness,
   findBestGlobalWitness,
   findExactTargetWitnesses,
+  visibleArmorTargets,
 } from "./exact-target-oracle.mjs";
 import {
   createCanonicalId,
@@ -331,6 +332,7 @@ export function evaluateConfig(
     masks.push(0);
   }
 
+  const equivalentMasks = new Set();
   for (const mask of masks) {
     const totals = { ...baseTotals };
     const tuningAssignments = [];
@@ -344,6 +346,14 @@ export function evaluateConfig(
       }
     }
 
+    // Same Balanced contribution and ordered remaining capabilities produce
+    // the same greedy search and neighborhood. Keep its first representative.
+    const maskKey = STATS.map(stat => totals[stat]).join(",") + "|" + tuningAssignments
+      .flatMap((assignment, index) => assignment ? [] : [tuningCapabilities
+        ? tuningCapabilities[index].allowedDirectionalStats?.join(",")
+        : fixedTuningTargets?.[index] || "*"]).join(";");
+    if (equivalentMasks.has(maskKey)) continue;
+    equivalentMasks.add(maskKey);
     const hitsRemaining = { ...forcedFromHits };
     for (let i = 0; i < 5; i++) {
       if (tuningAssignments[i] !== null) continue;
@@ -596,7 +606,9 @@ function insertRelaxedEntry(bucket, entry, limit) {
 
 function findBestRelaxedTargets(total, target, constraints, limit = 8, valueStep = 1) {
   if (!Number.isSafeInteger(total) || total < 0 || total > 1200) return [];
-  const statRanks = STATS.map(stat => Array.from({ length: 201 }, (_, value) =>
+  // This is an armor-domain relaxation, not the clamped display domain.
+  // Armor can exceed 200 (e.g. Health=225); the conserved total is its bound.
+  const statRanks = STATS.map(stat => Array.from({ length: total + 1 }, (_, value) =>
     singleStatScoreRank(stat, value, target[stat], constraints)));
   let states = Array.from({ length: total + 1 }, () => []);
   states[0].push({ rank: [0, 0, 0, 0, 0, 0], values: [] });
@@ -605,7 +617,7 @@ function findBestRelaxedTargets(total, target, constraints, limit = 8, valueStep
     const next = Array.from({ length: total + 1 }, () => []);
     for (let sum = 0; sum <= total; sum++) {
       if (states[sum].length === 0) continue;
-      const maximum = Math.min(200, total - sum);
+      const maximum = total - sum;
       for (const previous of states[sum]) {
         for (let value = 0; value <= maximum; value += valueStep) {
           const contribution = statRanks[statIndex][value];
@@ -712,57 +724,66 @@ export function runSolver(problemSpec) {
   // falls through to the deterministic fuzzy/near-target search below.
   const exactTargetRank = scoreStatsRank(target, target, constraints);
   if (exactTargetRank.every(value => value === 0)) {
-    const searchStats = {};
-    const exactWitnesses = findExactTargetWitnesses({
-      target,
-      numPlus5,
-      numPlus10,
-      numPlus3,
-      fixedConfig: exoticSettings?.config || null,
-      searchStats,
-    });
-    if (exactWitnesses.length > 0) {
-      const exactScore = scoreStats(target, target, constraints);
-      const exactSolutions = exactWitnesses.map(witness => ({
-        ...witness,
-        totals: { ...target },
-        rank: [...exactTargetRank],
-        score: exactScore,
-        exoticIndex: exoticSettings?.config ? 0 : null,
-        exoticSelection: exoticSettings ? {
-          classId: exoticSettings.classId,
-          classLabel: exoticSettings.classLabel,
-          primaryPerkId: exoticSettings.primaryPerkId,
-          primaryPerkName: exoticSettings.primaryPerkName,
-          secondaryPerkId: exoticSettings.secondaryPerkId,
-          secondaryPerkName: exoticSettings.secondaryPerkName,
-        } : null,
-      }));
-      exactSolutions.sort((left, right) => {
-        const farmabilityOrder = farmabilityScore(left.config, left.exoticIndex)
-          - farmabilityScore(right.config, right.exoticIndex);
-        if (farmabilityOrder !== 0) return farmabilityOrder;
-        return archetypeKey(left.config, left.exoticIndex)
-          .localeCompare(archetypeKey(right.config, right.exoticIndex));
+    const fixedBase = exoticSettings?.config?.baseStats;
+    const budgetTotal = (fixedBase ? STATS.reduce((sum, stat) => sum + fixedBase[stat], 360) : 450)
+      + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
+    const exactTargets = problemSpec.constraintModel.targetDomain === "visible"
+      ? visibleArmorTargets(problemSpec.constraintModel.target, problemSpec.constraintModel.fragments, budgetTotal, 8).targets
+      : [target];
+    for (const exactTarget of exactTargets) {
+      if (!satisfiesConstraintModel({totals: exactTarget}, problemSpec.constraintModel)) continue;
+      const searchStats = {};
+      const exactWitnesses = findExactTargetWitnesses({
+        target: exactTarget,
+        numPlus5,
+        numPlus10,
+        numPlus3,
+        fixedConfig: exoticSettings?.config || null,
+        searchStats,
       });
-      const requestedLimit = Number(runtimeOptions.maxExactSolutions);
-      const maxExactSolutions = Number.isInteger(requestedLimit)
-        ? Math.max(1, requestedLimit)
-        : 60;
-      // The exact oracle has already scanned the full target space before this
-      // presentation limit is applied. Truncation therefore cannot turn a
-      // reachable target into a miss.
-      const presented = exactSolutions.slice(0, maxExactSolutions);
-      presented.proof = createProofEvidence(problemSpec, {
-        producer: "exact-target-oracle",
-        method: "exact-target-oracle",
-        complete: true,
-        statesExamined: searchStats.statesExamined,
-        assumptions: ["known-data", "complete-catalog", "unrestricted-theoretical-tuning"],
-        scope: "target-point",
-        outcome: "feasible",
-      });
-      return presented;
+      if (exactWitnesses.length > 0) {
+        const exactScore = scoreStats(exactTarget, target, constraints);
+        const exactSolutions = exactWitnesses.map(witness => ({
+          ...witness,
+          totals: { ...exactTarget },
+          rank: scoreStatsRank(exactTarget, target, constraints),
+          score: exactScore,
+          exoticIndex: exoticSettings?.config ? 0 : null,
+          exoticSelection: exoticSettings ? {
+            classId: exoticSettings.classId,
+            classLabel: exoticSettings.classLabel,
+            primaryPerkId: exoticSettings.primaryPerkId,
+            primaryPerkName: exoticSettings.primaryPerkName,
+            secondaryPerkId: exoticSettings.secondaryPerkId,
+            secondaryPerkName: exoticSettings.secondaryPerkName,
+          } : null,
+        }));
+        exactSolutions.sort((left, right) => {
+          const farmabilityOrder = farmabilityScore(left.config, left.exoticIndex)
+            - farmabilityScore(right.config, right.exoticIndex);
+          if (farmabilityOrder !== 0) return farmabilityOrder;
+          return archetypeKey(left.config, left.exoticIndex)
+            .localeCompare(archetypeKey(right.config, right.exoticIndex));
+        });
+        const requestedLimit = Number(runtimeOptions.maxExactSolutions);
+        const maxExactSolutions = Number.isInteger(requestedLimit)
+          ? Math.max(1, requestedLimit)
+          : 60;
+        // The exact oracle has already scanned the full target space before this
+        // presentation limit is applied. Truncation therefore cannot turn a
+        // reachable target into a miss.
+        const presented = exactSolutions.slice(0, maxExactSolutions);
+        presented.proof = createProofEvidence(problemSpec, {
+          producer: "exact-target-oracle",
+          method: "exact-target-oracle",
+          complete: true,
+          statesExamined: searchStats.statesExamined,
+          assumptions: ["known-data", "complete-catalog", "unrestricted-theoretical-tuning"],
+          scope: "target-point",
+          outcome: "feasible",
+        });
+        return presented;
+      }
     }
   }
 

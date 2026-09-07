@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 
 const root = path.resolve(process.argv[2] || ".");
-const cases = ["easy-exact", "hard-exact", "no-exact", "hard-rules", "exotic-set", "equivalent", "upgrade"];
+const cases = ["easy-exact", "hard-exact", "middle-exact", "late-exact", "no-exact", "hard-rules", "exotic-set", "equivalent", "upgrade"];
 const fixtureSeed = 0x1300cafe;
 if (!process.argv[3]) {
   const rows = [];
@@ -57,7 +57,8 @@ if (!process.argv[3]) {
       armorModSize: equivalent ? 10 : [0, 5, 10][n % 3], armorModStat: STATS[index], masterworkTier: 5,
       dataConfidence: {stats: "exact", tuning: "exact", sockets: "unknown"}, setHash: equivalent ? null : 700 + n % 3 };
   }));
-  const selected = slots.map((_, index) => createUpgradePieceFromItem(items[index * 260], index));
+  const knownIndex = name === "late-exact" ? 259 : name === "middle-exact" ? 130 : 0;
+  const selected = slots.map((_, index) => createUpgradePieceFromItem(items[index * 260 + knownIndex], index));
   const target = getManualUpgradeArmorTotals(selected);
   for (const s of STATS) target[s] = Math.max(0, Math.min(200, target[s]));
   if (name === "no-exact") target.health++;
@@ -72,8 +73,11 @@ if (!process.argv[3]) {
         : {exact}, maxResults: 3 });
   const searchMs = performance.now() - start;
   const memory = process.memoryUsage();
-  console.log(JSON.stringify({name, seed: fixtureSeed, items: items.length, normalizeMs, searchMs,
-    outcome: result.status, resultCount: result.results?.length ?? Number(Boolean(result.verified)),
+  const entries = result.results || [{finalTotals: result.plan?.evaluation?.finalTotals || result.baseline?.finalTotals}];
+  const exactHit = entries.some(entry => STATS.every(stat => entry.finalTotals?.[stat] === target[stat]));
+  console.log(JSON.stringify({name, seed: fixtureSeed, knownIndex, targets: target, items: items.length, normalizeMs, searchMs,
+    outcome: result.status || (exactHit ? "LEGACY_EXACT_HIT" : "LEGACY_PARTIAL"), exactHit,
+    resultCount: result.results?.length ?? Number(Boolean(result.plan || result.baseline)),
     states: result.searchStats || {}, heapUsed: memory.heapUsed, arrayBuffers: memory.arrayBuffers,
     maxRSS: process.resourceUsage().maxRSS * 1024,
     note: "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"}));

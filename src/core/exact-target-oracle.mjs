@@ -1,4 +1,4 @@
-import { BASE_CONFIGS, STATS } from "./armor-model.mjs";
+import { BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
 
 // The exact-target path is deliberately target-directed. Materializing the
 // complete five-piece state space creates far more intermediate objects than
@@ -363,6 +363,159 @@ function materializeWitness(configs, mask, adjustmentIndex, packedWitness) {
   return { tuningAssignments, modAssignments };
 }
 
+const pointShiftCache = new Map();
+const pointModifierCache = new Map();
+
+// Enumerate the preimage of a full visible target under clamp, intersected
+// with the conserved armor budget. A single boundary reduces to one point.
+// The caller must inspect complete before using a miss as negative evidence.
+export function visibleArmorTargets(target, fragments, total, limit = 128) {
+  const bounds = STATS.map(stat => {
+    const visible = Number(target[stat]);
+    const fragment = Number(fragments[stat] || 0);
+    return visible === 0 ? [0, Math.min(total, -fragment)]
+      : visible === 200 ? [Math.max(0, 200 - fragment), total]
+      : [visible - fragment, visible - fragment];
+  });
+  const targets = [];
+  let complete = true;
+  if (!Number.isSafeInteger(total) || bounds.some(([min, max]) => !Number.isSafeInteger(min)
+      || !Number.isSafeInteger(max) || min < 0 || max < min)) return {targets, complete};
+  const suffixMin = Array(7).fill(0), suffixMax = Array(7).fill(0);
+  for (let index = 5; index >= 0; index--) {
+    suffixMin[index] = suffixMin[index + 1] + bounds[index][0];
+    suffixMax[index] = suffixMax[index + 1] + bounds[index][1];
+  }
+  const values = [];
+  const visit = (index, remaining) => {
+    if (remaining < suffixMin[index] || remaining > suffixMax[index]) return;
+    if (index === 6) {
+      if (targets.length >= limit) { complete = false; return; }
+      targets.push(Object.fromEntries(STATS.map((stat, i) => [stat, values[i]])));
+      return;
+    }
+    const low = Math.max(bounds[index][0], remaining - suffixMax[index + 1]);
+    const high = Math.min(bounds[index][1], remaining - suffixMin[index + 1]);
+    for (let value = low; value <= high; value++) {
+      values[index] = value;
+      visit(index + 1, remaining - value);
+      if (!complete) return;
+    }
+  };
+  visit(0, total);
+  return {targets, complete};
+}
+
+// Target-directed join: do not materialize every shift × mod pair for each
+// owned capability pattern. The sixth coordinate follows from the total.
+export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tuningCapabilities}) {
+  if (configs?.length !== 5 || tuningCapabilities?.length !== 5
+      || !STATS.every(stat => Number.isSafeInteger(target?.[stat]))) return null;
+  const modKey = `${numPlus5}|${numPlus10}`;
+  if (!pointModifierCache.has(modKey)) pointModifierCache.set(modKey, buildModifierStates(numPlus5, numPlus10));
+  const modifier = pointModifierCache.get(modKey);
+  const base = STATS.map(stat => configs.reduce((sum, config) => sum + config.baseStats[stat], 0));
+  const targetTotal = STATS.reduce((sum, stat) => sum + target[stat], 0);
+  const count = (targetTotal - base.reduce((sum, value) => sum + value, 0)
+    - numPlus5 * 5 - numPlus10 * 10) / 3;
+  if (!Number.isInteger(count) || count < 0 || count > 5) return null;
+  for (const {mask} of getMasks(5, count)) {
+    const totals = [...base];
+    const destinations = [];
+    let allowed = true;
+    for (let index = 0; index < 5; index++) {
+      const capability = tuningCapabilities[index];
+      if ((mask >> index) & 1) {
+        const masterwork = getMasterworkStats(configs[index]);
+        if (!capability.allowBalanced || !masterwork) { allowed = false; break; }
+        for (const stat of masterwork) totals[STATS.indexOf(stat)]++;
+      } else {
+        if (!capability.allowedDirectionalStats?.length) { allowed = false; break; }
+        destinations.push([...capability.allowedDirectionalStats].sort());
+      }
+    }
+    if (!allowed) continue;
+    const residual = STATS.map((stat, index) => (target[stat] - totals[index]) / 5);
+    if (residual.some(value => !Number.isInteger(value) || value < -5 || value > 15)) continue;
+    const key = JSON.stringify(destinations);
+    let shift = pointShiftCache.get(key);
+    if (!shift) {
+      const states = buildRestrictedShiftStates(destinations);
+      shift = {states, byVector: new Map(states.map((state, index) => [state.values.slice(0, 5).join(","), index]))};
+      pointShiftCache.set(key, shift);
+      if (pointShiftCache.size > 64) pointShiftCache.delete(pointShiftCache.keys().next().value);
+    }
+    for (let modIndex = 0; modIndex < modifier.states.length; modIndex++) {
+      const mod = modifier.states[modIndex];
+      const needed = residual.slice(0, 5).map((value, index) => value - mod.values[index]);
+      const shiftIndex = shift.byVector.get(needed.join(","));
+      if (shiftIndex === undefined) continue;
+      return {totals: {...target}, ...materializeWitness(configs, mask, {
+        shiftCount: destinations.length, shiftStates: shift.states,
+        modifierStates: modifier.states, modifierSizes: modifier.sizes,
+      }, shiftIndex * modifier.states.length + modIndex + 1)};
+    }
+  }
+  return null;
+}
+
+export function findFixedRuleWitness({configs, numPlus5, numPlus10, tuningCapabilities, minimums, maximums}) {
+  const constrained = STATS.map((_, index) => index).filter(index => minimums[index] !== null || maximums[index] !== null);
+  if (!constrained.length) return null;
+  const modKey = `${numPlus5}|${numPlus10}`;
+  if (!pointModifierCache.has(modKey)) pointModifierCache.set(modKey, buildModifierStates(numPlus5, numPlus10));
+  const modifier = pointModifierCache.get(modKey);
+  const units = numPlus5 + numPlus10 * 2;
+  const modVectors = modifier.states.map(state => [...state.values, units - state.values.reduce((sum, value) => sum + value, 0)]);
+  const projectedMods = new Map();
+  modVectors.forEach((vector, index) => {
+    const key = constrained.map(stat => vector[stat]).join(",");
+    if (!projectedMods.has(key)) projectedMods.set(key, index);
+  });
+  for (let mask = 0; mask < 32; mask++) {
+    const base = STATS.map(stat => configs.reduce((sum, config) => sum + config.baseStats[stat], 0));
+    const destinations = [];
+    let allowed = true;
+    for (let index = 0; index < 5; index++) {
+      if ((mask >> index) & 1) {
+        if (!tuningCapabilities[index].allowBalanced) { allowed = false; break; }
+        for (const stat of getMasterworkStats(configs[index])) base[STATS.indexOf(stat)]++;
+      } else {
+        if (!tuningCapabilities[index].allowedDirectionalStats?.length) { allowed = false; break; }
+        destinations.push([...tuningCapabilities[index].allowedDirectionalStats].sort());
+      }
+    }
+    const total = base.reduce((sum, value) => sum + value, 0) + units * 5;
+    const minTotal = base.reduce((sum, value, index) => sum + Math.max(minimums[index] ?? -Infinity, value - destinations.length * 5), 0);
+    const maxTotal = base.reduce((sum, value, index) => sum + Math.min(maximums[index] ?? Infinity, value + destinations.length * 5 + units * 5), 0);
+    if (!allowed || total < minTotal || total > maxTotal
+      || constrained.some(index => minimums[index] !== null && base[index] + 25 + units * 5 < minimums[index]
+      || maximums[index] !== null && base[index] - 25 > maximums[index])) continue;
+    const key = JSON.stringify(destinations);
+    let shift = pointShiftCache.get(key);
+    if (!shift) {
+      const states = buildRestrictedShiftStates(destinations);
+      shift = {states, byVector: new Map(states.map((state, index) => [state.values.slice(0, 5).join(","), index]))};
+      pointShiftCache.set(key, shift);
+      if (pointShiftCache.size > 64) pointShiftCache.delete(pointShiftCache.keys().next().value);
+    }
+    for (let shiftIndex = 0; shiftIndex < shift.states.length; shiftIndex++) {
+      const values = shift.states[shiftIndex].values;
+      for (const modIndex of projectedMods.values()) {
+        const mod = modVectors[modIndex];
+        if (constrained.some(index => {
+          const value = base[index] + (values[index] + mod[index]) * 5;
+          return minimums[index] !== null && value < minimums[index] || maximums[index] !== null && value > maximums[index];
+        })) continue;
+        return {totals: Object.fromEntries(STATS.map((stat, index) => [stat, base[index] + (values[index] + mod[index]) * 5])),
+          ...materializeWitness(configs, mask, {shiftCount: destinations.length, shiftStates: shift.states,
+            modifierStates: modifier.states, modifierSizes: modifier.sizes}, shiftIndex * modifier.states.length + modIndex + 1)};
+      }
+    }
+  }
+  return null;
+}
+
 export function findBestFixedConfigWitness({
   configs,
   target,
@@ -605,11 +758,12 @@ export function findBestGlobalWitness({
 
 function normalizeFixedConfig(config) {
   if (!config) return null;
+  const masterworkStats = getMasterworkStats(config);
   return {
-    config,
+    config: {...config, masterworkStats},
     base: STATS.map(stat => Number(config.baseStats?.[stat]) || 0),
     masterwork: STATS.map(stat =>
-      Number(config.masterworkStats?.includes(stat))),
+      Number(masterworkStats?.includes(stat))),
   };
 }
 

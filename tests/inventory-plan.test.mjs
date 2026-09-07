@@ -319,7 +319,15 @@ const STATS = ["health", "melee", "grenade", "super", "class", "weapons"];
 function rotatedRolls(solution, offset) {
   return [1, 2, 3, 4].map(index => {
     const wanted = solution.tuningAssignments[index].to;
-    return makeOwnedLegendary(solution, index, STATS[(STATS.indexOf(wanted) + offset) % 6]);
+    const config = solution.config[index];
+    // A different destination in the original slot can now legitimately match
+    // another slot. This negative fixture must conflict with every equal base.
+    const used = new Set(solution.config.flatMap((other, otherIndex) =>
+      STATS.every(stat => other.baseStats[stat] === config.baseStats[stat])
+        ? [solution.tuningAssignments[otherIndex].to] : []));
+    const destination = Array.from({length: 6}, (_, step) => STATS[(STATS.indexOf(wanted) + offset + step) % 6])
+      .find(stat => !used.has(stat));
+    return makeOwnedLegendary(solution, index, destination);
   });
 }
 

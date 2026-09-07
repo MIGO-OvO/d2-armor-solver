@@ -143,7 +143,6 @@ function inventoryFixture() {
 }
 
 const rows = [];
-let hotPayload = null;
 
 for (let numPlus3 = 0; numPlus3 <= 5; numPlus3++) {
   const target = generatedTarget(numPlus3);
@@ -162,13 +161,17 @@ for (let numPlus3 = 0; numPlus3 <= 5; numPlus3++) {
   assert.ok(row.elapsedMs <= LIMITS.coldMs,
     `${row.label}: ${row.elapsedMs.toFixed(1)}ms > ${LIMITS.coldMs}ms`);
   rows.push(row);
-  if (numPlus3 === 3) hotPayload = payload;
+  // Repeat immediately: running modes 4 and 5 first evicts mode 3 from the
+  // two-entry residual LRU and measures another cold index, not a hot query.
+  if (numPlus3 === 3) {
+    for (let sample = 1; sample <= 5; sample++) {
+      const hot = timed(`scratch-hot-plus3-3-${sample}`, () => solveLoadout(payload));
+      assert.deepEqual(rebuild(hot.value[0]), target);
+      assert.ok(hot.elapsedMs <= LIMITS.hotMs, `${hot.label}: ${hot.elapsedMs.toFixed(1)}ms > ${LIMITS.hotMs}ms`);
+      rows.push(hot);
+    }
+  }
 }
-
-const hot = timed("scratch-hot-plus3-3", () => solveLoadout(hotPayload));
-assert.ok(hot.elapsedMs <= LIMITS.hotMs,
-  `${hot.label}: ${hot.elapsedMs.toFixed(1)}ms > ${LIMITS.hotMs}ms`);
-rows.push(hot);
 
 const { items, target: inventoryTarget } = inventoryFixture();
 const inventory = timed("inventory-8^5", () => solveInventoryLoadout({
@@ -179,9 +182,12 @@ const inventory = timed("inventory-8^5", () => solveInventoryLoadout({
   reassignModifiers: false,
   userConstraints: { exact: EXACT },
   maxResults: 1,
+  searchLimits: {exhaustive: true},
 }));
 assert.equal(inventory.value.results[0]?.metrics.allReached, true,
   "inventory-8^5: exact witness not found");
+assert.equal(inventory.value.searchStats.frontierComplete, true,
+  "same-domain benchmark must exhaust the complete fixed-assignment domain");
 assert.ok(inventory.elapsedMs <= LIMITS.inventoryMs,
   `${inventory.label}: ${inventory.elapsedMs.toFixed(1)}ms > ${LIMITS.inventoryMs}ms`);
 rows.push(inventory);
@@ -194,3 +200,5 @@ console.table(rows.map(({ label, elapsedMs }) => ({
   milliseconds: Number(elapsedMs.toFixed(1)),
 })));
 console.log(`maximum per-operation retained JS/ArrayBuffer memory: ${(maximumOperationMemory / 1024 / 1024).toFixed(1)} MiB`);
+const hotTimes = rows.filter(row => row.label.startsWith("scratch-hot")).map(row => row.elapsedMs).sort((a, b) => a - b);
+console.log(`hot cache: n=${hotTimes.length}, median=${hotTimes[2].toFixed(1)}ms, empirical P95=${hotTimes.at(-1).toFixed(1)}ms`);

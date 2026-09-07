@@ -34,6 +34,8 @@ reference test domains and remaining limits. `sealWitness` and
 `createSolutionDisplayModel` provides concrete per-piece data and recomputed
 armor/visible totals. UI display and execution projections are not alternate
 sources of Solver totals. Upgrade steps carry full verified snapshots.
+The subsequent algorithm optimizations and acceptance results are recorded in
+[algorithm-optimization.md](algorithm-optimization.md).
 
 `solver-v3-contract.mjs` owns `ProblemSpec`, the armor-domain `ConstraintModel`,
 `PieceCapability`, integer lexicographic comparison, canonical witness ids, and
@@ -42,13 +44,26 @@ unclamped armor domain through `clamp(armor + fragment, 0, 200)`; clamp-boundary
 misses remain `SEARCH_LIMIT_REACHED` unless the full armor interval was proved.
 
 Exact-target search uses a bounded TypedArray residual index. Fixed-five
-evaluation jointly searches Tuning and stat mods. Scratch fuzzy search first
+production evaluation uses target-directed Tuning/mod joins and a hard-rule
+feasibility fallback; nearest fuzzy ranking remains bounded. Scratch fuzzy search first
 solves an integer total-budget relaxation and sends candidates through the same
 exact-target oracle; legacy greedy/local search is only an incumbent. Inventory
-frontiers use a deterministic resource ceiling (incomplete on exhaustion) and merge only states with
-equivalent stats, Tuning/mod descriptors, set coverage, Exotic count, and
-execution capability. Upgrade exact completion iterates replacement counts
-from zero upward, so its first exact plan carries a minimum-replacement proof.
+uses a streaming 2+3 join for fixed-assignment point targets and conservative
+stat/set bounds in DFS otherwise. Retained pairs, nodes, evaluations and time
+have explicit limits. Exhaustion or an exact-witness quota marks coverage
+incomplete; a witness still proves existence. Unknown or stale physical data
+cannot consume a verified result slot or authorize negative evidence.
+
+Visible 0/200 targets are budget-constrained armor preimages, with an interval
+DP for ranges; incomplete DP work cannot certify infeasibility. Upgrade exact
+completion iterates replacement counts from zero upward. Its minimum proof
+requires six exact visible rules, reassignment, known Tuning capabilities and
+complete enumeration of all budget-consistent preimages at smaller depths.
+
+Owned/farm matching searches legal slot permutations of each supplied theory
+witness, keeping the original immutable and resealing the mapped display.
+Matching equivalence is mathematical/ownership equivalence, not an execution
+certificate. `mathDataKnown` and `executionKnown` are separate predicates.
 
 Result proof status and execution status are orthogonal. `assignArmorMods`
 round-trips a concrete owned witness through sockets, energy, plug availability,

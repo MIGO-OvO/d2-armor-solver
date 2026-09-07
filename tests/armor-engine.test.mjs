@@ -129,7 +129,7 @@ test("reachability exposes a proof certificate without changing its legacy field
   assert.equal(result.certificate.proof.producer, "reachability-dp");
 });
 
-test("clamped reachability without an interval proof is always search-limited", () => {
+test("clamped reachability now produces interval-complete range evidence", () => {
   const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
   for (const health of [0, 200]) {
     const result = calculateReachability({
@@ -141,8 +141,9 @@ test("clamped reachability without an interval proof is always search-limited", 
       lockedTargets: { health },
     });
 
-    assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
-    assert.equal(result.certificate.proof.complete, false);
+    assert.equal(result.status, health === 0 ? RESULT_STATUS.INFEASIBLE_PROVEN : RESULT_STATUS.RULE_FEASIBLE_PROVEN);
+    assert.equal(result.certificate.proof.complete, true);
+    assert.equal(result.certificate.proof.method, "interval-complete-dynamic-programming");
   }
 });
 
@@ -180,7 +181,9 @@ test("bounded relaxed search cannot turn the reachable Health=225 rule into infe
 
   assert.ok(solutions.length > 0, "the bounded search should still expose its incumbent");
   assert.equal(solutions.proof.complete, false);
-  assert.equal(solutions.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+  assert.equal(solutions.status, RESULT_STATUS.RULE_FEASIBLE_PROVEN);
+  assert.equal(solutions[0].armorTotals.health, 225,
+    "the armor-domain relaxation must not clamp a hard target to 200");
   assert.notEqual(solutions.status, RESULT_STATUS.INFEASIBLE_PROVEN);
 });
 

@@ -1,6 +1,6 @@
 import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
 import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
-import { createPieceCapability, physicalBaseStats } from "./solver-v3-contract.mjs";
+import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers } from "./solver-v3-contract.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -11,7 +11,6 @@ export const INVENTORY_PLAN_SLOTS = Object.freeze([
 ]);
 
 const LEGENDARY_SLOTS = INVENTORY_PLAN_SLOTS.slice(0, 4);
-const MAX_MATCH_CANDIDATES = 8;
 
 function archetypeIdForName(name) {
   return normalizeArchetypeId(name);
@@ -111,6 +110,7 @@ function getFixedExoticMismatch(item, requirement) {
 
 function isItemEligible(item, requirement, options) {
   if (!item || item.slot !== requirement.slot) return false;
+  if (item.dataConfidence?.stats === "unknown") return false;
   if (options.classId && item.classId !== options.classId) return false;
   if (item.archetypeId !== requirement.archetypeId) return false;
   if (item.tertiary !== requirement.tertiary) return false;
@@ -162,7 +162,8 @@ function sortCandidates(left, right, setRequirement) {
   if (Number(left.masterworkTier) !== Number(right.masterworkTier)) {
     return Number(right.masterworkTier) - Number(left.masterworkTier);
   }
-  return String(left.name || "").localeCompare(String(right.name || ""));
+  return String(left.name || "").localeCompare(String(right.name || ""))
+    || String(getItemKey(left)).localeCompare(String(getItemKey(right)));
 }
 
 function getSetCoverage(pieces, setRequirement) {
@@ -194,11 +195,14 @@ function compressAssignmentCandidates(candidates, setRequirement) {
   const compressed = [];
   const seen = new Set();
   for (const item of candidates) {
-    const setKey = setRequirement.type === "none"
-      ? ""
-      : Number(item.setHash) || 0;
-    const capabilityKey = getItemDirectionalStats(item)?.join(",") || "unknown";
-    const key = `${capabilityKey}|${setKey}|${createPieceCapability(item).equivalenceKey}`;
+    const setHash = Number(item.setHash);
+    const setKey = setRequirement.type === "none" ? 0 : setRequirement.type === "set"
+      ? Number(setHash === Number(setRequirement.setHash))
+      : setHash === Number(setRequirement.a) ? 1 : setHash === Number(setRequirement.b) ? 2 : 0;
+    // Eligibility already bound the exact base and selected assignment.
+    // Socket/energy variants do not change owned-count feasibility; this is
+    // not an execution certificate. Keep the preferred physical representative.
+    const key = `${item.classId || ""}|${setKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     compressed.push(item);
@@ -308,6 +312,7 @@ function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequi
     }
     for (const item of candidatesBySlot[index]) {
       if (item && used.has(getItemKey(item))) continue;
+      if (item?.classId && chosen.slice(0, index).some(previous => previous?.classId && previous.classId !== item.classId)) continue;
       if (item) used.add(getItemKey(item));
       chosen[index] = item;
       walk(index + 1, ownedSoFar + Number(Boolean(item)));
@@ -418,7 +423,7 @@ export function rankInventoryPlans({
   maxResults = 12,
 } = {}) {
   const normalizedSetRequirement = getSetRequirement(setRequirement);
-  const pool = items.filter(item => !classId || item.classId === classId);
+  const pool = items.filter(item => !classId || item.classId === classId).map(normalizePieceNumbers);
   const eligibleItemsByKey = new Map();
   for (const item of pool) {
     const key = getEligibilityKey(item);
@@ -429,23 +434,59 @@ export function rankInventoryPlans({
   const plans = [];
 
   for (const solution of solutions) {
-    const requirements = getSolutionRequirements(solution, fixedExotic);
+    let requirements = getSolutionRequirements(solution, fixedExotic);
     if (requirements.length !== INVENTORY_PLAN_SLOTS.length) continue;
     if (solution.exoticIndex !== null && solution.exoticIndex !== undefined && fixedExotic) continue;
 
-    const candidatesBySlot = requirements.map(requirement => {
+    const candidateCache = new Map();
+    const candidatesFor = requirement => {
+      const key = `${requirement.index}:${requirement.slot}`;
+      if (candidateCache.has(key)) return candidateCache.get(key);
       const candidates = compressAssignmentCandidates((
         eligibleItemsByKey.get(getEligibilityKey(requirement)) || []
       )
         .filter(item => isItemEligible(item, requirement, { classId, fixedExotic }))
         .sort((left, right) => sortCandidates(left, right, normalizedSetRequirement)),
         normalizedSetRequirement,
-      ).slice(0, MAX_MATCH_CANDIDATES);
-      return [...candidates, null];
-    });
-    const assignment = chooseBestAssignment(
-      solution, requirements, candidatesBySlot, normalizedSetRequirement
-    );
+      );
+      const values = [...candidates, null];
+      candidateCache.set(key, values);
+      return values;
+    };
+    const originalRequirements = requirements;
+    const signatures = solution.config.map((config, index) => JSON.stringify([
+      config.archetype, config.tertiary, config.baseStats, solution.tuningAssignments[index], solution.modAssignments?.[index],
+      solution.exoticIndex === index, config.sourceId || null,
+    ]));
+    let assignment = null;
+    const usedSlots = new Set();
+    const mapped = [];
+    const searchSlots = index => {
+      if (assignment?.feasible && assignment.ownedCount === 5) return;
+      if (index === 5) {
+        const candidate = chooseBestAssignment(solution, mapped, mapped.map(candidatesFor), normalizedSetRequirement);
+        if (!candidate) return;
+        if (!assignment || Number(candidate.feasible) > Number(assignment.feasible)
+            || candidate.feasible === assignment.feasible && (candidate.ownedCount > assignment.ownedCount
+              || candidate.ownedCount === assignment.ownedCount && candidate.setCoverage > assignment.setCoverage)) {
+          assignment = candidate;
+          requirements = [...mapped];
+        }
+        return;
+      }
+      const original = originalRequirements[index];
+      const fixed = solution.exoticIndex === index || solution.config[index].sourceId;
+      for (const slot of fixed ? [original.slot] : [original.slot, ...INVENTORY_PLAN_SLOTS.filter(slot => slot !== original.slot)]) {
+        if (usedSlots.has(slot) || solution.exoticIndex != null && solution.exoticIndex !== index && slot === "classItem") continue;
+        const previousEqual = signatures.slice(0, index).lastIndexOf(signatures[index]);
+        if (previousEqual >= 0 && INVENTORY_PLAN_SLOTS.indexOf(slot) <= INVENTORY_PLAN_SLOTS.indexOf(mapped[previousEqual].slot)) continue;
+        mapped[index] = {...original, slot, exotic: solution.exoticIndex === index || slot === fixedExotic?.slot};
+        usedSlots.add(slot);
+        searchSlots(index + 1);
+        usedSlots.delete(slot);
+      }
+    };
+    searchSlots(0);
     if (!assignment) continue;
     assignment.chosen = repairChosenForExactness(solution, assignment.chosen, normalizedSetRequirement);
     assignment.ownedCount = assignment.chosen.filter(Boolean).length;
@@ -472,6 +513,8 @@ export function rankInventoryPlans({
       : null;
     const plan = {
       solution,
+      slotByConfig: requirements.map(requirement => requirement.slot),
+      matchingProof: {scope: "provided-theoretical-witness", complete: true, slotPermutations: true},
       requirements,
       pieces,
       ownedCount: assignment.ownedCount,
@@ -484,6 +527,17 @@ export function rankInventoryPlans({
       farmability: farmabilityScore(solution.config, solution.exoticIndex),
       score: solution.score,
     };
+    if (solution.problemSpec && requirements.some((requirement, index) => requirement.slot !== solution.config[index].slot)) {
+      const candidate = {...solution, config: solution.config.map((config, index) => ({...config, slot: requirements[index].slot}))};
+      delete candidate.canonicalId;
+      delete candidate.certificate;
+      const sealed = sealWitness(solution.problemSpec, candidate);
+      if (sealed.valid) {
+        plan.matchedSolution = sealed.witness;
+        plan.matchedSolution.certificate = createResultCertificate({problemSpec: solution.problemSpec,
+          witness: sealed.witness, status: solution.status || solution.certificate?.status || "SEARCH_LIMIT_REACHED"});
+      }
+    }
     plans.push(plan);
   }
 

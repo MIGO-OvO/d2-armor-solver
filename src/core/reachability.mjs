@@ -1,8 +1,9 @@
-import { BASE_CONFIGS, STATS } from "./armor-model.mjs";
-import { findExactTargetWitnesses } from "./exact-target-oracle.mjs";
+import { BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
+import { findExactTargetWitnesses, visibleArmorTargets } from "./exact-target-oracle.mjs";
 import {
   RESULT_STATUS, STAT_DOMAIN, createProblemSpec, createProofEvidence,
-  getArmorSolverInput, visibleStatFromArmor,
+  getArmorSolverInput, visibleStatFromArmor, createConstraintModel,
+  stableSerialize,
 } from "./solver-v3-contract.mjs";
 
 const reachableRangeCache = new Map();
@@ -20,11 +21,7 @@ export function buildPieceStateOptions(configs, usePlus3) {
   for (const config of configs) {
     if (usePlus3) {
       const totals = { ...config.baseStats };
-      for (const stat of STATS) {
-        if (stat !== config.primary && stat !== config.secondary && stat !== config.tertiary) {
-          totals[stat] += 1;
-        }
-      }
+      for (const stat of getMasterworkStats(config) || []) totals[stat]++;
       options.push(totals);
       continue;
     }
@@ -71,6 +68,7 @@ export function buildModifierStateOptions(numPlus5, numPlus10, lockedStats, obje
   let states = new Map([['', {
     lockValues: lockedStats.map(() => 0),
     values: new Set([0]),
+    modAssignments: {},
   }]]);
   const sizes = [
     ...Array(numPlus10).fill(10),
@@ -91,6 +89,8 @@ export function buildModifierStateOptions(numPlus5, numPlus10, lockedStats, obje
           next.set(key, {
             lockValues,
             values: new Set([...state.values].map(value => value + objectiveGain)),
+            modAssignments: {...state.modAssignments,
+              [Object.keys(state.modAssignments).length]: {size, stat}},
           });
         } else {
           for (const value of state.values) existing.values.add(value + objectiveGain);
@@ -102,6 +102,7 @@ export function buildModifierStateOptions(numPlus5, numPlus10, lockedStats, obje
   return [...states.values()].map(option => ({
     lockValues: option.lockValues,
     values: [...option.values],
+    modAssignments: option.modAssignments,
   }));
 }
 
@@ -117,6 +118,10 @@ export function calculateReachableStatRange(
   fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, objectiveStat,
   searchStats = { statesExamined: 0 },
 ) {
+  if (Object.values(lockedTargets).some(value => value === 0 || value === 200)) {
+    return calculateIntervalStatRange(fixedPiece, numPlus5, numPlus10, numPlus3,
+      fragments, lockedTargets, objectiveStat, searchStats);
+  }
   searchStats.statesExamined++;
   const lockedStats = Object.keys(lockedTargets).sort();
   const armorTargets = lockedStats.map(stat =>
@@ -389,6 +394,111 @@ export function calculateDenseLockRanges(
   return { feasible: true, ranges };
 }
 
+// A saturated lower-bound coordinate is future-equivalent once reached:
+// all subsequent T5 pieces/mods contribute nonnegative amounts. Upper bounds
+// retain the exact running value. Thus 0/200 locks are intervals, not points.
+function calculateIntervalStatRange(fixed, n5, n10, n3, fragments, locks, objective, stats) {
+  stats.intervalDomain = true;
+  stats.complete ??= true;
+  stats.startedAt ??= performance.now();
+  const model = createConstraintModel({target: locks, fragments, targetDomain: STAT_DOMAIN.VISIBLE,
+    constraints: {exact: Object.fromEntries(Object.keys(locks).map(stat => [stat, true]))}});
+  const locked = STATS.filter(stat => locks[stat] !== undefined);
+  const rules = locked.map(stat => model.rules.find(rule => rule.stat === stat));
+  const total = STATS.reduce((sum, stat) => sum + fixed.baseStats[stat], 360) + n3 * 3 + n5 * 5 + n10 * 10;
+  if (model.rules.reduce((sum, rule) => sum + Math.max(0, rule.armorMinimum ?? 0), 0) > total
+      || model.rules.every(rule => rule.armorMaximum !== null)
+        && model.rules.reduce((sum, rule) => sum + rule.armorMaximum, 0) < total) return null;
+  const tracing = locked.length === 6 && objective === null;
+  const traceOptions = (configs, balanced) => {
+    const records = new Map();
+    for (const config of configs) {
+      const tunings = balanced ? [{mode: "+3", from: null, to: null}]
+        : STATS.flatMap(from => STATS.filter(to => to !== from).map(to => ({mode: "+5-5", from, to})));
+      for (const tuning of tunings) {
+        const totals = {...config.baseStats};
+        if (balanced) for (const stat of getMasterworkStats(config)) totals[stat]++;
+        else { totals[tuning.from] -= 5; totals[tuning.to] += 5; }
+        const lockValues = locked.map(stat => totals[stat]);
+        const key = lockValues.join(",");
+        if (!records.has(key)) records.set(key, {lockValues, values: [0], config, tuning});
+      }
+    }
+    return [...records.values()];
+  };
+  const fixedOptions = [false, true].map(mode => tracing ? traceOptions([fixed], mode)
+    : compressStateOptions(buildPieceStateOptions([fixed], mode), locked, objective));
+  const purpleOptions = PURPLE_STATE_OPTIONS.map((options, mode) => tracing ? traceOptions(BASE_CONFIGS, mode)
+    : compressStateOptions(options, locked, objective));
+  const mods = buildModifierStateOptions(n5, n10, locked, objective);
+  let states = new Map([["start", {used: 0, locks: locked.map(() => 0), values: new Set([0])}]]);
+  for (let depth = 0; depth < 6; depth++) {
+    const next = new Map();
+    for (const state of states.values()) {
+      for (const mode of depth === 5 ? [0] : [0, 1]) {
+        const used = state.used + mode;
+        if (used > n3 || used + Math.max(0, 4 - depth) < n3) continue;
+        const options = depth === 5 ? mods : depth === 0 ? fixedOptions[mode] : purpleOptions[mode];
+        for (const option of options) {
+          stats.statesExamined++;
+          if ((stats.statesExamined & 1023) === 0 && performance.now() - stats.startedAt > 3000
+              || next.size >= 50000) {
+            stats.complete = false;
+            stats.limitation = "interval DP resource limit";
+            return null;
+          }
+          const values = state.locks.map((value, index) => value + option.lockValues[index]);
+          if (rules.some((rule, index) => rule.armorMaximum !== null && values[index] > rule.armorMaximum)) continue;
+          for (let index = 0; index < rules.length; index++) {
+            const rule = rules[index];
+            if (rule.armorMaximum === null && rule.armorMinimum !== null) values[index] = Math.min(values[index], rule.armorMinimum);
+          }
+          const key = `${used}|${values.join(",")}`;
+          let entry = next.get(key);
+          if (!entry) {
+            entry = {used, locks: values, values: new Set(), ...(tracing ? {parent: state, option} : {})};
+            next.set(key, entry);
+          }
+          for (const a of state.values) for (const b of option.values) entry.values.add(a + b);
+        }
+      }
+    }
+    states = next;
+    if (!states.size) return null;
+  }
+  const reachable = new Set();
+  let witness = null;
+  for (const state of states.values()) {
+    if (state.used !== n3 || rules.some((rule, index) => rule.armorMinimum !== null && state.locks[index] < rule.armorMinimum)) continue;
+    for (const value of state.values) reachable.add(value);
+    if (tracing && !witness) {
+      const config = [];
+      const tuningAssignments = [];
+      const modAssignments = state.option.modAssignments;
+      let cursor = state.parent;
+      while (cursor.option) {
+        config.unshift(cursor.option.config);
+        tuningAssignments.unshift(cursor.option.tuning);
+        cursor = cursor.parent;
+      }
+      const totals = Object.fromEntries(STATS.map(stat => [stat, 0]));
+      config.forEach((piece, index) => {
+        for (const stat of STATS) totals[stat] += piece.baseStats[stat];
+        const tuning = tuningAssignments[index];
+        if (tuning.mode === "+3") for (const stat of getMasterworkStats(piece)) totals[stat]++;
+        else { totals[tuning.from] -= 5; totals[tuning.to] += 5; }
+        const mod = modAssignments[index];
+        if (mod) totals[mod.stat] += mod.size;
+      });
+      witness = {config, tuningAssignments, modAssignments, totals};
+    }
+  }
+  if (!reachable.size) return null;
+  const rawValues = [...reachable].sort((a, b) => a - b);
+  const values = [...new Set(rawValues.map(value => visibleStatFromArmor(value, fragments[objective] || 0)))].sort((a, b) => a - b);
+  return {min: values[0], max: values.at(-1), values, rawValues, ...(witness ? {witness} : {})};
+}
+
 export function calculateReachableRanges(
   fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets
 ) {
@@ -399,7 +509,7 @@ export function calculateReachableRanges(
     .map(stat => `${stat}:${lockedTargets[stat]}`)
     .join(',');
   const cacheKey = [
-    fixedKey, fixedPiece.primary, fixedPiece.secondary, fixedPiece.tertiary,
+    fixedKey, getMasterworkStats(fixedPiece)?.join(","), stableSerialize(fixedPiece),
     numPlus5, numPlus10, numPlus3, fragmentKey, lockKey,
   ].join('|');
   const cached = reachableRangeCache.get(cacheKey);
@@ -408,7 +518,7 @@ export function calculateReachableRanges(
   const finish = result => cacheReachableRange(cacheKey, { ...result, searchStats });
 
   const lockedStats = Object.keys(lockedTargets);
-  if (lockedStats.length >= 4) {
+  if (lockedStats.length >= 4 && !Object.values(lockedTargets).some(value => value === 0 || value === 200)) {
     const result = calculateDenseLockRanges(
       fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, searchStats,
     );
@@ -441,7 +551,7 @@ export function calculateReachableRanges(
     );
   }
 
-  const result = { feasible: true, ranges };
+  const result = { feasible: true, ranges, ...(feasibilityProbe.witness ? {witness: feasibilityProbe.witness} : {}) };
   return finish(result);
 }
 
@@ -470,6 +580,47 @@ export function findReachabilityWitness({
     };
   }
   const armorTarget = getArmorSolverInput(problemSpec).target;
+  ({numPlus5, numPlus10, numPlus3} = problemSpec.budget);
+  fixedPiece = problemSpec.solverContext.fixedConfig;
+  const hasClampBoundary = STATS.some(stat =>
+    Number(visibleTarget[stat]) === 0 || Number(visibleTarget[stat]) === 200);
+  if (hasClampBoundary) {
+    const total = STATS.reduce((sum, stat) => sum + fixedPiece.baseStats[stat], 360)
+      + numPlus3 * 3 + numPlus5 * 5 + numPlus10 * 10;
+    const preimage = visibleArmorTargets(problemSpec.constraintModel.target, problemSpec.constraintModel.fragments, total, 8);
+    if (preimage.complete) {
+      let witness = null;
+      let statesExamined = 0;
+      for (const point of preimage.targets) {
+        const pointStats = {};
+        const found = findExactTargetWitnesses({target: point, numPlus5, numPlus10, numPlus3,
+          fixedConfig: fixedPiece, searchStats: pointStats});
+        statesExamined += pointStats.statesExamined;
+        if (found[0]) { witness = {...found[0], totals: point}; break; }
+      }
+      if (witness) witness.visibleTotals = Object.fromEntries(STATS.map(stat =>
+        [stat, visibleStatFromArmor(witness.totals[stat], problemSpec.constraintModel.fragments[stat])]));
+      return {status: witness ? RESULT_STATUS.EXACT_TARGET_PROVEN : RESULT_STATUS.INFEASIBLE_PROVEN, witness,
+        proof: createProofEvidence(problemSpec, {producer: "reachability-dp", method: "budget-reduced-interval-oracle",
+          complete: true, scope: "rule-domain", outcome: witness ? "feasible" : "infeasible", statesExamined,
+          assumptions: ["known-data", "complete-catalog", "exhausted-clamp-preimage"]})};
+    }
+    const ranged = calculateReachableRanges(fixedPiece, numPlus5, numPlus10, numPlus3,
+      problemSpec.constraintModel.fragments, problemSpec.constraintModel.target);
+    const complete = ranged.searchStats.complete !== false;
+    const witness = ranged.witness || null;
+    if (witness) witness.visibleTotals = Object.fromEntries(STATS.map(stat =>
+      [stat, visibleStatFromArmor(witness.totals[stat], problemSpec.constraintModel.fragments[stat])]));
+    return {
+      status: witness ? RESULT_STATUS.EXACT_TARGET_PROVEN
+        : complete && !ranged.feasible ? RESULT_STATUS.INFEASIBLE_PROVEN : RESULT_STATUS.SEARCH_LIMIT_REACHED,
+      witness,
+      proof: createProofEvidence(problemSpec, {producer: "reachability-dp", method: "interval-complete-dynamic-programming",
+        complete, truncated: !complete, scope: "rule-domain", outcome: ranged.feasible ? "feasible" : "infeasible",
+        statesExamined: ranged.searchStats.statesExamined, assumptions: ["known-data", "complete-catalog", "nonnegative-future-contributions"],
+        limitation: ranged.searchStats.limitation}),
+    };
+  }
   const searchStats = {};
   const witnesses = findExactTargetWitnesses({
     target: armorTarget,
@@ -480,8 +631,6 @@ export function findReachabilityWitness({
     searchStats,
   });
   const witness = witnesses[0] || null;
-  const hasClampBoundary = STATS.some(stat =>
-    Number(visibleTarget[stat]) === 0 || Number(visibleTarget[stat]) === 200);
   const proof = createProofEvidence(problemSpec, {
     producer: "exact-target-oracle",
     method: "exact-target-oracle",

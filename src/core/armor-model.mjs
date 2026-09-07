@@ -457,3 +457,11 @@ export const BASE_CONFIGS = [];
   }
 })();
 // 12 archetypes × 4 tertiary = 48 base configs
+
+// Framework-derived metadata shared by search and witness verification.
+export function getMasterworkStats(piece) {
+  const frame = ARCHETYPES.find(entry => entry.id === (piece?.archetype || piece?.archetypeId));
+  if (!frame || !STATS.includes(piece?.tertiary)
+      || piece.tertiary === frame.primary || piece.tertiary === frame.secondary) return null;
+  return STATS.filter(stat => ![frame.primary, frame.secondary, piece.tertiary].includes(stat));
+}

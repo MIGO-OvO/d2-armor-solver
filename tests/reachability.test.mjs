@@ -80,7 +80,7 @@ test("reachability target probe and exact witness agree in both directions", () 
   }
 });
 
-test("a missed clamped boundary target is limited, never falsely proven infeasible", () => {
+test("clamp preimage plus conserved budget proves the all-zero target infeasible", () => {
   const result = findReachabilityWitness({
     fixedPiece: BASE_CONFIGS[0],
     numPlus5: 0,
@@ -89,6 +89,7 @@ test("a missed clamped boundary target is limited, never falsely proven infeasib
     fragments: Object.fromEntries(STATS.map(stat => [stat, 0])),
     visibleTarget: Object.fromEntries(STATS.map(stat => [stat, 0])),
   });
-  assert.equal(result.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
-  assert.equal(result.proof.complete, false);
+  assert.equal(result.status, RESULT_STATUS.INFEASIBLE_PROVEN);
+  assert.equal(result.proof.complete, true);
+  assert.equal(result.proof.method, "budget-reduced-interval-oracle");
 });

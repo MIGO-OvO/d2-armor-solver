@@ -1808,6 +1808,7 @@ function renderWitnessBreakdown(witness) {
 }
 
 function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
+  result = getOwnedArmorPlan(result)?.matchedSolution || result;
   const results = document.getElementById('results');
   results.classList.add('show');
   document.getElementById('floatJump').style.display = 'flex';
