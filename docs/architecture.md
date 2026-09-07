@@ -97,6 +97,11 @@ state from leaking back across the Seam.
 
 ## Performance
 
+Request-scoped execution, effort profiles, cancellation and progressive-result
+semantics are described in [staged-search.md](staged-search.md). UI renders
+`certificate.statResults` and the certificate projection; progress/coverage is
+separate from mathematical truth. Search callbacks never enter ProblemSpec.
+
 - Standard solving, priority refinement, reachability, inventory search, armor
   inference, and owned-armor analysis execute through a module Worker.
 - The upgrade optimizer memoizes identical piece evaluations for the lifetime

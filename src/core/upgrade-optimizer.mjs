@@ -16,6 +16,7 @@ import {
   normalizePieceNumbers,
 } from "./solver-v3-contract.mjs";
 import { findExactPartialConfigWitnesses, findFixedTargetWitness, findFixedRuleWitness, visibleArmorTargets } from "./exact-target-oracle.mjs";
+import {SearchBudgetExceeded} from "./search-session.mjs";
 
 export const UPGRADE_SLOTS = [
   { id:'helmet', labels:['头盔','頭盔','Helmet'] },
@@ -637,10 +638,11 @@ export function evaluateUpgradePieces(
   };
 }
 
-function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuning = false, userConstraints = {}) {
+function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuning = false, userConstraints = {}, search = null) {
   const cache = new Map();
   const constraintsKey = JSON.stringify(userConstraints);
   return (pieces, reassignModifiers) => {
+    search?.checkpoint();
     const key = pieces.map(piece => [
       piece.archetypeId,
       piece.tertiary,
@@ -664,6 +666,7 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
       pieces, targets, fragments, reassignModifiers, requiredStats, onlyPlus5Tuning, userConstraints
     );
     cache.set(key, evaluation);
+    search?.evaluated?.(pieces, evaluation);
     return evaluation;
   };
 }
@@ -1079,7 +1082,7 @@ export function buildUpgradePlanSteps(
 // match. Installed mode/source/destination are assignment state.
 function findFromScratchUpgradeWitness(
   pieces, targets, fragments, reassignModifiers, requiredStats, userConstraints,
-  evaluatePieces, onlyPlus5Tuning = false,
+  evaluatePieces, onlyPlus5Tuning = false, search = null,
 ) {
   if (!reassignModifiers) return null;
   // runSolver can pin one arbitrary-stat Exotic config. Additional locked
@@ -1124,8 +1127,8 @@ function findFromScratchUpgradeWitness(
       numPlus3,
       pieces: exoticSettings?.config ? [exoticSettings.config] : [],
       exoticSettings,
-      runtimeOptions: { maxExactSolutions: 1 },
-    })));
+      runtimeOptions: {...search?.runtimeOptions, maxExactSolutions: 1},
+    }), search ? {checkpoint: search.checkpoint, publish: () => {}} : null));
   let bestPlan = null;
 
   for (const solution of solutions) {
@@ -1254,7 +1257,7 @@ function visitPermutations(values, visit, depth = 0) {
 
 function findExactUpgradePlanIterative(
   pieces, targets, fragments, reassignModifiers, evaluatePieces,
-  onlyPlus5Tuning, userConstraints = {},
+  onlyPlus5Tuning, userConstraints = {}, search = null,
 ) {
   if (!reassignModifiers) return null;
   const exactPointModelComplete = STATS.every(stat => userConstraints.exact?.[stat] === true);
@@ -1308,6 +1311,7 @@ function findExactUpgradePlanIterative(
       const witnesses = [];
       for (const point of points.values()) {
         witnesses.push(...findExactPartialConfigWitnesses({
+          checkpoint: search?.checkpoint,
           fixedEntries,
           freePieceCount: replacementDepth,
           target: point,
@@ -1584,7 +1588,7 @@ function getSingleSwapSeeds(pieces, rankings) {
 }
 
 export function analyzeUpgradeCandidates(
-  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}
+  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}, search = null
 ) {
   pieces = pieces.map(normalizePieceNumbers);
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
@@ -1600,13 +1604,26 @@ export function analyzeUpgradeCandidates(
     .filter(index => index >= 0);
   pieces = projectPiecesToFullMasterwork(enteredPieces);
   if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
+  let observeCandidate = null;
+  const monitoredSearch = search ? {checkpoint: search.checkpoint, evaluated: (candidate, evaluation) => observeCandidate?.(candidate, evaluation)} : null;
   const evaluatePieces = createUpgradeEvaluator(
-    targets, fragments, normalizedRequiredStats, onlyPlus5Tuning, userConstraints
+    targets, fragments, normalizedRequiredStats, onlyPlus5Tuning, userConstraints, monitoredSearch
   );
   const enteredBaseline = onlyPlus5Tuning
     ? evaluateUpgradePieces(enteredPieces, targets, fragments, false, normalizedRequiredStats, false, userConstraints)
     : evaluatePieces(enteredPieces, false);
   const baseline = evaluatePieces(pieces, reassignModifiers);
+  const partial = plan => ({pieces: enteredPieces, targets, fragments, requiredStats: normalizedRequiredStats,
+    constraints: userConstraints, reassignModifiers, projectedMasterworkIndices, enteredBaseline, baseline, rankings: [], best: null, plan});
+  search?.publish(partial(null));
+  let incumbent = baseline;
+  observeCandidate = (candidate, evaluation) => {
+    if (compareUpgradeMetrics(evaluation.metrics, incumbent.metrics) >= 0) return;
+    incumbent = evaluation;
+    const replacements = getUpgradeReplacements(pieces, candidate);
+    search?.publish(partial({pieces: candidate, evaluation, metrics: evaluation.metrics,
+      replacements, replacementCount: replacements.length, steps: []}));
+  };
   const modifierBudget = getUpgradeModifierBudget(pieces, {reassignModifiers, onlyPlus5Tuning});
   const maximumBudget = pieces.reduce((sum, piece) => {
     const current = STATS.reduce((total, stat) => total + getUpgradeConfig(piece).baseStats[stat], 0);
@@ -1623,6 +1640,7 @@ export function analyzeUpgradeCandidates(
   const fullGoalBudgetImpossible = minimumGoalBudget > maximumBudget;
   let rankings = [];
   let plan = null;
+  try {
   if (!baseline.metrics.allReached) {
     plan = findExactUpgradePlanIterative(
       pieces,
@@ -1632,6 +1650,7 @@ export function analyzeUpgradeCandidates(
       evaluatePieces,
       onlyPlus5Tuning,
       userConstraints,
+      search,
     );
     if (!plan) {
     // Full-target feasibility is invariant under the UI's fallback-priority
@@ -1652,7 +1671,7 @@ export function analyzeUpgradeCandidates(
     if (!fullTargetSearch) {
       const fullTargetEvaluator = allStatsRequired
         ? evaluatePieces
-        : createUpgradeEvaluator(targets, fragments, STATS, onlyPlus5Tuning, userConstraints);
+        : createUpgradeEvaluator(targets, fragments, STATS, onlyPlus5Tuning, userConstraints, search);
       const fullTargetBaseline = allStatsRequired
         ? baseline
         : fullTargetEvaluator(pieces, reassignModifiers);
@@ -1672,7 +1691,7 @@ export function analyzeUpgradeCandidates(
       if (!fullTargetPlan?.metrics.allReached) {
         const scratchWitness = findFromScratchUpgradeWitness(
           pieces, targets, fragments, reassignModifiers, STATS, userConstraints,
-          fullTargetEvaluator, onlyPlus5Tuning,
+          fullTargetEvaluator, onlyPlus5Tuning, search,
         );
         if (scratchWitness && compareUpgradePlans(scratchWitness, fullTargetPlan) < 0) {
           fullTargetPlan = scratchWitness;
@@ -1721,6 +1740,9 @@ export function analyzeUpgradeCandidates(
       );
     }
     }
+  }
+  } catch (error) {
+    if (!(error instanceof SearchBudgetExceeded)) throw error;
   }
   const bestCandidate = rankings[0] || null;
   const best = bestCandidate && compareUpgradeMetrics(bestCandidate.metrics, baseline.metrics) < 0

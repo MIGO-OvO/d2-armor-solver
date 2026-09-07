@@ -45,7 +45,8 @@ test("critical UI terms are wired to the centralized contract", () => {
 });
 
 test("Solver V3 UI copy distinguishes proof, limits, witnesses, and execution", async () => {
-  const source = await readFile(path.join(root, "src", "app.mjs"), "utf8");
+  const source = await readFile(path.join(root, "src", "app.mjs"), "utf8")
+    + await readFile(path.join(root, "src", "core", "solver-presentation.mjs"), "utf8");
   for (const status of [
     "EXACT_TARGET_PROVEN",
     "RULE_FEASIBLE_PROVEN",

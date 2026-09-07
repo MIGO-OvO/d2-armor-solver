@@ -1556,6 +1556,43 @@ try {
   }), BASE_CONFIGS[0]);
   assert.equal(workerProbe.status, "EXACT_TARGET_PROVEN");
   assert.equal(workerProbe.certificate.witnessVerification.armorTotals.health, 225);
+  const stagedProbe = await page.evaluate(fixedPiece => new Promise((resolve, reject) => {
+    const worker = new Worker(window.__armorWorkerUrls.find(url => url.includes("armor-engine.worker")), {type: "module"});
+    const frames = [];
+    const timer = setTimeout(() => {worker.terminate(); reject(new Error("staged Worker timeout"));}, 10000);
+    worker.onmessage = ({data}) => {
+      frames.push({type: data.type, generation: data.generation, search: data.search || data.result?.search,
+        status: data.result?.certificate?.status, verified: data.result?.certificate?.witnessVerification?.valid});
+      if (data.type === "error") {clearTimeout(timer); worker.terminate(); reject(new Error(data.error.message));}
+      if (data.type === "result") {clearTimeout(timer); worker.terminate(); resolve(frames);}
+    };
+    const slots = ["helmet", "arms", "chest", "legs", "classItem"];
+    const stats = ["health", "melee", "grenade", "super", "class", "weapons"];
+    const items = slots.map((slot, index) => ({...fixedPiece, id: `staged-${index}`, hash: 100 + index,
+      slot, classId: "hunter", archetypeId: fixedPiece.archetype, effectiveBaseStats: {...fixedPiece.baseStats},
+      optimizationBaseStats: {...fixedPiece.baseStats}, masterworkTier: 5,
+      tuningMode: "plus3", tunedStat: "health", allowedTuningStats: ["health"], armorModSize: 0,
+      dataConfidence: {stats: "exact", tuning: "exact"}}));
+    const targets = Object.fromEntries(stats.map(stat => [stat, 5 * (fixedPiece.baseStats[stat] + Number(fixedPiece.masterworkStats.includes(stat)))]));
+    worker.postMessage({type: "start", id: "staged", generation: 77, operation: "solveInventory", payload: {
+      searchProfile: "balanced", items, targets, fragments: {}, reassignModifiers: false,
+      setRequirement: {type: "none"}, userConstraints: {exact: Object.fromEntries(stats.map(stat => [stat, true]))},
+    }});
+  }), BASE_CONFIGS[0]);
+  assert.ok(stagedProbe.some(event => event.type === "progress" && event.verified && event.status === "EXACT_TARGET_PROVEN"));
+  assert.ok(stagedProbe.every(event => event.generation === 77));
+  assert.equal(stagedProbe.at(-1).type, "result");
+  assert.equal(stagedProbe.at(-1).search.running, false);
+  await page.locator('#searchProfile').selectOption('fast');
+  assert.match(await page.locator('#searchProfileHelp').innerText(), /200/);
+  await page.locator('#searchProfile').selectOption('deep');
+  await page.evaluate(() => { window.__cancelledSearch = window.solve(); });
+  await page.locator('#cancelSearch').waitFor({state: 'visible'});
+  await page.waitForFunction(() => !document.getElementById('cancelSearch').disabled);
+  await page.locator('#cancelSearch').click();
+  await page.evaluate(() => window.__cancelledSearch);
+  assert.match(await page.locator('#searchStatus').innerText(), /停止|stopped/);
+  await page.locator('#searchProfile').selectOption('balanced');
 
   await page.evaluate(() => window.setCalculatorMode("upgrade"));
   assert.equal(await page.locator("#upgradeBuildCard").getAttribute("hidden"), null);

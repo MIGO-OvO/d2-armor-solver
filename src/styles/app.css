@@ -5111,3 +5111,10 @@ a:focus-visible {
   .notice.notice--free { margin-bottom: 12px; }
   .solver-mode-switch { margin-bottom: 16px; }
 }
+/* Existing workbench controls, with status distinct from mathematical proof. */
+.search-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; color: var(--text-dim); font-size: 13px; }
+.search-toolbar select { min-height: 40px; padding: 7px 12px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.search-progress { flex-basis: 100%; display: flex; gap: 12px; align-items: baseline; }
+#searchStatus { color: var(--accent); }
+#searchStatistics { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { #searchProfileHelp { flex-basis: 100%; order: 3; } .search-progress { flex-wrap: wrap; order: 4; } }

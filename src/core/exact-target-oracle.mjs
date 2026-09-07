@@ -660,6 +660,8 @@ export function findBestGlobalWitness({
   compareRanks,
   initialBest = null,
   searchStats = {},
+  checkpoint = null,
+  onWitness = null,
 }) {
   searchStats.statesExamined = 0;
   if (typeof rankTotals !== "function" || typeof lowerBoundRank !== "function" ||
@@ -688,6 +690,7 @@ export function findBestGlobalWitness({
 
     const inspect = (plus3, shift) => {
       searchStats.statesExamined++;
+      if ((searchStats.statesExamined & 1023) === 0) checkpoint?.(1024);
       const baseTotals = fixedTotals.map((value, statIndex) =>
         value + plus3.totals[statIndex] + shift.totals[statIndex]);
       const lowerRank = lowerBoundRank(baseTotals, adjustmentValueSets);
@@ -695,6 +698,7 @@ export function findBestGlobalWitness({
 
       for (let row = 0; row < adjustmentIndex.reachableKeys.length; row++) {
         searchStats.statesExamined++;
+        if ((searchStats.statesExamined & 1023) === 0) checkpoint?.(1024);
         const units = adjustmentIndex.reachableUnits;
         const totals = Object.fromEntries(STATS.map((stat, statIndex) => [
           stat,
@@ -727,6 +731,7 @@ export function findBestGlobalWitness({
           exoticIndex: fixed ? 0 : null,
         };
         incumbentRank = rank;
+        onWitness?.(best);
       }
     };
 
@@ -800,6 +805,8 @@ export function findExactTargetWitnesses({
   numPlus3,
   fixedConfig = null,
   searchStats = {},
+  onWitness = null,
+  checkpoint = null,
 }) {
   searchStats.statesExamined = 1; // Includes arithmetic/residue rejection.
   const normalizedTarget = STATS.map(stat => Number(target?.[stat]));
@@ -840,10 +847,12 @@ export function findExactTargetWitnesses({
       : configIndices.map(index => BASE_CONFIGS[index]);
     const groupKey = getArchetypeGroupKey(configs, Boolean(fixed));
     if (witnessesByGroup.has(groupKey)) return;
-    witnessesByGroup.set(groupKey, {
+    const witness = {
       config: [...configs],
       ...materializeWitness(configs, mask, adjustmentIndex, packedWitness),
-    });
+    };
+    witnessesByGroup.set(groupKey, witness);
+    onWitness?.(witness);
   };
 
   // When both modes are present, enumerating their multisets independently is
@@ -854,6 +863,7 @@ export function findExactTargetWitnesses({
     const mask = (1 << numPlus3) - 1;
     const inspectPair = (plus3, shift) => {
       searchStats.statesExamined++;
+      if ((searchStats.statesExamined & 1023) === 0) checkpoint?.(1024);
       const residuals = normalizedTarget.map((value, statIndex) =>
         value - plus3.totals[statIndex] - shift.totals[statIndex]);
       if (residuals.some(value => value % 5 !== 0)) return;
@@ -886,6 +896,7 @@ export function findExactTargetWitnesses({
   }
 
   const inspectSelection = () => {
+    if ((searchStats.statesExamined & 1023) === 1) checkpoint?.(1024);
     for (const maskEntry of masks) {
       searchStats.statesExamined++;
       const units = STATS.map((_, statIndex) => {
@@ -943,6 +954,7 @@ export function findExactPartialConfigWitnesses({
   numPlus10,
   allowedFreePlus3Counts,
   maxWitnesses = 16,
+  checkpoint = null,
 }) {
   if (fixedEntries.length + freePieceCount !== 5) return [];
   const normalizedTarget = STATS.map(stat => Number(target?.[stat]));
@@ -1019,6 +1031,7 @@ export function findExactPartialConfigWitnesses({
       );
 
       const inspect = (plus3, shift) => {
+        checkpoint?.();
         if (witnesses.length >= maxWitnesses) return;
         const baseTotals = fixedSelection.baseTotals.map((value, statIndex) =>
           value + plus3.totals[statIndex] + shift.totals[statIndex]);

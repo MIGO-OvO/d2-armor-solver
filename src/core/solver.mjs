@@ -604,7 +604,7 @@ function insertRelaxedEntry(bucket, entry, limit) {
   if (bucket.length > limit) bucket.pop();
 }
 
-function findBestRelaxedTargets(total, target, constraints, limit = 8, valueStep = 1) {
+function findBestRelaxedTargets(total, target, constraints, limit = 8, valueStep = 1, search = null) {
   if (!Number.isSafeInteger(total) || total < 0 || total > 1200) return [];
   // This is an armor-domain relaxation, not the clamped display domain.
   // Armor can exceed 200 (e.g. Health=225); the conserved total is its bound.
@@ -616,6 +616,7 @@ function findBestRelaxedTargets(total, target, constraints, limit = 8, valueStep
   for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
     const next = Array.from({ length: total + 1 }, () => []);
     for (let sum = 0; sum <= total; sum++) {
+      search?.checkpoint();
       if (states[sum].length === 0) continue;
       const maximum = total - sum;
       for (const previous of states[sum]) {
@@ -707,7 +708,7 @@ export function farmabilityScore(config, exoticIndex = null) {
 const REFINEMENT_CANDIDATE_LIMIT = 192;
 const LOCAL_SEARCH_CANDIDATE_LIMIT = 12;
 
-export function runSolver(problemSpec) {
+export function runSolver(problemSpec, search = null) {
   const {
     target,
     constraints,
@@ -719,6 +720,52 @@ export function runSolver(problemSpec) {
   const exoticSettings = fixedConfig
     ? { ...(exoticSelection || {}), config: fixedConfig }
     : null;
+  let publishedRank = null;
+  const publishImprovement = candidate => {
+    if (!search || publishedRank && compareScoreRanks(candidate.rank, publishedRank) >= 0) return;
+    publishedRank = [...candidate.rank];
+    search.publish(candidate);
+  };
+  if (search) {
+    let incumbent = null;
+    // Cheap target-directed seeds precede the cold residual index. The same
+    // request keeps searching; these candidates cannot prove infeasibility.
+    for (let seed = 0; seed < 12; seed++) {
+      search.checkpoint();
+      const configs = fixedConfig ? [fixedConfig] : [BASE_CONFIGS[(seed * 5) % BASE_CONFIGS.length]];
+      const totals = {...configs[0].baseStats};
+      while (configs.length < 5) {
+        const count = configs.length + 1;
+        const projected = Object.fromEntries(STATS.map(stat => [stat, target[stat] * count]));
+        let piece = null, rank = null;
+        for (const config of BASE_CONFIGS) {
+          if (seed > 0 && STATS.some(stat => {
+            const ceiling = constraints.exact?.[stat] ? target[stat] : constraints.maximums?.[stat];
+            return ceiling !== undefined && totals[stat] + config.baseStats[stat]
+              + (5 - count) * 5 - (5 - numPlus3) * 5 > ceiling;
+          })) continue;
+          const values = Object.fromEntries(STATS.map(stat => [stat, (totals[stat] + config.baseStats[stat]) * 5]));
+          const score = scoreStatsRank(values, projected, {});
+          if (!rank || compareScoreRanks(score, rank) < 0) { piece = config; rank = score; }
+        }
+        if (!piece) { configs.length = 0; break; }
+        configs.push(piece);
+        for (const stat of STATS) totals[stat] += piece.baseStats[stat];
+      }
+      if (configs.length !== 5) continue;
+      const evaluation = evaluateConfig(configs, target, numPlus5, numPlus10, numPlus3, constraints, null, {skipExactJointSearch: true});
+      const candidate = {...evaluation, config: configs, exoticIndex: fixedConfig ? 0 : null};
+      if (!incumbent || compareScoreRanks(candidate.rank, incumbent.rank) < 0) {
+        incumbent = candidate; publishImprovement(candidate);
+      }
+      if (candidate.rank.every(value => value === 0)) break;
+    }
+    if (runtimeOptions.fastMode) {
+      const result = incumbent ? [incumbent] : [];
+      result.proof = createProofEvidence(problemSpec, {producer: "heuristic-solver", method: "fast-incumbent", truncated: true});
+      return result;
+    }
+  }
   // Search the exact target independently of all heuristic ranking and
   // refinement limits. A returned witness proves reachability; only a miss
   // falls through to the deterministic fuzzy/near-target search below.
@@ -733,6 +780,7 @@ export function runSolver(problemSpec) {
     for (const exactTarget of exactTargets) {
       if (!satisfiesConstraintModel({totals: exactTarget}, problemSpec.constraintModel)) continue;
       const searchStats = {};
+      let progressFarmability = Infinity;
       const exactWitnesses = findExactTargetWitnesses({
         target: exactTarget,
         numPlus5,
@@ -740,6 +788,15 @@ export function runSolver(problemSpec) {
         numPlus3,
         fixedConfig: exoticSettings?.config || null,
         searchStats,
+        checkpoint: search?.checkpoint,
+        onWitness: search ? witness => {
+          const farmability = farmabilityScore(witness.config, exoticSettings?.config ? 0 : null);
+          if (farmability >= progressFarmability) return;
+          progressFarmability = farmability;
+          search.publish({...witness, totals: {...exactTarget},
+            rank: scoreStatsRank(exactTarget, target, constraints), score: scoreStats(exactTarget, target, constraints),
+            exoticIndex: exoticSettings?.config ? 0 : null});
+        } : null,
       });
       if (exactWitnesses.length > 0) {
         const exactScore = scoreStats(exactTarget, target, constraints);
@@ -787,7 +844,7 @@ export function runSolver(problemSpec) {
     }
   }
 
-  if (!runtimeOptions.fastMode) {
+  if (!runtimeOptions.fastMode && !runtimeOptions.proveFuzzy) {
     const relaxedProof = tryRelaxedProof(
       target,
       numPlus5,
@@ -796,6 +853,7 @@ export function runSolver(problemSpec) {
       constraints,
       exoticSettings,
       runtimeOptions,
+      search,
     );
     if (relaxedProof) {
       relaxedProof.proof = createProofEvidence(problemSpec, {
@@ -814,6 +872,7 @@ export function runSolver(problemSpec) {
   const stagedCandidates = [];
 
   function storeSolution(bestConfig, bestResult) {
+    search?.checkpoint();
     const exoticIndex = fixedExotic ? 0 : null;
     const key = archetypeKey(bestConfig, exoticIndex);
     const existing = solutionMap.get(key);
@@ -835,6 +894,7 @@ export function runSolver(problemSpec) {
         secondaryPerkName: exoticSettings.secondaryPerkName,
       } : null,
     });
+    publishImprovement(solutionMap.get(key));
   }
 
   function refineAndStore(archIndices, config, initialResult, localSearch) {
@@ -876,6 +936,7 @@ export function runSolver(problemSpec) {
   }
 
   function evaluateArchetypeSet(archIndices) {
+        search?.checkpoint();
         // Greedy tertiary assignment. In exotic mode slot 0 is the locked exotic.
         const config = fixedExotic ? [fixedExotic] : [];
         const partialTotals = {};
@@ -1011,6 +1072,8 @@ export function runSolver(problemSpec) {
 
   const searchStats = {};
   const provenBest = findBestGlobalWitness({
+    checkpoint: search?.checkpoint,
+    onWitness: search?.publish,
     target,
     numPlus5,
     numPlus10,
@@ -1056,7 +1119,7 @@ export function runSolver(problemSpec) {
 
 function tryRelaxedProof(
   target, numPlus5, numPlus10, numPlus3, constraints,
-  exoticSettings, runtimeOptions,
+  exoticSettings, runtimeOptions, search = null,
 ) {
   const fixedBaseTotal = exoticSettings?.config
     ? STATS.reduce((sum, stat) =>
@@ -1074,9 +1137,11 @@ function tryRelaxedProof(
       ? Math.max(1, runtimeOptions.relaxedCandidateLimit)
       : 4,
     numPlus3 === 0 ? 5 : 1,
+    search,
   );
   for (const relaxed of relaxedTargets) {
     const witnesses = findExactTargetWitnesses({
+      checkpoint: search?.checkpoint,
       target: relaxed.target,
       numPlus5,
       numPlus10,

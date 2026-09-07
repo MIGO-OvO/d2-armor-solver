@@ -1077,6 +1077,15 @@ export function createResultCertificate({
   return {
     schemaVersion: SOLVER_V3_SCHEMA_VERSION,
     status: verifiedStatus,
+    statResults: Object.fromEntries((problemSpec?.constraintModel?.rules || []).map(rule => {
+      const actual = verifiedWitness?.armorTotals?.[rule.stat];
+      const visible = verifiedWitness?.visibleTotals?.[rule.stat];
+      const met = actual !== undefined && (rule.armorMinimum === null || actual >= rule.armorMinimum)
+        && (rule.armorMaximum === null || actual <= rule.armorMaximum);
+      return [rule.stat, {met, actual: visible ?? null, target: rule.preferredVisible,
+        below: actual === undefined || rule.armorMinimum === null ? 0 : Math.max(0, rule.armorMinimum - actual),
+        above: actual === undefined || rule.armorMaximum === null ? 0 : Math.max(0, actual - rule.armorMaximum)}];
+    })),
     executionStatus,
     canonicalId: createCanonicalId(verifiedWitness),
     problem: {

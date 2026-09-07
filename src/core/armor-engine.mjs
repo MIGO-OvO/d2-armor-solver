@@ -19,6 +19,7 @@ import {
   sealWitness,
 } from "./solver-v3-contract.mjs";
 import { analyzeUpgradeCandidates, getUpgradeConfig, getUpgradeModifierBudget } from "./upgrade-optimizer.mjs";
+import {SearchBudgetExceeded} from "./search-session.mjs";
 
 function certificateForWitness({
   problemSpec,
@@ -52,6 +53,17 @@ function certificateForWitness({
     proof,
     message: problemSpec.valid ? null : problemSpec.errors.join("; "),
   });
+}
+
+export function createSearchLimitResult(operation, payload) {
+  const problemSpec = createProblemSpec({operation, ...payload,
+    target: payload.targets || payload.target || payload.probeTarget || payload.lockedTargets,
+    pieces: payload.items || payload.pieces || (payload.fixedPiece ? [payload.fixedPiece] : []),
+    targetDomain: operation === "solve" ? payload.targetDomain || STAT_DOMAIN.ARMOR : STAT_DOMAIN.VISIBLE});
+  const result = operation === "solve" ? [] : {results: [], feasible: false, ranges: {}, verified: false};
+  return attachResultCertificate(result, certificateForWitness({problemSpec, witness: null,
+    witnessDomain: problemSpec.constraintModel.targetDomain, executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+    proof: createProofEvidence(problemSpec, {method: "effort-budget", truncated: true})}));
 }
 
 function annotateWitnesses(witnesses, problemSpec) {
@@ -92,7 +104,7 @@ export function solveLoadout({
   runtimeOptions = {},
   fragments = {},
   targetDomain = STAT_DOMAIN.ARMOR,
-}) {
+}, search = null) {
   const problemSpec = createProblemSpec({
     operation: "solve",
     target,
@@ -115,7 +127,25 @@ export function solveLoadout({
       proof: createProofEvidence(problemSpec, { method: "input-validation" }),
     }));
   }
-  const solutions = annotateWitnesses(runSolver(problemSpec), problemSpec);
+  const publish = candidate => {
+    const checked = sealWitness(problemSpec, candidate);
+    if (!checked.valid) return;
+    const witness = checked.witness;
+    const proof = createProofEvidence(problemSpec, {producer: "heuristic-solver", method: "staged-incumbent", truncated: true});
+    attachResultCertificate(witness, certificateForWitness({problemSpec, witness, witnessDomain: targetDomain,
+      executionStatus: EXECUTION_STATUS.NOT_APPLICABLE, proof}));
+    const result = attachResultCertificate([witness], witness.certificate);
+    search?.publish(result);
+  };
+  let raw;
+  try { raw = runSolver(problemSpec, search ? {checkpoint: search.checkpoint, publish} : null); }
+  catch (error) {
+    if (!(error instanceof SearchBudgetExceeded)) throw error;
+    return search.lastResult || attachResultCertificate([], certificateForWitness({problemSpec, witness: null,
+      witnessDomain: targetDomain, executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+      proof: createProofEvidence(problemSpec, {method: "effort-budget", truncated: true})}));
+  }
+  const solutions = annotateWitnesses(raw, problemSpec);
   for (const witness of solutions) attachResultCertificate(witness, certificateForWitness({
     problemSpec, witness, witnessDomain: targetDomain,
     executionStatus: EXECUTION_STATUS.NOT_APPLICABLE, proof: solutions.proof,
@@ -148,7 +178,8 @@ export function calculateReachability({
   fragments,
   lockedTargets,
   probeTarget = null,
-}) {
+}, search = null) {
+  search?.checkpoint(0);
   const targetForSpec = {...(lockedTargets || {}), ...(probeTarget || {})};
   const constraints = {
     exact: Object.fromEntries(Object.keys(targetForSpec || {}).map(stat => [stat, true])),
@@ -190,14 +221,21 @@ export function calculateReachability({
   fragments = problemSpec.constraintModel.fragments;
   lockedTargets = Object.fromEntries(Object.keys(lockedTargets || {}).map(stat =>
     [stat, problemSpec.constraintModel.target[stat]]));
-  const result = calculateReachableRanges(
+  let result;
+  try { result = calculateReachableRanges(
     fixedPiece,
     numPlus5,
     numPlus10,
     numPlus3,
     fragments,
     lockedTargets,
-  );
+    search,
+  ); } catch (error) {
+    if (!(error instanceof SearchBudgetExceeded)) throw error;
+    return attachResultCertificate({feasible: false, ranges: {}, searchStats: {complete: false}},
+      certificateForWitness({problemSpec, witness: null, witnessDomain: STAT_DOMAIN.VISIBLE,
+        executionStatus: EXECUTION_STATUS.NOT_APPLICABLE, proof: createProofEvidence(problemSpec, {method: "effort-budget", truncated: true})}));
+  }
   const probe = probeTarget ? findReachabilityWitness({
     fixedPiece,
     numPlus5,
@@ -251,7 +289,8 @@ export function analyzeUpgrade({
   requiredStats = [],
   onlyPlus5Tuning = false,
   constraints = {},
-}) {
+  runtimeOptions = {},
+}, search = null) {
   const problemSpec = createProblemSpec({
     operation: "analyzeUpgrade",
     targets,
@@ -290,7 +329,15 @@ export function analyzeUpgrade({
     requiredStats,
     onlyPlus5Tuning,
     constraints,
+    search ? {checkpoint: search.checkpoint, runtimeOptions, publish: raw => {
+      search.publish(certifyUpgradeResult(raw, problemSpec, pieces, reassignModifiers, onlyPlus5Tuning, requiredStats));
+    }} : null,
   );
+  return certifyUpgradeResult(result, problemSpec, pieces, reassignModifiers, onlyPlus5Tuning, requiredStats);
+}
+
+function certifyUpgradeResult(result, problemSpec, pieces, reassignModifiers, onlyPlus5Tuning, requiredStats) {
+  result = structuredClone(result);
   const materialize = (physical, evaluation) => physical.map((piece, index) => ({
     ...piece, ...getUpgradeConfig(piece),
     archetypeId: piece.archetypeId,
@@ -312,6 +359,9 @@ export function analyzeUpgrade({
     const verification = sealWitness(problemSpec, candidate);
     if (verification.valid) {
       Object.assign(evaluation, verification.witness, { finalTotals: verification.visibleTotals });
+      attachResultCertificate(evaluation, certificateForWitness({problemSpec, witness: verification.witness,
+        witnessDomain: STAT_DOMAIN.VISIBLE, executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+        proof: createProofEvidence(problemSpec, {method: "verified-upgrade-evaluation", truncated: true})}));
       return verification.witness;
     }
     evaluation.verificationErrors = verification.errors;
@@ -323,7 +373,12 @@ export function analyzeUpgrade({
   const entered = sealWitness(enteredSpec, {
     ...result.enteredBaseline, pieces: materialize(result.pieces, result.enteredBaseline),
   });
-  if (entered.valid) Object.assign(result.enteredBaseline, entered.witness, { finalTotals: entered.visibleTotals });
+  if (entered.valid) {
+    Object.assign(result.enteredBaseline, entered.witness, { finalTotals: entered.visibleTotals });
+    attachResultCertificate(result.enteredBaseline, certificateForWitness({problemSpec: enteredSpec, witness: entered.witness,
+      witnessDomain: STAT_DOMAIN.VISIBLE, executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+      proof: createProofEvidence(enteredSpec, {method: "entered-baseline", truncated: true})}));
+  }
   let witness = baselineWitness;
   if (result.plan) {
     witness = bind(result.plan.pieces, result.plan.evaluation);
@@ -363,7 +418,7 @@ export function analyzeUpgrade({
   }));
 }
 
-export function solveInventory(payload) {
+export function solveInventory(payload, search = null) {
   const problemSpec = createProblemSpec({
     operation: "solveInventory",
     targets: payload?.targets,
@@ -394,8 +449,22 @@ export function solveInventory(payload) {
       proof: createProofEvidence(problemSpec, { method: "input-validation" }),
     }));
   }
-  const result = solveInventoryLoadout({...payload,
-    targets: problemSpec.constraintModel.target, fragments: problemSpec.constraintModel.fragments}, problemSpec);
+  let result;
+  try {
+    result = solveInventoryLoadout({...payload,
+      targets: problemSpec.constraintModel.target, fragments: problemSpec.constraintModel.fragments}, problemSpec,
+    search ? {checkpoint: search.checkpoint, publish: raw => {
+      const certified = certifyInventoryResult(raw, problemSpec, payload);
+      search.publish(certified, raw.searchStats);
+    }} : null);
+  } catch (error) {
+    if (!(error instanceof SearchBudgetExceeded)) throw error;
+    return search.lastResult || certifyInventoryResult({results: [], searchStats: {frontierComplete: false}, examined: 0}, problemSpec, payload);
+  }
+  return certifyInventoryResult(result, problemSpec, payload);
+}
+
+function certifyInventoryResult(result, problemSpec, payload) {
   if (!result) return result;
   for (const entry of result.results || []) {
     const verification = sealWitness(problemSpec, entry);

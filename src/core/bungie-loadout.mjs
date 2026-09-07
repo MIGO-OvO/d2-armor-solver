@@ -317,6 +317,7 @@ function transferRequest(item, membershipType, characterId, transferToVault) {
 // merely pulling an item out of the Vault.
 export function buildBungieArmorItemActionPlan({
   membershipType,
+  membershipId = null,
   targetCharacterId,
   targetClassId = null,
   itemId,
@@ -414,6 +415,7 @@ export function buildBungieArmorItemActionPlan({
     action,
     item,
     itemId: sourceId,
+    membershipId,
     membershipType: Number(membershipType),
     targetCharacterId: targetId,
     moveAsideTransfers,
@@ -682,9 +684,9 @@ function equipStatusByInstanceId(response) {
 }
 
 // Execute one owned-armor row action. This intentionally omits socket writes
-// and verification: it only transfers an item into the selected character's
+// but reconciles the server state: it only transfers into the selected character's
 // inventory or equips an item that is already there.
-export async function applyBungieArmorItemAction(plan, { onProgress = null, delays = true } = {}) {
+export async function applyBungieArmorItemAction(plan, { onProgress = null, delays = true, verify = true } = {}) {
   if (!plan?.valid) throw new BungieLoadoutPlanError(plan?.errors || []);
   const completed = {
     moveAsideTransfers: 0,
@@ -696,10 +698,13 @@ export async function applyBungieArmorItemAction(plan, { onProgress = null, dela
   let stage = "ready";
   const progress = detail => onProgress?.({ stage, completed: { ...completed }, ...detail });
   const pause = delays ? sleep : () => {};
+  const finish = async (action, equipFailure = null) => ({action, completed, equipFailure,
+    verification: verify ? await reconcileBungieArmorItemAction(plan, {delayMs: delays ? 500 : 0})
+      : {status: "unverified", reason: "verification-disabled"}});
 
   try {
     if (plan.action === "equipped") {
-      return { action: "equipped", completed, equipFailure: null };
+      return await finish("equipped");
     }
 
     stage = "space";
@@ -748,7 +753,7 @@ export async function applyBungieArmorItemAction(plan, { onProgress = null, dela
         completed.transfers++;
         await pause(WRITE_DELAY_MS);
       }
-      return { action: "transferred", completed, equipFailure: null };
+      return await finish("transferred");
     }
 
     if (plan.action === "equip") {
@@ -761,20 +766,58 @@ export async function applyBungieArmorItemAction(plan, { onProgress = null, dela
       });
       const status = equipStatusByInstanceId(response).get(String(plan.itemId));
       if (status !== PLATFORM_SUCCESS) {
-        return {
-          action: "equip",
-          completed,
-          equipFailure: { itemId: String(plan.itemId), errorCode: status ?? null },
-        };
+        return await finish("equip", {itemId: String(plan.itemId), errorCode: status ?? null});
       }
       completed.targetEquip++;
-      return { action: "equipped", completed, equipFailure: null };
+      return await finish("equipped");
     }
 
-    return { action: plan.action, completed, equipFailure: null };
+    return await finish(plan.action);
   } catch (cause) {
-    throw new BungieLoadoutApplyError(stage, completed, cause);
+    const error = new BungieLoadoutApplyError(stage, completed, cause);
+    // A timeout may follow a successful write. Observe state, never replay a
+    // transfer/equip to guess whether it happened.
+    error.reconciliation = verify ? await reconcileBungieArmorItemAction(plan, {delayMs: 0}) : null;
+    throw error;
   }
+}
+
+export async function reconcileBungieArmorItemAction(plan, {retries = 1, delayMs = 500} = {}) {
+  if (!plan.membershipId) return {status: "unverified", reason: "missing-membership-id", attempts: 0};
+  let observed = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await bungieFetch(`/Destiny2/${plan.membershipType}/Profile/${plan.membershipId}/?components=102,201,205`,
+        {auth: true, retries: 0});
+      const data = unwrapProfile(response);
+      const backpack = data.characterInventories?.data?.[plan.targetCharacterId]?.items;
+      const equipment = data.characterEquipment?.data?.[plan.targetCharacterId]?.items;
+      const find = list => list?.find(item => String(item.itemInstanceId) === String(plan.itemId));
+      const equipped = find(equipment);
+      const carried = find(backpack);
+      observed = {owner: equipped || carried ? plan.targetCharacterId : null, equipped: Boolean(equipped)};
+      const located = plan.action === "transfer" ? carried : equipped;
+      if (located && Number(located.itemHash) === Number(plan.item.hash)) {
+        const locations = [];
+        for (const item of data.profileInventory?.data?.items || []) locations.push({id: String(item.itemInstanceId), hash: Number(item.itemHash), owner: "Vault", equipped: false});
+        for (const [owner, inventory] of Object.entries(data.characterInventories?.data || {})) {
+          for (const item of inventory.items || []) locations.push({id: String(item.itemInstanceId), hash: Number(item.itemHash), owner, equipped: false});
+        }
+        for (const [owner, inventory] of Object.entries(data.characterEquipment?.data || {})) {
+          for (const item of inventory.items || []) locations.push({id: String(item.itemInstanceId), hash: Number(item.itemHash), owner, equipped: true});
+        }
+        return {status: "verified", attempts: attempt + 1, observed, locations,
+          characterInventories: Object.fromEntries(Object.entries(data.characterInventories?.data || {}).map(([owner, inventory]) => [owner, inventory.items]))};
+      }
+      if (!Array.isArray(backpack) || !Array.isArray(equipment)) {
+        return {status: "unverified", reason: "incomplete-profile", attempts: attempt + 1, observed};
+      }
+    } catch (error) {
+      if (attempt === retries) return {status: "unverified", reason: "read-back-failed", message: error.message, attempts: attempt + 1, observed};
+    }
+    if (attempt < retries && delayMs) await sleep(delayMs);
+  }
+  return {status: "failed", reason: "server-state-mismatch", attempts: retries + 1, observed};
 }
 
 // Re-read the profile after writing and confirm every expected instance is

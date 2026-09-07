@@ -93,7 +93,7 @@ test("inline Adapter and direct ArmorEngine return the same canonical witness", 
     runtimeOptions: { fastMode: true },
   };
   const direct = solveLoadout(payload);
-  const inline = await solveLoadoutAsync(payload);
+  const inline = await solveLoadoutAsync({...payload, searchProfile: "deep"});
 
   assert.equal(inline[0].canonicalId, direct[0].canonicalId);
   assert.deepEqual(inline.certificate, direct.certificate);

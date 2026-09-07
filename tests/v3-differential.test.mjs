@@ -29,7 +29,10 @@ test("120 seeded generated-reachable Scratch witnesses survive independent rebui
     assert.deepEqual(independent.visible, model.visibleTotals);
     assertSolutionConsistency(model.problemSpec, model, model.visibleTotals);
     if (trial % 6 === 0) {
-      const again = await solveLoadoutAsync(payload);
+      // Adapter equivalence compares the completed exact domain. Balanced is
+      // now time-bounded and may retain a different equally valid incumbent.
+      const again = await solveLoadoutAsync({...payload, searchProfile: "deep"});
+      assert.equal(again.search.termination, "completed");
       assert.equal(again[0].canonicalId, result[0].canonicalId);
     }
   }

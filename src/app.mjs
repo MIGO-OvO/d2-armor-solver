@@ -29,14 +29,13 @@ import {
   calculateReachabilityAsync,
   solveInventoryAsync,
   solveLoadoutAsync,
+  cancelAllSearches,
 } from "./core/armor-engine-client.mjs";
 import {
   createBalancedTargetPlan,
 } from "./core/budget.mjs";
 import {
   createTargetConstraints,
-  preferConstraintSatisfyingSolutions,
-  satisfiesTargetConstraints,
   visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
@@ -58,8 +57,75 @@ import {
   getUpgradeModifierBudget,
   normalizeUpgradePiece,
   resolveCurrentLoadoutTotals,
-  satisfiesUpgradeStatRule,
 } from "./core/upgrade-optimizer.mjs";
+import {certifiedFeasible, proofPresentation} from "./core/solver-presentation.mjs";
+
+let searchProfile = "balanced";
+let searchUiRevision = 0;
+let lastSearchResult = null;
+function searchProofLabel(result, search = result?.search) {
+  const labels = {
+    exact: ['精确解 · 已证明','精確解 · 已證明','Exact solution · proven'],
+    feasible: ['满足规则 · 已证明','滿足規則 · 已證明','Rules satisfied · proven'],
+    feasibleSearching: ['满足规则 · 搜索未完成','滿足規則 · 搜尋未完成','Rules satisfied · search incomplete'],
+    infeasible: ['已证明不可行','已證明不可行','Infeasibility proven'],
+    limited: ['未找到达标解 · 已达到搜索上限','未找到達標解 · 已達搜尋上限','No qualifying solution · search limit reached'],
+    searching: ['继续搜索中 · 当前候选未达标','繼續搜尋中 · 目前候選未達標','Searching · current candidate does not meet rules'],
+    invalid: ['输入无效 · 请检查条件','輸入無效 · 請檢查條件','Invalid input · check the constraints'],
+    unverified: ['尚未验证 · 请重新求解','尚未驗證 · 請重新求解','Not verified · solve again'],
+  };
+  return l(...labels[proofPresentation(result, search).key]);
+}
+function renderSearchStatus(result, search = result?.search) {
+  if (result) lastSearchResult = result;
+  const status = document.getElementById('searchStatus');
+  if (!status) return;
+  status.textContent = result ? searchProofLabel(result, search)
+    : l('正在搜索…','正在搜尋…','Searching…');
+  document.getElementById('searchStatistics').textContent = search
+    ? `${Math.round(search.elapsedMs)} ms · ${search.nodes.toLocaleString()} ${l('节点','節點','nodes')}` : '';
+  document.getElementById('cancelSearch').disabled = !search?.running;
+}
+function beginSearch() {
+  lastSearchResult = null;
+  const revision = ++searchUiRevision;
+  renderSearchStatus(null, {running: true, elapsedMs: 0, nodes: 0});
+  return revision;
+}
+
+function setSearchProfile(value) {
+  stopSearches();
+  searchProfile = ['fast','balanced','deep'].includes(value) ? value : 'balanced';
+  saveCurrentDraft();
+  renderSearchControls();
+}
+function renderSearchControls() {
+  document.getElementById('searchProfileLabel').textContent = l('搜索深度','搜尋深度','Search depth');
+  const select = document.getElementById('searchProfile');
+  ['fast','balanced','deep'].forEach((mode, index) => {
+    select.options[index].textContent = l(...{
+      fast: ['快速','快速','Fast'], balanced: ['均衡','均衡','Balanced'], deep: ['深度','深度','Deep'],
+    }[mode]);
+  });
+  select.value = searchProfile;
+  document.getElementById('cancelSearch').textContent = l('停止搜索','停止搜尋','Stop search');
+  document.getElementById('searchProfileHelp').textContent = searchProfile === 'deep'
+    ? l('最多 15 秒，扩大搜索并尝试全局证明。可随时停止。','最多 15 秒，擴大搜尋並嘗試全域證明。可隨時停止。','Up to 15 seconds; wider search and global proof attempts. Stop at any time.')
+    : searchProfile === 'fast' ? l('约 200 ms 搜索预算，优先返回已验证候选。','約 200 ms 搜尋預算，優先回傳已驗證候選。','About 200 ms search budget; verified candidates first.')
+      : l('先显示已验证结果，再继续搜索至 3 秒。','先顯示已驗證結果，再繼續搜尋至 3 秒。','Show verified results first, then continue searching for up to 3 seconds.');
+}
+function stopSearches() {
+  searchUiRevision++;
+  cancelAllSearches();
+  document.getElementById('loading')?.classList.remove('show');
+  document.getElementById('btnSolve')?.removeAttribute('disabled');
+  document.getElementById('btnUpgradeAnalyze')?.removeAttribute('disabled');
+  document.querySelectorAll('.set-requirement-controls select').forEach(control => { control.disabled = false; });
+  if (lastSearchResult?.search) lastSearchResult.search = {...lastSearchResult.search, running: false, termination: 'cancelled'};
+  document.getElementById('cancelSearch')?.setAttribute('disabled', '');
+  const status = document.getElementById('searchStatus');
+  if (status) status.textContent = l('搜索已停止，已验证结果保留','搜尋已停止，已驗證結果保留','Search stopped; verified results retained');
+}
 import {
   detectEquippedClass,
   filterArmorItems,
@@ -134,8 +200,6 @@ let lastNumPlus3 = 0;
 let allSolutions = [];
 let currentSolutionIdx = 0;
 let lastExoticSettings = null;
-let lastSolverTarget = null;
-let lastSolverConstraints = null;
 let showAllSolutions = false;
 
 // Per-stat priority (1=high, 2=mid, 3=low; 0 = none, key omitted) and fuzzy
@@ -684,6 +748,7 @@ function changePageLanguage() {
   setStatLabels(language);
   buildRepository.writeLanguage(language);
   applyStaticTranslations();
+  renderSearchControls();
   if (controlState) {
     renderInputs();
     for (const stat of STATS) {
@@ -816,17 +881,7 @@ function hasNonExactTargetRules() {
 }
 
 function solutionSatisfiesCurrentTargetRules(solution) {
-  if (!solution) return false;
-  if (solution.certificate) return ['EXACT_TARGET_PROVEN', 'RULE_FEASIBLE_PROVEN'].includes(solution.certificate.status);
-  if (!lastSolverTarget || !lastSolverConstraints?.targetRules) {
-    return Boolean(lastSolverTarget) && STATS.every(stat =>
-      solution.totals[stat] === lastSolverTarget[stat]);
-  }
-  return satisfiesTargetConstraints(
-    solution.totals,
-    lastSolverTarget,
-    lastSolverConstraints,
-  );
+  return certifiedFeasible(solution);
 }
 
 async function calculateExoticRanges(exoticConfig, numPlus5, numPlus10, numPlus3, fragments) {
@@ -859,6 +914,7 @@ function collectDraftState() {
     statPriority: { ...statPriority },
     statFuzzyMode: { ...statFuzzyMode },
     fragments: Object.fromEntries(STATS.map(s => [s, getFragVal(s)])),
+    searchProfile,
     numPlus5: getVal('numPlus5'),
     numPlus10: getVal('numPlus10'),
     onlyPlus5Tuning,
@@ -884,6 +940,8 @@ function saveCurrentDraft() {
 function loadCurrentDraft() {
   const draft = buildRepository.readCurrentDraft();
   if (!draft) return;
+  searchProfile = ['fast','balanced','deep'].includes(draft.searchProfile) ? draft.searchProfile : 'balanced';
+  renderSearchControls();
   const draftLanguage = draft.language || draft.exotic?.language;
   if (['zh-chs', 'zh-cht', 'en'].includes(draftLanguage) && draftLanguage !== getPageLanguage()) {
     document.getElementById('pageLanguage').value = draftLanguage;
@@ -1116,6 +1174,7 @@ async function getNearestTargetSuggestion(exoticSettings, numPlus5, numPlus10, n
 }
 
 function applyNearestTargetSuggestion() {
+  stopSearches();
   if (!nearestTargetSuggestion) return;
   for (const stat of STATS) {
     const input = document.getElementById('target_' + stat);
@@ -1197,7 +1256,13 @@ async function updateRealtimeRanges() {
   }
   if (revision !== realtimeRangeRevision) return;
 
-  if (!reachable.feasible) {
+  if (!certifiedFeasible(reachable) && reachable.certificate?.status !== 'INFEASIBLE_PROVEN') {
+    clearRangeHints();
+    summary.textContent = searchProofLabel(reachable);
+    summary.style.display = 'block';
+    return;
+  }
+  if (reachable.certificate?.status === 'INFEASIBLE_PROVEN') {
     nearestTargetSuggestion = await getNearestTargetSuggestion(
       exoticSettings, numPlus5, numPlus10, numPlus3, fragments
     );
@@ -1231,6 +1296,7 @@ async function updateRealtimeRanges() {
 }
 
 function scheduleRealtimeRanges() {
+  stopSearches();
   clearTimeout(realtimeRangeTimer);
   if (calculatorMode === 'upgrade') {
     resetRealtimeRangeUI();
@@ -1301,15 +1367,15 @@ async function solve() {
   lastNumPlus10 = numPlus10;
 
   // Run solver
+  const revision = beginSearch();
   loading.classList.add('show');
   loading.setAttribute('aria-busy', 'true');
   document.getElementById('btnSolve').disabled = true;
 
   try {
     const solverConstraints = buildVisibleTargetConstraints();
-    lastSolverTarget = { ...adjTarget };
-    lastSolverConstraints = solverConstraints;
     const solvedSolutions = await solveLoadoutAsync({
+      searchProfile,
       target: adjTarget,
       fragments,
       targetDomain: 'visible',
@@ -1318,60 +1384,25 @@ async function solve() {
       numPlus3,
       constraints: solverConstraints,
       exoticSettings,
-    });
-    allSolutions = preferConstraintSatisfyingSolutions(
-      solvedSolutions,
-      adjTarget,
-      solverConstraints,
-    );
-    currentSolutionIdx = 0;
-
-    if (!allSolutions[0]) {
-      msgs.innerHTML += `<div class="msg error">${icon('block')}${l('未找到满足当前异域职业物品框架的候选方案。','找不到符合目前異域職業物品原型的候選方案。','No candidate matches the current Exotic Class Item archetype.')}</div>`;
-      return;
-    }
-    if (exoticSettings) {
-      const exoticRanges = await calculateExoticRanges(
-        exoticSettings.config, numPlus5, numPlus10, numPlus3, fragments
-      );
-      for (const solution of allSolutions) {
-        solution.exoticRanges = exoticRanges;
-        solution.priorityOrder = [...exoticSettings.priorityOrder];
+    }, {onProgress: (partial, search) => {
+      if (revision !== searchUiRevision) return;
+      renderSearchStatus(partial, search);
+      if (partial?.[0]) {
+        allSolutions = partial; currentSolutionIdx = 0;
+        displayAllResults(partial[0], targets, fragments, {scroll: false});
       }
+    }});
+    if (revision !== searchUiRevision) return;
+    allSolutions = solvedSolutions;
+    currentSolutionIdx = 0;
+    renderSearchStatus(solvedSolutions);
+    msgs.innerHTML = `<div class="msg ${certifiedFeasible(solvedSolutions) ? 'info' : 'warn'}">${escapeHtml(searchProofLabel(solvedSolutions))}</div>`;
+    if (allSolutions[0]) {
+      refreshInventoryPlansFromSolutions({rerender: false});
+      displayAllResults(allSolutions[0], targets, fragments);
     }
-    refreshInventoryPlansFromSolutions({ rerender: false });
-    const bestResult = allSolutions[0];
-
-    // Count +3 pieces in best result
-    const plus3Count = bestResult.tuningAssignments.filter(t => t.mode === '+3').length;
-    const targetRulesSatisfied = satisfiesTargetConstraints(
-      bestResult.visibleTotals,
-      adjTarget,
-      solverConstraints,
-    );
-
-    // Post-solve analysis
-    if (targetRulesSatisfied) {
-      msgs.innerHTML += `<div class="msg info">${icon('check')}${hasNonExactTargetRules()
-        ? l('找到满足全部属性规则的配装！','找到滿足全部屬性規則的配裝！','Found a loadout that satisfies every stat rule.')
-        : isOnlyPlus5Tuning()
-        ? l('找到完美配装！全部护甲使用+5/-5调整。','找到完美配裝！全部防具使用+5/-5調校。','Perfect loadout found. Every piece uses +5/-5 Tuning.')
-        : l(`找到完美配装！${plus3Count}件使用+3模式。`,`找到完美配裝！${plus3Count}件使用+3模式。`,`Perfect loadout found. ${plus3Count} piece(s) use +3 mode.`)}</div>`;
-    } else if (exoticSettings) {
-      const limitLines = exoticSettings.priorityOrder.map(stat => {
-        const actual = bestResult.totals[stat] + (fragments[stat] || 0);
-        const target = targets[stat];
-        return actual < target
-          ? l(`${STAT_LABELS[stat]}目标${target}，当前异域职业物品框架下最高为<strong>${actual}</strong>`,`${STAT_LABELS[stat]}目標${target}，目前異域職業物品原型下最高為<strong>${actual}</strong>`,`${STAT_LABELS[stat]} target ${target}; maximum with this Exotic Class Item archetype is <strong>${actual}</strong>`)
-          : l(`${STAT_LABELS[stat]}达到目标<strong>${target}</strong>`,`${STAT_LABELS[stat]}達成目標<strong>${target}</strong>`,`${STAT_LABELS[stat]} reaches <strong>${target}</strong>`);
-      });
-      msgs.innerHTML += `<div class="msg info">${icon('check')}${limitLines.join(l('；','；','; ')) || l('已找到固定异域职业物品框架下的最佳方案。','已找到固定異域職業物品原型下的最佳方案。','Best loadout for the fixed Exotic Class Item archetype found.')}</div>`;
-    } else {
-      msgs.innerHTML += `<div class="msg warn">${icon('warn')}${l('当前未找到满足全部属性规则的方案，以下显示最接近的结果。','目前未找到滿足全部屬性規則的方案，以下顯示最接近的結果。','No loadout satisfying every stat rule was found; the closest result is shown below.')}</div>`;
-    }
-
-    displayAllResults(bestResult, targets, fragments);
   } catch (error) {
+    if (error.name === 'AbortError') return;
     console.error('Armor solver failed', error);
     msgs.innerHTML += '<div class="msg error">' + icon('block') + l(
       '求解过程中发生错误，请重试。',
@@ -1379,9 +1410,11 @@ async function solve() {
       'The solver failed. Please try again.'
     ) + '</div>';
   } finally {
-    loading.classList.remove('show');
-    loading.setAttribute('aria-busy', 'false');
-    document.getElementById('btnSolve').disabled = false;
+    if (revision === searchUiRevision) {
+      loading.classList.remove('show');
+      loading.setAttribute('aria-busy', 'false');
+      document.getElementById('btnSolve').disabled = false;
+    }
   }
 }
 
@@ -1402,7 +1435,7 @@ function buildRefineCard(targets, finalTotals) {
     <div role="columnheader">${l('属性','數值','Stat')}</div>
     <div role="columnheader">${l('精确达成','精確達成','Exact')}<small>${l('锁定当前目标','鎖定目前目標','Match target')}</small></div>
     <div role="columnheader">${l('不超过 100','不超過 100','At most 100')}<small>${l('限制属性上限','限制數值上限','Cap the result')}</small></div>
-    <div role="columnheader">${l('强制最低','強制最低','Force minimum')}<small>${l('压到可达最低值','降至可達最低值','Use reachable min')}</small></div>
+    <div role="columnheader">${l('限制为 0','限制為 0','Require zero')}<small>${l('由求解器验证可达性','由求解器驗證可達性','Solver verifies feasibility')}</small></div>
     <div role="columnheader">${l('当前结果','目前結果','Current')}<small>${l('相对目标','相對目標','vs target')}</small></div>`;
 
   for (const s of STATS) {
@@ -1410,8 +1443,7 @@ function buildRefineCard(targets, finalTotals) {
     const notExact = diff !== 0;
     const notOver100 = finalTotals[s] <= 100;
     // Force-minimum: checked when at the achievable minimum (armor base + fragments)
-    const armorBase = getEnabledPlus3Count() * 6;
-    const statMin = Math.max(0, armorBase + (parseInt(document.getElementById('fragVal_' + s)?.textContent) || 0));
+    const statMin = 0;
     const atMinimum = finalTotals[s] === statMin;
     const exactLabel = l(
       `${STAT_LABELS[s]}：精确达成目标 ${targets[s]}`,
@@ -1424,9 +1456,9 @@ function buildRefineCard(targets, finalTotals) {
       `${STAT_LABELS[s]}: stay at or below 100`
     );
     const minLabel = l(
-      `${STAT_LABELS[s]}：强制为最低可达值 ${statMin}`,
-      `${STAT_LABELS[s]}：強制為最低可達值 ${statMin}`,
-      `${STAT_LABELS[s]}: force reachable minimum ${statMin}`
+      `${STAT_LABELS[s]}：限制为 ${statMin}`,
+      `${STAT_LABELS[s]}：限制為 ${statMin}`,
+      `${STAT_LABELS[s]}: require ${statMin}`
     );
     const status = notExact
       ? `<span class="constraint-status">${l('差','差','Off by')} ${diff > 0 ? '+' : ''}${diff}</span>`
@@ -1481,17 +1513,18 @@ function readConstraints() {
     le100[s] = document.getElementById('le100_' + s)?.checked || false;
     force0[s] = document.getElementById('force0_' + s)?.checked || false;
   }
-  return { priorities, le100, force0 };
+  return { exact: priorities, priorities: {}, le100, force0 };
 }
 
 async function refineWithPriorities() {
   if (!lastTargets || allSolutions.length === 0) return;
+  const revision = beginSearch();
 
   const constraints = readConstraints();
   if (lastExoticSettings) {
     Object.assign(constraints, buildExoticConstraints(lastExoticSettings, lastFragments));
   }
-  const hasConstraint = Object.values(constraints.priorities).some(v=>v) ||
+  const hasConstraint = Object.values(constraints.exact).some(v=>v) ||
                         Object.values(constraints.le100).some(v=>v) ||
                         Object.values(constraints.force0).some(v=>v);
   if (!hasConstraint) {
@@ -1499,24 +1532,15 @@ async function refineWithPriorities() {
     return;
   }
 
-  // Re-compute adjusted target
-  const adjTarget = {};
-  const armorMinPerStat = lastNumPlus3 * 6;
-  for (const s of STATS) {
-    let raw = lastTargets[s] - (lastFragments[s] || 0);
-    if (lastTargets[s] === 0 || raw < 0) raw = 0;
-    const finalMin = Math.max(0, armorMinPerStat + (lastFragments[s] || 0));
-    // force0 constraint: override target to minimum possible
-    if (constraints.force0[s]) adjTarget[s] = finalMin;
-    else if (lastTargets[s] < finalMin) adjTarget[s] = finalMin;
-    else adjTarget[s] = raw;
-  }
+  const adjTarget = {...lastTargets};
 
   // Show loading
   document.getElementById('loading').classList.add('show');
 
   try {
     const newSolutions = await solveLoadoutAsync({
+      searchProfile,
+      targetDomain: 'visible',
       target: adjTarget,
       fragments: lastFragments,
       numPlus5: lastNumPlus5,
@@ -1524,8 +1548,13 @@ async function refineWithPriorities() {
       numPlus3: lastNumPlus3,
       constraints,
       exoticSettings: lastExoticSettings,
-    });
+    }, {onProgress: (partial, search) => {
+      if (revision !== searchUiRevision) return;
+      renderSearchStatus(partial, search);
+      if (partial?.[0]) { allSolutions = partial; currentSolutionIdx = 0; displayAllResults(partial[0], lastTargets, lastFragments, {scroll: false}); }
+    }});
     const newResult = newSolutions[0];
+    if (revision !== searchUiRevision) return;
     if (!newResult) throw new Error('No refined armor solution found');
     if (lastExoticSettings && newResult) {
       const exoticRanges = await calculateExoticRanges(
@@ -1537,14 +1566,14 @@ async function refineWithPriorities() {
       }
     }
 
+    if (revision !== searchUiRevision) return;
+    renderSearchStatus(newSolutions);
     // Store new solutions
     const prevResult = allSolutions[currentSolutionIdx];
     allSolutions = newSolutions;
     currentSolutionIdx = 0;
     // The legacy refinement card has its own priority/cap semantics rather than
     // the main per-stat target rules, so keep its historical score-based labels.
-    lastSolverTarget = null;
-    lastSolverConstraints = null;
 
     // Full refresh (comparison, pieces, refine card, nav)
     displayAllResults(newResult, lastTargets, lastFragments);
@@ -1568,6 +1597,7 @@ async function refineWithPriorities() {
     }
     document.getElementById('refineCost').innerHTML = `<div style="border-top:1px solid var(--border);padding-top:12px;"><strong>${l('代价分析：','代價分析：','Trade-off analysis:')}</strong><br>${costLines.length > 0 ? costLines.join('<br>') : l('所有属性均无显著变化。','所有數值均無顯著變化。','No significant stat changes.')}</div>`;
   } catch (error) {
+    if (error.name === 'AbortError') return;
     console.error('Armor refinement failed', error);
     document.getElementById('messages').innerHTML += '<div class="msg error">' +
       icon('block') + l(
@@ -1576,7 +1606,7 @@ async function refineWithPriorities() {
         'Refinement failed. Please try again.'
       ) + '</div>';
   } finally {
-    document.getElementById('loading').classList.remove('show');
+    if (revision === searchUiRevision) document.getElementById('loading').classList.remove('show');
   }
 }
 
@@ -1869,13 +1899,7 @@ function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
     rangeSummary.style.display = 'none';
   }
 
-  const proofLabel = allSolutions.status === 'EXACT_TARGET_PROVEN'
-    ? l('精确目标已证明', '精確目標已證明', 'Exact target proven')
-    : allSolutions.status === 'RULE_FEASIBLE_PROVEN'
-      ? l('硬规则可行性已证明', '硬規則可行性已證明', 'Hard-rule feasibility proven')
-      : allSolutions.status === 'INFEASIBLE_PROVEN'
-        ? l('不可达已证明 · 显示最佳违反目标 witness', '不可達已證明 · 顯示最佳違反目標 witness', 'Infeasibility proven · best violating witness')
-        : l('搜索受限 · 当前最佳 witness', '搜尋受限 · 目前最佳 witness', 'Search limited · current-best witness');
+  const proofLabel = searchProofLabel(result);
   document.getElementById('scoreDisplay').innerHTML = `${proofLabel} | ${l(
     `总属性：<strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`,
     `總數值：<strong>${Object.values(finalTotals).reduce((a,b)=>a+b,0)}</strong>`,
@@ -1972,28 +1996,10 @@ function appendImperfectWarning() {
   if (msgDiv.dataset.imperfectShown === '1') return;
   msgDiv.dataset.imperfectShown = '1';
 
-  const adjSum = STATS.reduce((s, st) => s + Math.max(0, (lastTargets[st] || 0) - (lastFragments[st] || 0)), 0);
-  const budget = 450 + lastNumPlus3 * 3 + lastNumPlus5 * 5 + lastNumPlus10 * 10;
   const hasFuzzyRules = hasNonExactTargetRules();
-  const advice = hasFuzzyRules
-    ? l(
-        '尝试调整属性规则、目标值或调整模组数量。',
-        '嘗試調整數值規則、目標值或調校模組數量。',
-        'Try adjusting stat rules, target values, or modifier counts.'
-      )
-    : adjSum !== budget
-    ? l(
-        `目标总和与预算不一致（差${Math.abs(budget - adjSum)}点），请先调整目标使总和等于预算。`,
-        `目標總和與預算不一致（差${Math.abs(budget - adjSum)}點），請先調整目標使總和等於預算。`,
-        `Target total differs from budget by ${Math.abs(budget - adjSum)}. Adjust targets to match the budget first.`
-      )
-    : l(
-        '尝试<strong>修改调整+3数量</strong>，或<strong>调整六维属性目标</strong>。',
-        '嘗試<strong>修改調校+3數量</strong>，或<strong>調整六維數值目標</strong>。',
-        'Try changing the number of +3 Tuning pieces or adjusting target stats.'
-      );
+  const advice = l('可选择深度搜索，或调整目标和规则。', '可選擇深度搜尋，或調整目標與規則。', 'Try Deep search, or adjust the targets and rules.');
 
-  const searchLimited = allSolutions.status === 'SEARCH_LIMIT_REACHED';
+  const searchLimited = allSolutions.certificate?.status !== 'INFEASIBLE_PROVEN';
   const warning = searchLimited
     ? l(
         '\u641c\u7d22\u8fbe\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u4ec5\u4e3a\u5f53\u524d\u6700\u4f73 witness\uff0c\u5c1a\u672a\u8bc1\u660e\u5168\u5c40\u6700\u4f18\u6216\u4e0d\u53ef\u8fbe\u3002',
@@ -2044,7 +2050,7 @@ function renderSolutionNav() {
 
   navBar.style.display = 'block';
   const hasFuzzyRules = hasNonExactTargetRules();
-  const title = !hasPerfect && allSolutions.status === 'SEARCH_LIMIT_REACHED'
+  const title = !hasPerfect && allSolutions.certificate?.status === 'SEARCH_LIMIT_REACHED'
     ? l(
         `\u641c\u7d22\u53d7\u9650\uff1b\u663e\u793a ${total} \u4e2a\u5f53\u524d\u6700\u4f73 witness`,
         `\u641c\u5c0b\u53d7\u9650\uff1b\u986f\u793a ${total} \u500b\u76ee\u524d\u6700\u4f73 witness`,
@@ -2888,6 +2894,7 @@ function getOwnedArmorBungieActionState(item) {
   }
   const plan = buildBungieArmorItemActionPlan({
     membershipType: bungieProfileState.membershipType,
+    membershipId: bungieProfileState.membershipId,
     targetCharacterId: bungieTargetCharacterId,
     targetClassId: target.classId,
     itemId: item?.id ?? item?.sourceId,
@@ -2938,61 +2945,17 @@ function showOwnedArmorActionMessage(text, tone = "info") {
   buildOwnedGearSection();
 }
 
-function updateLocalOwnedArmorItemState(item, targetCharacterId, action, plan = null) {
-  const previousOwner = String(item.owner || "");
-  const targetId = String(targetCharacterId);
-  const removeFromCharacterInventory = (characterId, itemId) => {
-    const inventory = bungieProfileState?.characterInventories?.[String(characterId)];
-    if (!Array.isArray(inventory)) return;
-    bungieProfileState.characterInventories[String(characterId)] = inventory.filter(entry =>
-      String(entry?.itemInstanceId ?? "") !== String(itemId),
-    );
-  };
-  const addToCharacterInventory = (characterId, inventoryItem) => {
-    const inventory = bungieProfileState?.characterInventories?.[String(characterId)];
-    if (!Array.isArray(inventory) || inventory.some(entry =>
-      String(entry?.itemInstanceId ?? "") === String(inventoryItem?.id),
-    )) return;
-    inventory.push({
-      itemInstanceId: String(inventoryItem.id),
-      itemHash: Number(inventoryItem.hash) || 0,
-    });
-  };
-  if (action === "transferred") {
-    item.owner = targetId;
-    item.equipped = false;
-    removeFromCharacterInventory(previousOwner, item.id);
-    // Keep the local capacity snapshot exact after a full backpack was made
-    // room for this item. Without this, a second pull could try to move the
-    // same already-vaulted item aside again before the next auto-refresh.
-    for (const request of plan?.moveAsideTransfers || []) {
-      removeFromCharacterInventory(targetId, request.itemId);
+function updateLocalOwnedArmorItemState(verification) {
+  if (verification?.status !== 'verified') return;
+  const byId = new Map((verification.locations || []).map(location => [location.id, location]));
+  for (const item of importedInventory) {
+    const observed = byId.get(String(item.id));
+    if (observed && Number(item.hash) === observed.hash) {
+      item.owner = observed.owner;
+      item.equipped = observed.equipped;
     }
-    addToCharacterInventory(targetId, item);
-    for (const source of plan?.sourceEquips || []) {
-      for (const replacementId of source.itemIds || []) {
-        const replacement = importedInventory.find(candidate =>
-          String(candidate?.id ?? "") === String(replacementId),
-        );
-        if (!replacement) continue;
-        replacement.owner = String(source.characterId);
-        replacement.equipped = true;
-        removeFromCharacterInventory(source.characterId, replacement.id);
-      }
-    }
-  } else if (action === "equipped") {
-    const displaced = importedInventory.find(candidate => candidate !== item &&
-      candidate?.slot === item.slot &&
-      String(candidate?.owner) === targetId && candidate?.equipped,
-    );
-    if (displaced) {
-      displaced.equipped = false;
-      addToCharacterInventory(targetId, displaced);
-    }
-    item.owner = targetId;
-    item.equipped = true;
-    removeFromCharacterInventory(targetId, item.id);
   }
+  if (bungieProfileState) Object.assign(bungieProfileState.characterInventories, verification.characterInventories || {});
 }
 
 async function applyOwnedArmorItemAction(itemId) {
@@ -3024,14 +2987,22 @@ async function applyOwnedArmorItemAction(itemId) {
         }
       },
     });
-    if (result.equipFailure) {
+    if (result.equipFailure && result.verification?.status !== 'verified') {
       showOwnedArmorActionMessage(
         l("游戏未能装备此件护甲。请确认角色在轨道、社交空间或离线状态后重试。", "遊戲未能裝備此件防具。請確認角色在軌道、社交空間或離線狀態後重試。", "The game could not equip this armor. Make sure the character is in orbit, a social space, or offline, then retry."),
         "error",
       );
       return;
     }
-    updateLocalOwnedArmorItemState(item, state.plan.targetCharacterId, result.action, state.plan);
+    if (result.verification?.status === 'verified' && result.action === 'equip') result.action = 'equipped';
+    if (result.verification?.status !== "verified") {
+      lastBungieImportAt = 0;
+      showOwnedArmorActionMessage(l('操作已发送，但服务器状态尚未确认。请刷新库存后核对，不要重复点击。',
+        '操作已送出，但伺服器狀態尚未確認。請重新整理庫存後核對，不要重複點擊。',
+        'Action sent, but server state is not confirmed. Refresh inventory before retrying.'), 'warn');
+      return;
+    }
+    updateLocalOwnedArmorItemState(result.verification);
     lastBungieImportAt = 0;
     const target = bungieProfileState?.characters?.[state.plan.targetCharacterId];
     const targetLabel = target ? formatBungieCharacterLabel(target) : l("目标角色", "目標角色", "the target character");
@@ -3041,12 +3012,13 @@ async function applyOwnedArmorItemAction(itemId) {
         : l(`已将「${itemName}」装备到 ${targetLabel}。`, `已將「${itemName}」裝備到 ${targetLabel}。`, `Equipped “${itemName}” on ${targetLabel}.`),
     );
   } catch (error) {
-    const partial = error instanceof BungieLoadoutApplyError && error.partial;
-    showOwnedArmorActionMessage(`${partial ? l(
-      "已完成部分操作：",
-      "已完成部分操作：",
-      "Some steps completed: ",
-    ) : ""}${bungieWriteErrorMessage(error)}`, "error");
+    if (error.reconciliation?.status === 'verified') {
+      updateLocalOwnedArmorItemState(error.reconciliation);
+      showOwnedArmorActionMessage(l('请求响应异常，但服务器回读已确认操作完成。','請求回應異常，但伺服器回讀已確認操作完成。','The response failed, but server read-back confirmed completion.'));
+    } else {
+      lastBungieImportAt = 0;
+      showOwnedArmorActionMessage(l('操作未确认，可能已部分完成。请刷新库存核对后再操作。','操作未確認，可能已部分完成。請重新整理庫存核對後再操作。','Action unconfirmed; some steps may have completed. Refresh inventory before another action.'), 'warn');
+    }
   } finally {
     isBungieApplying = false;
     buildOwnedGearSection();
@@ -4590,6 +4562,7 @@ function loadUpgradeDraft() {
 }
 
 function setCalculatorMode(mode, persist = true) {
+  stopSearches();
   calculatorMode = mode === 'upgrade' ? 'upgrade' : 'solve';
   const isUpgrade = calculatorMode === 'upgrade';
   document.body.classList.toggle('is-upgrade-mode', isUpgrade);
@@ -4667,39 +4640,16 @@ function formatUpgradePieceSummary(piece) {
 // Rule-aware "how far from target" copy for a stat that is NOT satisfied.
 // 至多/区间 exceeding the cap is "over the cap"; being below an 至少 floor is
 // "short"; 精确 is the absolute distance. Returns '' when the stat is met.
-function upgradeStatShortText(stat, actual, targets, constraints = {}, fragments = {}) {
-  const ceiling = constraints.maximums?.[stat];
-  const floor = constraints.minimums?.[stat] || 0;
-  const exact = Boolean(constraints.exact?.[stat]);
-  const target = targets[stat] || 0;
-  const fragment = fragments[stat] || 0;
-  if (exact) {
-    const distance = actual - target;
-    return distance === 0
-      ? ''
-      : l(`${distance > 0 ? '超' : '差'} ${Math.abs(distance)}`, `${distance > 0 ? '超' : '差'} ${Math.abs(distance)}`, `${distance > 0 ? 'over' : 'short'} ${Math.abs(distance)}`);
-  }
-  if (ceiling !== undefined) {
-    const cap = ceiling + fragment;
-    if (actual > cap) return l(`超上限 ${actual - cap}`, `超上限 ${actual - cap}`, `over cap ${actual - cap}`);
-    return floor > 0 && actual < floor + fragment
-      ? l(`差 ${floor + fragment - actual}`, `差 ${floor + fragment - actual}`, `${floor + fragment - actual} short`)
-      : '';
-  }
-  if (floor > 0) {
-    const lower = floor + fragment;
-    return actual < lower
-      ? l(`差 ${lower - actual}`, `差 ${lower - actual}`, `${lower - actual} short`)
-      : '';
-  }
-  return actual < target
-    ? l(`差 ${target - actual}`, `差 ${target - actual}`, `${target - actual} short`)
-    : '';
+function upgradeStatShortText(stat, evaluation) {
+  const result = evaluation?.certificate?.statResults?.[stat];
+  if (!result) return l('未验证','未驗證','Unverified');
+  if (result.above) return l(`超上限 ${result.above}`, `超上限 ${result.above}`, `${result.above} over cap`);
+  if (result.below) return l(`差 ${result.below}`, `差 ${result.below}`, `${result.below} short`);
+  return '';
 }
 
 function buildUpgradeStatComparison(analysis, afterTotals) {
-  const constraints = analysis.constraints || {};
-  const fragments = analysis.fragments || {};
+  const evaluation = analysis.plan?.evaluation?.finalTotals === afterTotals ? analysis.plan.evaluation : analysis.baseline;
   const targets = analysis.targets || {};
   return `<div class="upgrade-stat-comparison">${STATS.map(stat => {
     const before = (analysis.enteredBaseline || analysis.baseline).finalTotals[stat];
@@ -4707,8 +4657,8 @@ function buildUpgradeStatComparison(analysis, afterTotals) {
     const delta = after - before;
     const target = targets[stat];
     const isRequired = analysis.requiredStats?.includes(stat) === true;
-    const targetReached = satisfiesUpgradeStatRule(stat, afterTotals, targets, constraints, fragments);
-    const shortText = targetReached ? '' : upgradeStatShortText(stat, after, targets, constraints, fragments);
+    const targetReached = evaluation?.certificate?.statResults?.[stat]?.met === true;
+    const shortText = targetReached ? '' : upgradeStatShortText(stat, evaluation);
     const deltaClass = targetReached ? 'is-target-met' : 'is-shortfall';
     const targetStatus = targetReached
       ? l('达标','達標','met')
@@ -4731,7 +4681,7 @@ function buildUpgradeRequirementResult(analysis, evaluation) {
     const target = analysis.targets[stat];
     return `${STAT_LABELS[stat]} ${actual}/${target}`;
   }).join(l(' · ', ' · ', ' · '));
-  const met = metrics.requiredAllReached;
+  const met = requiredStats.every(stat => evaluation.certificate?.statResults?.[stat]?.met === true);
   return `<div class="upgrade-requirement-result ${met ? 'is-met' : 'is-unmet'}">
     ${icon(met ? 'check' : 'warn')}
     <div><strong>${met
@@ -4791,7 +4741,7 @@ function buildUpgradePlanFlow(analysis, plan) {
       'Each step needs a newly farmed piece whose archetype, tertiary stat, and rolled +5 tuning stat all match — the +5 side comes with the armor and cannot be changed, only the -5 source is yours to pick. Set it up as the row shows and you get the stats listed.'
     )}</p>
     <div class="upgrade-plan-steps">${plan.steps.map((step, index) => {
-      const complete = step.evaluation.metrics.allReached;
+      const complete = certifiedFeasible(step.evaluation);
       const finalTuning = plan.evaluation.tuningAssignments[step.slotIndex];
       const finalArmorMod = plan.evaluation.modAssignments[step.slotIndex];
       return `<div class="upgrade-plan-step">
@@ -4866,14 +4816,14 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
   const section = document.getElementById('upgradeResults');
   const body = document.getElementById('upgradeResultsBody');
   section.hidden = calculatorMode !== 'upgrade';
-  if (!analysis.verified) {
-    body.innerHTML = `<div class="msg error">${l('UNVERIFIED：护甲或调整资料不足，无法证明此方案。', 'UNVERIFIED：防具或調校資料不足，無法證明此方案。', 'UNVERIFIED: Armor or Tuning data is incomplete; this plan cannot be proved.')}</div>`;
+  if (!analysis.certificate?.witnessVerification?.valid) {
+    body.innerHTML = `<div class="msg warn">${escapeHtml(searchProofLabel(analysis))}</div>`;
     return;
   }
   let displayedEvaluation = analysis.baseline;
 
-  if (analysis.baseline.metrics.allReached) {
-    const enteredAlreadyReached = analysis.enteredBaseline.metrics.allReached;
+  if (certifiedFeasible(analysis.baseline)) {
+    const enteredAlreadyReached = certifiedFeasible(analysis.enteredBaseline);
     const needsMasterwork = (analysis.projectedMasterworkIndices?.length || 0) > 0;
     body.innerHTML = `<div class="upgrade-hero">
       <div>
@@ -4926,7 +4876,7 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
   } else {
     const plan = analysis.plan;
     displayedEvaluation = plan.evaluation;
-    const reached = plan.metrics.allReached;
+    const reached = certifiedFeasible(plan.evaluation);
     const farmLabel = importedInventory.length > 0
       ? `<div class="upgrade-option-label">${l(
         '刷取方案：替换清单中没有的护甲（与上面从已有清单搭配的方案二选一）',
@@ -4980,7 +4930,6 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
 let lastInventoryResult = null;
 let lastInventoryTargets = null;
 let lastInventoryRequiredStats = [];
-let lastInventoryConstraints = {};
 let selectedInventoryResultIndex = 0;
 let inventorySolveRevision = 0;
 
@@ -4989,7 +4938,6 @@ function clearInventoryResults() {
   lastInventoryResult = null;
   lastInventoryTargets = null;
   lastInventoryRequiredStats = [];
-  lastInventoryConstraints = {};
   selectedInventoryResultIndex = 0;
   const el = document.getElementById("inventoryResults");
   if (el) {
@@ -5043,6 +4991,7 @@ async function solveInventoryRequirement({
   const loading = document.getElementById("loading");
   const requirementSnapshot = snapshotSetRequirement();
   const solveRevision = ++inventorySolveRevision;
+  const revision = searchUiRevision;
   const setControls = [...document.querySelectorAll(".set-requirement-controls select")];
   const reassignModifiers = document.getElementById("upgradeReassignModifiers")?.checked !== false;
   const pool = filterArmorItems(importedInventory, {
@@ -5070,6 +5019,7 @@ async function solveInventoryRequirement({
 
   try {
     const result = await solveInventoryAsync({
+      searchProfile,
       items: pool,
       targets,
       fragments,
@@ -5079,21 +5029,24 @@ async function solveInventoryRequirement({
       requiredStats,
       onlyPlus5Tuning,
       userConstraints: constraints,
-    });
-    if (solveRevision !== inventorySolveRevision ||
+    }, {onProgress: (partial, search) => {
+      if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision) return;
+      renderSearchStatus(partial, search);
+      if (partial?.results?.length) {
+        lastInventoryTargets = targets; lastInventoryRequiredStats = requiredStats;
+        renderInventoryResults(partial);
+      }
+    }});
+    if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision ||
         !sameSetRequirement(requirementSnapshot, setRequirement)) {
       return null;
     }
     lastInventoryTargets = targets;
     lastInventoryRequiredStats = requiredStats;
-    lastInventoryConstraints = constraints;
     renderInventoryResults(result);
+    renderSearchStatus(result);
     if (result?.results?.length) {
-      const proofLabel = result.status === 'EXACT_TARGET_PROVEN'
-        ? l('精确目标已证明', '精確目標已證明', 'Exact target proven')
-        : result.status === 'RULE_FEASIBLE_PROVEN'
-          ? l('规则可行性已证明', '規則可行性已證明', 'Rule feasibility proven')
-          : l('搜索受限：显示当前最佳 witness', '搜尋受限：顯示目前最佳 witness', 'Search limited: showing current-best witnesses');
+      const proofLabel = searchProofLabel(result);
       const executionLabel = result.executionStatus === 'VERIFIED'
         ? l('执行预检已验证', '執行預檢已驗證', 'Execution preflight verified')
         : result.executionStatus === 'BLOCKED'
@@ -5111,18 +5064,9 @@ async function solveInventoryRequirement({
           `Found ${result.results.length} loadouts meeting ${formatSetRequirementLabel(requirementSnapshot)}. Click “Apply” to use one.`
         )}</div>`;
     }
-    return `<div class="msg error">${icon("block")}${requirementSnapshot.type === "none"
-      ? l(
-        "当前筛选下清单里凑不齐五件护甲，无法从清单搭配；可调整职业或 Tier 5 筛选后重试。",
-        "目前篩選下清單中湊不齊五件防具，無法從清單搭配；可調整職業或 Tier 5 篩選後重試。",
-        "The list cannot produce a five-piece loadout under the current filter. Adjust the class or Tier 5 filter and try again."
-      )
-      : l(
-        "清单里凑不出满足所选套装要求的配装（当前职业 / Tier 5 筛选下套装件数不足）。",
-        "清單中湊不出滿足所選套裝要求的配裝（目前職業 / Tier 5 篩選下套裝件數不足）。",
-        "The list cannot produce a loadout meeting the set requirement (not enough set pieces under the current class / Tier 5 filter)."
-      )}</div>`;
+    return `<div class="msg warn">${escapeHtml(searchProofLabel(result))}</div>`;
   } catch (error) {
+    if (error.name === 'AbortError') return null;
     console.error("Inventory solve failed", error);
     return `<div class="msg error">${icon("block")}${l(
       "库存搭配计算失败，请重试。",
@@ -5130,11 +5074,13 @@ async function solveInventoryRequirement({
       "The inventory solve failed. Please try again."
     )}</div>`;
   } finally {
-    button.disabled = false;
-    setControls.forEach(control => { control.disabled = false; });
-    loading.classList.remove("show");
-    loading.setAttribute("aria-busy", "false");
-    loading.querySelector("p").textContent = t("calculating");
+    if (revision === searchUiRevision) {
+      button.disabled = false;
+      setControls.forEach(control => { control.disabled = false; });
+      loading.classList.remove("show");
+      loading.setAttribute("aria-busy", "false");
+      loading.querySelector("p").textContent = t("calculating");
+    }
   }
 }
 
@@ -5192,27 +5138,12 @@ function getDisplayedFinalTotals(entry) {
 }
 
 function getInventoryResultSummary(entry) {
-  const targets = lastInventoryTargets || {};
-  const finalTotals = getDisplayedFinalTotals(entry);
-  const constraints = lastInventoryConstraints || {};
-  const fragments = getUpgradeFragments();
-  const metCount = STATS.filter(stat =>
-    satisfiesUpgradeStatRule(stat, finalTotals, targets, constraints, fragments)).length;
-  const requiredCount = entry.metrics.requiredCount || lastInventoryRequiredStats.length;
-  const requiredReachedCount = entry.metrics.requiredReachedCount || 0;
-  const statusMet = requiredCount > 0 ? entry.metrics.requiredAllReached : entry.metrics.allReached;
-  const status = entry.metrics.allReached
-    ? l("六维全部达标", "六維全部達標", "All targets met")
-    : (requiredCount > 0
-      ? (entry.metrics.requiredAllReached
-        ? l("必达属性全部满足", "必達數值全部滿足", "All must-meet stats satisfied")
-        : l(
-          `必达属性还差 ${entry.metrics.requiredShortfall} 点`,
-          `必達數值還差 ${entry.metrics.requiredShortfall} 點`,
-          `Must-meet stats ${entry.metrics.requiredShortfall} points short`
-        ))
-      : l(`还差 ${entry.metrics.shortfall} 点`, `還差 ${entry.metrics.shortfall} 點`, `${entry.metrics.shortfall} points short`));
-  return { metCount, requiredCount, requiredReachedCount, status, statusMet };
+  const stats = entry.certificate?.statResults || {};
+  const metCount = STATS.filter(stat => stats[stat]?.met).length;
+  const requiredCount = lastInventoryRequiredStats.length;
+  const requiredReachedCount = lastInventoryRequiredStats.filter(stat => stats[stat]?.met).length;
+  return {metCount, requiredCount, requiredReachedCount, status: searchProofLabel(entry),
+    statusMet: certifiedFeasible(entry)};
 }
 
 function renderInventoryResultOption(entry, index) {
@@ -5301,10 +5232,8 @@ function renderInventoryResultDetail(entry, index) {
       ${STATS.map(stat => {
         const actual = finalTotals[stat] || 0;
         const target = targets[stat] || 0;
-        const constraints = lastInventoryConstraints || {};
-        const fragments = getUpgradeFragments();
-        const met = satisfiesUpgradeStatRule(stat, finalTotals, targets, constraints, fragments);
-        const shortText = met ? '' : upgradeStatShortText(stat, actual, targets, constraints, fragments);
+        const met = entry.certificate?.statResults?.[stat]?.met === true;
+        const shortText = met ? '' : upgradeStatShortText(stat, entry);
         const isRequired = lastInventoryRequiredStats.includes(stat);
         return `<div class="inventory-result-stat ${met ? "is-met" : "is-short"} ${isRequired ? 'is-required' : ''}" role="listitem">
           <span style="color:${STAT_COLORS[stat]}">${icon(stat)}${STAT_LABELS[stat]}</span>
@@ -5488,6 +5417,7 @@ async function exportInventorySolution(index) {
 }
 
 async function analyzeArmorUpgrades() {
+  const revision = beginSearch();
   const button = document.getElementById('btnUpgradeAnalyze');
   const loading = document.getElementById('loading');
   const messages = document.getElementById('messages');
@@ -5531,6 +5461,7 @@ async function analyzeArmorUpgrades() {
 
   try {
       const analysis = await analyzeUpgradeAsync({
+        searchProfile,
         pieces: upgradeBuildState.map(piece => ({ ...piece })),
         targets,
         fragments,
@@ -5538,18 +5469,17 @@ async function analyzeArmorUpgrades() {
         requiredStats,
         onlyPlus5Tuning,
         constraints,
-      });
+      }, {onProgress: (partial, search) => {
+        if (revision !== searchUiRevision) return;
+        renderSearchStatus(partial, search);
+        if (partial?.baseline) renderUpgradeAnalysis(partial, false);
+      }});
+      if (revision !== searchUiRevision) return;
       renderUpgradeAnalysis(analysis, true);
-      messages.innerHTML = inventoryMessage + `<div class="msg info">${icon('check')}${analysis.baseline.metrics.allReached
-        ? l('已证明：当前护甲无需替换。','已證明：目前防具無需替換。','Proven: the current armor needs no replacements.')
-        : (analysis.plan
-          ? (analysis.plan.metrics.allReached
-            ? (analysis.plan.replacementProof?.minimal
-              ? l(`已证明：最少替换 ${analysis.plan.replacementCount} 件即可达标。`, `已證明：最少替換 ${analysis.plan.replacementCount} 件即可達標。`, `Proven minimum: replace ${analysis.plan.replacementCount} piece(s) to meet every target.`)
-              : l(`找到可行 witness：替换 ${analysis.plan.replacementCount} 件即可达标。`, `找到可行 witness：替換 ${analysis.plan.replacementCount} 件即可達標。`, `Feasible witness: replace ${analysis.plan.replacementCount} piece(s) to meet every target.`))
-            : l(`当前最佳 witness 还差 ${analysis.plan.metrics.shortfall} 点；未证明全局最优。`, `目前最佳 witness 還差 ${analysis.plan.metrics.shortfall} 點；未證明全域最優。`, `The current-best witness is ${analysis.plan.metrics.shortfall} points short; global optimality is not proven.`))
-          : l('搜索结束但没有改进 witness；不代表已证明不可达。','搜尋結束但沒有改進 witness；不代表已證明不可達。','Search ended without an improved witness; this is not an infeasibility proof.'))}</div>`;
+      renderSearchStatus(analysis);
+      messages.innerHTML = inventoryMessage + `<div class="msg info">${escapeHtml(searchProofLabel(analysis))}</div>`;
     } catch (error) {
+      if (error.name === 'AbortError') return;
       console.error('Armor upgrade analysis failed', error);
       messages.innerHTML = inventoryMessage + '<div class="msg error">' + icon('block') + l(
         '替换分析过程中发生错误，请重试。',
@@ -5557,10 +5487,12 @@ async function analyzeArmorUpgrades() {
         'The replacement analysis failed. Please try again.'
       ) + '</div>';
     } finally {
-      button.disabled = false;
-      loading.classList.remove('show');
-      loading.setAttribute('aria-busy', 'false');
-      loading.querySelector('p').textContent = t('calculating');
+      if (revision === searchUiRevision) {
+        button.disabled = false;
+        loading.classList.remove('show');
+        loading.setAttribute('aria-busy', 'false');
+        loading.querySelector('p').textContent = t('calculating');
+      }
     }
 }
 
@@ -5674,7 +5606,7 @@ function loadBuild(build) {
       return;
     }
     allSolutions = [build.result];
-    allSolutions.status = build.result.status;
+    allSolutions.status = build.result.certificate?.status || 'SEARCH_LIMIT_REACHED';
     allSolutions.certificate = build.result.certificate;
     currentSolutionIdx = 0;
     lastTargets = build.targets;
@@ -5683,17 +5615,6 @@ function loadBuild(build) {
     lastNumPlus10 = build.numPlus10;
     lastNumPlus3 = build.onlyPlus5Tuning || !build.n3Enabled ? 0 : build.numPlus3;
     lastExoticSettings = getExoticSettings();
-    const armorMinPerStat = lastNumPlus3 * 6;
-    lastSolverTarget = Object.fromEntries(STATS.map(stat => {
-      let raw = build.targets[stat] - (build.fragments[stat] || 0);
-      if (build.targets[stat] === 0 || raw < 0) raw = 0;
-      const finalMin = Math.max(
-        0,
-        armorMinPerStat + (build.fragments[stat] || 0),
-      );
-      return [stat, build.targets[stat] < finalMin ? finalMin : raw];
-    }));
-    lastSolverConstraints = buildUserConstraints(build.fragments);
     displayAllResults(build.result, build.targets, build.fragments);
   }
 }
@@ -5794,6 +5715,8 @@ Object.assign(window, {
   setCalculatorMode,
   shouldAutoRefresh,
   solve,
+  setSearchProfile,
+  stopSearches,
   switchSolution,
   sync10to5,
   sync5to10,
@@ -5822,10 +5745,12 @@ Object.assign(window, {
 // INIT
 // ============================================================
 initializePageLanguage();
+renderSearchControls();
 renderInputs();
 renderExoticInputs();
 syncPlus3PreferenceUI();
 document.getElementById('inputCard').addEventListener('input', () => {
+  stopSearches();
   updateBudget();
   scheduleRealtimeRanges();
   saveCurrentDraft();
@@ -5845,4 +5770,7 @@ handleBungieOAuthCallback().finally(syncBungieAutoRefresh);
 document.addEventListener("visibilitychange", () => {
   syncBungieAutoRefresh();
   if (shouldAutoRefresh()) importInventoryFromBungie({ silent: true });
+});
+document.addEventListener('input', event => {
+  if (event.target.closest('#fragmentCard, #upgradeBuildCard')) stopSearches();
 });

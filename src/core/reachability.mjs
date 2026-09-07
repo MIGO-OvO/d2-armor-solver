@@ -123,6 +123,7 @@ export function calculateReachableStatRange(
       fragments, lockedTargets, objectiveStat, searchStats);
   }
   searchStats.statesExamined++;
+  if ((searchStats.statesExamined & 1023) === 0) searchStats.checkpoint?.(1024);
   const lockedStats = Object.keys(lockedTargets).sort();
   const armorTargets = lockedStats.map(stat =>
     lockedTargets[stat] - (fragments[stat] || 0)
@@ -168,6 +169,7 @@ export function calculateReachableStatRange(
           if (usedPlus3 > numPlus3) continue;
           for (const option of purpleOptions[mode]) {
             searchStats.statesExamined++;
+            if ((searchStats.statesExamined & 1023) === 0) searchStats.checkpoint?.(1024);
             const lockValues = state.lockValues.map((value, index) =>
               value + option.lockValues[index]
             );
@@ -200,6 +202,7 @@ export function calculateReachableStatRange(
       for (const option of fixedOptions[mode]) {
         for (const pair of purplePairStates.values()) {
           searchStats.statesExamined++;
+          if ((searchStats.statesExamined & 1023) === 0) searchStats.checkpoint?.(1024);
           const usedPlus3 = mode + pair.usedPlus3;
           if (usedPlus3 > numPlus3) continue;
           const lockValues = option.lockValues.map((value, index) =>
@@ -224,6 +227,7 @@ export function calculateReachableStatRange(
       if (rightPlus3 < 0 || rightPlus3 > 2) continue;
       for (const modifier of modifierOptions) {
         searchStats.statesExamined++;
+        if ((searchStats.statesExamined & 1023) === 0) searchStats.checkpoint?.(1024);
         const rightLocks = armorTargets.map((targetValue, index) =>
           targetValue - left.lockValues[index] - modifier.lockValues[index]
         );
@@ -280,6 +284,7 @@ export function calculateReachableStatRange(
     if (mode > numPlus3) continue;
     for (const option of fixedOptions[mode]) {
       searchStats.statesExamined++;
+      if ((searchStats.statesExamined & 1023) === 0) searchStats.checkpoint?.(1024);
       if (option.lockValues.some((value, index) => value > armorTargets[index])) continue;
       if (!canStillReachLocks(option.lockValues, mode, 4)) continue;
       const key = `${mode}|${option.lockValues.join(',')}`;
@@ -441,8 +446,9 @@ function calculateIntervalStatRange(fixed, n5, n10, n3, fragments, locks, object
         const options = depth === 5 ? mods : depth === 0 ? fixedOptions[mode] : purpleOptions[mode];
         for (const option of options) {
           stats.statesExamined++;
-          if ((stats.statesExamined & 1023) === 0 && performance.now() - stats.startedAt > 3000
-              || next.size >= 50000) {
+          if ((stats.statesExamined & 1023) === 0) stats.checkpoint?.(1024);
+          if ((stats.statesExamined & 1023) === 0 && performance.now() - stats.startedAt > (stats.maxTimeMs || 3000)
+              || next.size >= (stats.maxStates || 50000)) {
             stats.complete = false;
             stats.limitation = "interval DP resource limit";
             return null;
@@ -500,7 +506,7 @@ function calculateIntervalStatRange(fixed, n5, n10, n3, fragments, locks, object
 }
 
 export function calculateReachableRanges(
-  fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets
+  fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, search = null
 ) {
   const fixedKey = STATS.map(stat => fixedPiece.baseStats[stat]).join(',');
   const fragmentKey = STATS.map(stat => fragments[stat] || 0).join(',');
@@ -514,8 +520,14 @@ export function calculateReachableRanges(
   ].join('|');
   const cached = reachableRangeCache.get(cacheKey);
   if (cached) return structuredClone(cached);
-  const searchStats = { statesExamined: 0 };
-  const finish = result => cacheReachableRange(cacheKey, { ...result, searchStats });
+  const searchStats = { statesExamined: 0, checkpoint: search?.checkpoint,
+    maxStates: search?.limits?.maxStates, maxTimeMs: search?.limits?.maxTimeMs };
+  const finish = result => {
+    const statistics = {...searchStats};
+    delete statistics.checkpoint;
+    const value = {...result, searchStats: statistics};
+    return statistics.complete === false ? value : cacheReachableRange(cacheKey, value);
+  };
 
   const lockedStats = Object.keys(lockedTargets);
   if (lockedStats.length >= 4 && !Object.values(lockedTargets).some(value => value === 0 || value === 200)) {

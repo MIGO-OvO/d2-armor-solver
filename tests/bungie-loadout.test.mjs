@@ -15,6 +15,7 @@ import {
   getFragmentAdjustments,
   mapSavedLoadoutArmor,
   verifyLoadoutApplication,
+  reconcileBungieArmorItemAction,
 } from "../src/core/bungie-loadout.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
@@ -53,6 +54,40 @@ function restoreGlobals() {
 function jsonResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body };
 }
+
+test("single-item read-back retries stale ownership and never repeats a write", async () => {
+  installAuth();
+  let reads = 0;
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.method, "GET");
+    reads++;
+    return jsonResponse({ErrorCode: 1, Response: {
+      characterInventories: {data: {target: {items: reads === 1 ? [] : [{itemInstanceId: "42", itemHash: 123}]}}},
+      characterEquipment: {data: {target: {items: []}}},
+    }});
+  };
+  try {
+    const result = await reconcileBungieArmorItemAction({membershipType: 3, membershipId: "member",
+      targetCharacterId: "target", itemId: "42", item: {hash: 123}, action: "transfer"}, {delayMs: 0});
+    assert.equal(result.status, "verified");
+    assert.equal(result.attempts, 2);
+    assert.deepEqual(result.observed, {owner: "target", equipped: false});
+  } finally { restoreGlobals(); }
+});
+
+test("single-item equip read-back distinguishes wrong state and missing evidence", async () => {
+  installAuth();
+  const plan = {membershipType: 3, membershipId: "member", targetCharacterId: "target", itemId: "42", item: {hash: 123}, action: "equip"};
+  try {
+    globalThis.fetch = async () => jsonResponse({ErrorCode: 1, Response: {
+      characterInventories: {data: {target: {items: [{itemInstanceId: "42", itemHash: 123}]}}},
+      characterEquipment: {data: {target: {items: []}}},
+    }});
+    assert.equal((await reconcileBungieArmorItemAction(plan, {delayMs: 0})).status, "failed");
+    globalThis.fetch = async () => jsonResponse({ErrorCode: 1, Response: {}});
+    assert.equal((await reconcileBungieArmorItemAction(plan, {delayMs: 0})).status, "unverified");
+  } finally { restoreGlobals(); }
+});
 
 test("GetProfile loadout components contain only explicit request components", () => {
   assert.deepEqual(LOADOUT_WRITE_COMPONENTS, ["CharacterLoadouts"]);

@@ -57,11 +57,12 @@ export function solveInventoryLoadout({
 }, problemSpec = createProblemSpec({operation: "solveInventory", targets, fragments, constraints: userConstraints,
   targetDomain: STAT_DOMAIN.VISIBLE, pieces: items,
   inventoryContext: {setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces},
-})) {
+}), search = null) {
   if (!setRequirement) return null;
   const limit = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
   maxResults = limit(maxResults, 12);
   const started = performance.now();
+  search?.checkpoint(0);
   const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers,
     statesExamined: 0, equivalentItems: 0, mergedStates: 0, peakStates: 0,
     prunedBounds: 0, prunedSets: 0, layers: [0, 0, 0, 0, 0], firstFeasibleMs: null, firstExactMs: null,
@@ -139,6 +140,10 @@ export function solveInventoryLoadout({
     results.push(entry);
     results.sort(compare);
     if (results.length > maxResults) results.length = maxResults;
+    search?.publish({requirement: setRequirement, requiredStats: required, examined,
+      searchStats: {...searchStats, frontierComplete: false}, results: results.map(result => ({
+        pieces: result.pieces, ...result.evaluation,
+      }))});
   };
   if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)) evaluate(currentPieces.map(project));
   const chosen = Array(5);
@@ -169,6 +174,7 @@ export function solveInventoryLoadout({
     searchStats.method = "fixed-assignment-2+3-join";
     const target = rules.map(rule => rule.armorMinimum);
     for (const c of rows[2].candidates) for (const d of rows[3].candidates) for (const e of rows[4].candidates) {
+      if ((searchStats.statesExamined & 1023) === 0) search?.checkpoint(1024, searchStats);
       if (searchStats.statesExamined >= searchStats.maxNodes || performance.now() - started >= searchStats.maxTimeMs) {
         stop("join-resource-limit"); return true;
       }
@@ -208,6 +214,7 @@ export function solveInventoryLoadout({
       || a.candidate.min.join(",").localeCompare(b.candidate.min.join(","))
       || keyOf([a.candidate.piece]).localeCompare(keyOf([b.candidate.piece])));
     for (const {candidate} of ordered) {
+      search?.checkpoint(1, searchStats);
       if (searchStats.statesExamined >= searchStats.maxStates || examined >= searchStats.maxEvaluations) {
         stop("node-or-evaluation-limit"); break;
       }
