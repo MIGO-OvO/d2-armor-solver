@@ -317,7 +317,7 @@ export function normalizeApiItem(apiItem, context = {}) {
   const statSocket = findSocketByRole(socketsCapability, SOCKET_ROLE.STAT);
   const tuningInfo = deriveTuningStats(tuningSocket);
   const dataConfidence = {
-    stats: "exact", // ItemStats fully computed: base + masterwork + installed plugs
+    stats: STATS.every(stat => Number.isSafeInteger(rawStats[stat])) ? "exact" : "unknown",
     framework: archetypeId && tertiary ? "exact" : "unknown",
     tuning: tuningInfo.confidence,
     sockets: tuningSocket && tuningSocket.candidateState === "known" ? "exact" : "partial",
@@ -339,6 +339,7 @@ export function normalizeApiItem(apiItem, context = {}) {
     // plugs (DIM getArmor3TuningStat). null does NOT mean "guess": confidence
     // "unknown" means the data could not establish it and the solver must not
     // pretend it knows (upgrade-optimizer no longer falls back to a guess).
+    tunedStat: tuningInfo.fixedTuningStat,
     tuningStat: tuningInfo.fixedTuningStat,
     allowedTuningStats: tuningInfo.allowedTuningStats,
     dataConfidence,
@@ -367,6 +368,7 @@ export function normalizeApiItem(apiItem, context = {}) {
     power: Number(instance.primaryStat?.value) || 0,
     setHash: set ? set.hash : null,
     tuningMode,
+    tuningInstalled: tuningMode ? true : (sockets[instanceId]?.sockets ? false : undefined),
     tuningFrom,
     tuningTo,
     armorModSize,

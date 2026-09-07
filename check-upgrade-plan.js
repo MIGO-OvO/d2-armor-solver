@@ -8,6 +8,7 @@ const S = {
   ...(await import('./src/core/armor-model.mjs')),
   ...(await import('./src/core/upgrade-optimizer.mjs')),
 };
+const { createProblemSpec, assertSolutionConsistency } = await import('./src/core/solver-v3-contract.mjs');
 const STATS = S.STATS;
 const fmt = o => STATS.map(s => `${s}=${o[s]}`).join(' ');
 const totalsOf = (pieces, fragments) =>
@@ -60,37 +61,61 @@ for (const reassignModifiers of [false, true]) {
     // Headline totals must come out of the recommended pieces plus the printed
     // tuning and mod layout — nothing else.
     const configured = S.applyUpgradeEvaluationToPieces(plan.pieces, plan.evaluation);
+    const verificationSpec = createProblemSpec({operation: 'analyzeUpgrade', pieces, fragments});
+    assertSolutionConsistency(verificationSpec, {
+      pieces: configured.map(piece => ({...piece, baseStats: {...S.getUpgradeConfig(piece).baseStats}})),
+      tuningAssignments: plan.evaluation.tuningAssignments,
+      modAssignments: plan.evaluation.modAssignments,
+    }, plan.evaluation.finalTotals);
     assert.deepStrictEqual(
       totalsOf(configured, fragments), plan.evaluation.finalTotals,
       `${label}: plan totals unreachable\n  shown   ${fmt(plan.evaluation.finalTotals)}\n  rebuilt ${fmt(totalsOf(configured, fragments))}`
     );
 
-    // Reassigning mods must never repoint a tuning mod's +5 side: that stat is
-    // rolled onto the piece you already own, only the -5 source is free.
+    // Reassignment may change Balanced/directional mode and every assignment
+    // field, but it must never turn that into a physical armor replacement.
     const rearranged = S.evaluateUpgradePieces(pieces, targets, fragments, true);
+    const rearrangedPieces = S.applyUpgradeEvaluationToPieces(pieces, rearranged);
+    assert.strictEqual(
+      S.getUpgradeReplacements(pieces, rearrangedPieces).length,
+      0,
+      `${label}: assignment-only reconfiguration changed armor identity`,
+    );
     pieces.forEach((piece, index) => {
       const tuning = rearranged.tuningAssignments[index];
-      if (piece.tuningMode === 'plus3') {
-        assert.strictEqual(tuning.mode, '+3', `${label}: slot ${index} changed a +3 piece into +5/-5`);
-        return;
+      if (tuning.mode === '+3') return;
+      assert.strictEqual(tuning.mode, '+5-5', `${label}: slot ${index} has an invalid tuning mode`);
+      assert.notStrictEqual(tuning.from, tuning.to, `${label}: slot ${index} tunes from and to the same stat`);
+      if (piece.exotic) {
+        const allowed = Array.isArray(piece.allowedTuningStats)
+          ? piece.allowedTuningStats
+          : STATS;
+        assert.ok(allowed.includes(tuning.to), `${label}: slot ${index} chose an unsupported Exotic destination`);
+      } else {
+        assert.strictEqual(
+          tuning.to, piece.tunedStat,
+          `${label}: slot ${index} moved immutable tunedStat ${piece.tunedStat} to ${tuning.to}`,
+        );
       }
-      assert.strictEqual(tuning.mode, '+5-5', `${label}: slot ${index} changed a +5/-5 piece into +3`);
-      assert.strictEqual(
-        tuning.to, piece.tuningTo,
-        `${label}: slot ${index} moved the rolled +5 from ${piece.tuningTo} to ${tuning.to}`
-      );
     });
 
     // Each step row's stats must be what the player sees after that swap, with
     // the same tuning/mod the row prints. Slots not yet swapped still hold the
-    // owned piece: its archetype, tertiary, tuning mode, and rolled +5 stat.
-    let walk = configured.map((piece, index) => S.normalizeUpgradePiece({
-      ...piece,
-      archetypeId: pieces[index].archetypeId,
-      tertiary: pieces[index].tertiary,
-      tuningMode: pieces[index].tuningMode,
-      tuningTo: pieces[index].tuningTo,
-    }, index));
+    // owned piece: its physical identity. Retained pieces may take the final
+    // assignment immediately; replacement slots keep their old assignment
+    // until their step is applied.
+    const replacementSlots = new Set(plan.replacements.map(entry => entry.slotIndex));
+    let walk = configured.map((piece, index) => {
+      const assignment = replacementSlots.has(index) ? pieces[index] : piece;
+      return S.normalizeUpgradePiece({
+        ...pieces[index],
+        tuningMode: assignment.tuningMode,
+        tuningFrom: assignment.tuningFrom,
+        tuningTo: assignment.tuningTo,
+        armorModSize: piece.armorModSize,
+        armorModStat: piece.armorModStat,
+      }, index);
+    });
     plan.steps.forEach((step, stepIndex) => {
       walk = walk.map((piece, index) => index === step.slotIndex ? { ...configured[index] } : piece);
       assert.deepStrictEqual(
@@ -103,6 +128,7 @@ for (const reassignModifiers of [false, true]) {
         `${label}: step ${stepIndex + 1} prints a tuning it did not use`
       );
     });
+    if (trial % 10 === 9) console.log(`upgrade progress: reassign=${reassignModifiers} trial=${trial + 1}/40`);
 
     // The last step has to land exactly on the advertised result.
     const last = plan.steps[plan.steps.length - 1];

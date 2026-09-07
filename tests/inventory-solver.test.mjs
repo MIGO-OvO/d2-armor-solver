@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { BASE_CONFIGS } from "../src/core/armor-model.mjs";
 import { solveInventoryLoadout } from "../src/core/inventory-solver.mjs";
-import { createUpgradePieceFromItem } from "../src/core/upgrade-optimizer.mjs";
+import {
+  compareUpgradeMetrics,
+  createUpgradePieceFromItem,
+  evaluateUpgradePieces,
+} from "../src/core/upgrade-optimizer.mjs";
 
 const SET_A = 741162535; // 埃希恩记忆 (Atheon's Memory)
 const SET_B = 774717709; // 传承之誓 (Legacy's Oath)
@@ -178,6 +183,119 @@ test("large inventories keep an exact combination that looks bad in an early slo
   assert.equal(
     result.results[0].pieces.find(piece => piece.slot === "helmet").itemName,
     "Exact helmet",
+  );
+});
+
+test("eight-per-slot seed-5 inventory recovers the known exact target canonically", () => {
+  const target = {
+    health: 85,
+    melee: 90,
+    grenade: 70,
+    super: 70,
+    class: 90,
+    weapons: 60,
+  };
+  const exactConfigs = [
+    ["Brawler", "super"],
+    ["Brawler", "super"],
+    ["Brawler", "super"],
+    ["Demolitionist", "weapons"],
+    ["Demolitionist", "weapons"],
+  ].map(([archetype, tertiary]) => BASE_CONFIGS.find(config =>
+    config.archetype === archetype && config.tertiary === tertiary));
+  const exactTuning = [
+    ["health", "melee"],
+    ["melee", "health"],
+    ["melee", "class"],
+    ["melee", "class"],
+    ["grenade", "class"],
+  ];
+  const exactModStats = ["class", "class", "weapons", "health", "health"];
+  let state = 5;
+  const random = () => (
+    (state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 4294967296
+  );
+  const items = [];
+  for (let slotIndex = 0; slotIndex < SLOTS.length; slotIndex++) {
+    for (let itemIndex = 0; itemIndex < 7; itemIndex++) {
+      const config = BASE_CONFIGS[Math.floor(random() * BASE_CONFIGS.length)];
+      items.push({
+        ...makeItem(`Seed decoy ${slotIndex}-${itemIndex}`, SLOTS[slotIndex], null,
+          { ...config.baseStats }, 100 + slotIndex * 10 + itemIndex),
+        archetypeId: config.archetype,
+        tertiary: config.tertiary,
+        tuningMode: "shift",
+        tuningFrom: "health",
+        tuningTo: "weapons",
+        armorModSize: slotIndex < 3 ? 5 : 0,
+        armorModStat: "health",
+        masterworkTier: 5,
+        effectiveBaseStats: { ...config.baseStats },
+        optimizationBaseStats: { ...config.baseStats },
+      });
+    }
+    const config = exactConfigs[slotIndex];
+    items.push({
+      ...makeItem(`Exact ${SLOTS[slotIndex]}`, SLOTS[slotIndex], null,
+        { ...config.baseStats }, 999 + slotIndex),
+      id: `00-exact-${slotIndex}`,
+      archetypeId: config.archetype,
+      tertiary: config.tertiary,
+      tuningMode: "shift",
+      tuningFrom: exactTuning[slotIndex][0],
+      tuningTo: exactTuning[slotIndex][1],
+      armorModSize: slotIndex < 3 ? 5 : 0,
+      armorModStat: exactModStats[slotIndex],
+      masterworkTier: 5,
+      effectiveBaseStats: { ...config.baseStats },
+      optimizationBaseStats: { ...config.baseStats },
+    });
+  }
+  const exact = Object.fromEntries(Object.keys(zero).map(stat => [stat, true]));
+  const solve = inputItems => solveInventoryLoadout({
+    items: inputItems,
+    targets: target,
+    fragments: zero,
+    setRequirement: { type: "none" },
+    reassignModifiers: false,
+    userConstraints: { exact },
+  });
+
+  const forward = solve(items);
+  const reversed = solve([...items].reverse());
+  const bySlot = SLOTS.map(slot => items.filter(item => item.slot === slot));
+  let exhaustiveBest = null;
+  const chosen = Array(SLOTS.length);
+  const enumerate = slotIndex => {
+    if (slotIndex === SLOTS.length) {
+      const pieces = chosen.map((item, index) =>
+        createUpgradePieceFromItem(item, index));
+      const evaluation = evaluateUpgradePieces(
+        pieces, target, zero, false, [], false, { exact },
+      );
+      if (!exhaustiveBest ||
+          compareUpgradeMetrics(evaluation.metrics, exhaustiveBest.metrics) < 0) {
+        exhaustiveBest = evaluation;
+      }
+      return;
+    }
+    for (const item of bySlot[slotIndex]) {
+      chosen[slotIndex] = item;
+      enumerate(slotIndex + 1);
+    }
+  };
+  enumerate(0);
+  assert.equal(forward.results[0].metrics.allReached, true);
+  assert.deepEqual(forward.results[0].finalTotals, target);
+  assert.equal(
+    compareUpgradeMetrics(forward.results[0].metrics, exhaustiveBest.metrics),
+    0,
+    "the 8^5 frontier must match the independent exhaustive optimum",
+  );
+  assert.deepEqual(
+    forward.results[0].pieces.map(piece => piece.sourceId),
+    reversed.results[0].pieces.map(piece => piece.sourceId),
+    "inventory input order must not change the canonical exact witness",
   );
 });
 

@@ -1,0 +1,159 @@
+{
+  "root": "D:\\GitHub projects\\d2-armor-solver-v3-consistency",
+  "node": "v24.14.0",
+  "seed": 318819070,
+  "rows": [
+    {
+      "name": "easy-exact",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.705299999999994,
+      "searchMs": 161.2314,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "states": {
+        "frontierComplete": true,
+        "assignmentComplete": true,
+        "statesExamined": 5,
+        "equivalentItems": 1295,
+        "mergedStates": 0,
+        "peakStates": 1,
+        "maxStates": 50000,
+        "maxEvaluations": 50000
+      },
+      "heapUsed": 29754992,
+      "arrayBuffers": 10479,
+      "maxRSS": 107155456,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "hard-exact",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 3.789100000000005,
+      "searchMs": 899.802,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 3,
+      "states": {
+        "frontierComplete": false,
+        "assignmentComplete": true,
+        "statesExamined": 84416,
+        "equivalentItems": 363,
+        "mergedStates": 0,
+        "peakStates": 50000,
+        "maxStates": 50000,
+        "maxEvaluations": 50000
+      },
+      "heapUsed": 260367864,
+      "arrayBuffers": 10479,
+      "maxRSS": 454320128,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "no-exact",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 3.0212999999999965,
+      "searchMs": 884.4524,
+      "outcome": "SEARCH_LIMIT_REACHED",
+      "resultCount": 3,
+      "states": {
+        "frontierComplete": false,
+        "assignmentComplete": true,
+        "statesExamined": 84416,
+        "equivalentItems": 363,
+        "mergedStates": 0,
+        "peakStates": 50000,
+        "maxStates": 50000,
+        "maxEvaluations": 50000
+      },
+      "heapUsed": 265948216,
+      "arrayBuffers": 10479,
+      "maxRSS": 454004736,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "hard-rules",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.901699999999991,
+      "searchMs": 993.6286,
+      "outcome": "SEARCH_LIMIT_REACHED",
+      "resultCount": 3,
+      "states": {
+        "frontierComplete": false,
+        "assignmentComplete": false,
+        "statesExamined": 84416,
+        "equivalentItems": 363,
+        "mergedStates": 0,
+        "peakStates": 50000,
+        "maxStates": 50000,
+        "maxEvaluations": 50000
+      },
+      "heapUsed": 318600536,
+      "arrayBuffers": 10479,
+      "maxRSS": 466681856,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "exotic-set",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.731099999999998,
+      "searchMs": 749.5609,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 3,
+      "states": {
+        "frontierComplete": false,
+        "assignmentComplete": true,
+        "statesExamined": 60072,
+        "equivalentItems": 363,
+        "mergedStates": 0,
+        "peakStates": 50000,
+        "maxStates": 50000,
+        "maxEvaluations": 50000
+      },
+      "heapUsed": 69097192,
+      "arrayBuffers": 10479,
+      "maxRSS": 390311936,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "equivalent",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.784000000000006,
+      "searchMs": 157.1126,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "states": {
+        "frontierComplete": true,
+        "assignmentComplete": true,
+        "statesExamined": 5,
+        "equivalentItems": 1295,
+        "mergedStates": 0,
+        "peakStates": 1,
+        "maxStates": 50000,
+        "maxEvaluations": 50000
+      },
+      "heapUsed": 29585272,
+      "arrayBuffers": 10479,
+      "maxRSS": 107151360,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    },
+    {
+      "name": "upgrade",
+      "seed": 318819070,
+      "items": 1300,
+      "normalizeMs": 2.862800000000007,
+      "searchMs": 14.708700000000007,
+      "outcome": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "states": {},
+      "heapUsed": 11270784,
+      "arrayBuffers": 10515,
+      "maxRSS": 58236928,
+      "note": "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"
+    }
+  ]
+}
