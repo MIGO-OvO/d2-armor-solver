@@ -38,7 +38,7 @@ Development build: [https://migo-ovo.github.io/d2-armor-solver/dev/app/](https:/
 
 A standalone build that runs fully offline, no Node, npm, or server required:
 
-1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.7.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
+1. Download the [latest offline package](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v3.0.0.zip), or grab a pre-release build from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts on any push.
 2. Unzip it and open `index.html` in a browser over the `file://` protocol.
 
 The offline package matches the online version, with one difference: it doesn't inject Bungie secrets at build time, so the login entry is hidden. DIM CSV import, solving, and saving builds all run fully offline; the DIM Loadout export link is just a URL, so opening it still needs a network connection.
@@ -52,7 +52,16 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 ## Changelog
 
-### v2.0.7 (latest)
+### v3.0.0 (latest)
+
+- Solver V3 stable release: the four solving paths share one integer constraint model and result certificate; witness verification and sealing make the certificate the single source of truth for mathematical results, and the UI reports correctness conclusions only from the certificate instead of legacy heuristics.
+- Staged search Fast / Balanced / Deep: they solve the same mathematical problem and only change search budget and proof depth — no game-rule change. Fast never claims infeasibility when it finds no solution; budget exhaustion yields `SEARCH_LIMIT_REACHED`, and only a complete trusted proof produces `INFEASIBLE_PROVEN`.
+- Large-inventory search: retained states / nodes / evaluations are separated, so Deep really gets a larger search budget; 1300-item benchmark scenarios and exact-witness independent-rebuild regression pass. Large inventories remain budget-bounded searches; exhaustive proof exists only when the whole search domain was actually completed.
+- Progressive Search / Worker: progressively verified results, cancellation and generation isolation keep stale Worker results from polluting the UI; Reachability cooperative cancellation preserves proof completeness; Upgrade / fallback use the same V3 correctness boundary.
+- Bungie single-item actions: pull / equip of owned single items with target picking, read-back verification after writes, and ambiguous writes are never blindly replayed.
+- Release validation: 318 Node tests, browser smoke, upgrade verification, offline verification, and the 1300-item benchmark matrix all pass. Full notes: [v3.0.0 Release Notes](./docs/release-notes-v3.0.0.md).
+
+### v2.0.7
 
 - Improved real-inventory search to rank target quality first and keep a broader, target-aware frontier for large inventories, so an exact build is not discarded by an early local score or by saving one more owned piece.
 - Aligned exact rules between the existing-loadout and from-scratch paths. When the fast replacement search misses an exact build, an independent exact-target query now supplies a feasible witness while preserving fixed Legendary `+5` rolls and freely selectable Exotic tuning.

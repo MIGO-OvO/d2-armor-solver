@@ -38,7 +38,7 @@
 
 完全离线的独立构建，无需 Node、npm 或服务器：
 
-1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v2.0.7.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v3.0.0.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
 2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
 
 离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
@@ -52,7 +52,16 @@
 
 ## Changelog / 更新日志
 
-### v2.0.7（最新版）
+### v3.0.0（最新版）
+
+- Solver V3 正式稳定版：四条求解入口共享同一整数约束模型与结果证书，witness 校验与封印使证书成为数学结果的唯一真值，UI 只依据证书展示正确性结论，不再依赖 legacy heuristic 判断结果是否真实满足规则。
+- 分阶段搜索 Fast / Balanced / Deep：解决的是同一个数学问题，只改变搜索预算与证明深度，不改变任何游戏规则。Fast 未找到解时不会错误声称不可行；预算耗尽只会产生 `SEARCH_LIMIT_REACHED`，只有完整可信证明才会产生 `INFEASIBLE_PROVEN`。
+- 大型库存搜索优化：retained states / nodes / evaluations 分离，Deep 真正获得更大的搜索预算；1300 件库存 benchmark 场景与 exact witness 独立重建回归通过。大型库存仍是有预算上限的搜索，只有实际完成整个搜索域时才拥有 exhaustive proof。
+- Progressive Search / Worker：结果逐步验证发布、支持取消与 generation 隔离，过期 Worker 结果不会污染界面；Reachability 协作取消保持证明完整性；Upgrade / fallback 使用同一 V3 correctness boundary。
+- Bungie 单件护甲操作：单件已拥有护甲的拉取 / 装备与目标选择，写入后回读核对，不确定的写入不盲目重复执行。
+- 发布验证：318 项 Node 测试、浏览器 smoke、upgrade verification、offline verification 与 1300 项 benchmark matrix 全部通过。完整说明见 [v3.0.0 Release Notes](./docs/release-notes-v3.0.0.md)。
+
+### v2.0.7
 
 - 优化真实库存搜索：按目标属性质量优先排序，扩大并改进大库存候选搜索，避免因为早期局部评分或“少刷几件”而错过精确可达的配装。
 - 统一“优化现有配装”与从零配装的精确规则；当快速替换搜索找不到精确方案时，由独立的精确目标查询提供可行 witness，同时保留传说护甲固定 `+5` 与异域护甲自由调整的正确语义。
