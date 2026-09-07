@@ -50,6 +50,7 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 - Improved real-inventory search to rank target quality first and keep a broader, target-aware frontier for large inventories, so an exact build is not discarded by an early local score or by saving one more owned piece.
 - Aligned exact rules between the existing-loadout and from-scratch paths. When the fast replacement search misses an exact build, the complete solver now supplies a feasible plan while preserving fixed Legendary `+5` rolls and freely selectable Exotic tuning.
+- Fixed Exotic Class Item right-column tertiary-stat priorities, correcting eight affected `30/25/20` perk combinations involving Wormhusk, Armamentarium, Starfire, Swarm, and Harmony; added regression coverage for all 192 combinations across the three classes.
 
 ### v2.0.6
 
