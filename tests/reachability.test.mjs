@@ -1,12 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BASE_CONFIGS, STATS } from "../src/core/armor-model.mjs";
+import {
+  BASE_CONFIGS,
+  STATS,
+} from "../src/core/armor-model.mjs";
+import { SearchBudgetExceeded } from "../src/core/search-session.mjs";
 import {
   calculateReachableRanges,
+  calculateReachableStatRange,
   findReachabilityWitness,
 } from "../src/core/reachability.mjs";
 import { RESULT_STATUS } from "../src/core/solver-v3-contract.mjs";
+
+test("reachability DP yields to cooperative SearchSession cancellation", () => {
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const searchStats = {
+    statesExamined: 0,
+    checkpoint() { throw new SearchBudgetExceeded(); },
+  };
+  assert.throws(() => calculateReachableStatRange(
+    BASE_CONFIGS[0],
+    0,
+    5,
+    0,
+    fragments,
+    { health: 100, melee: 50, grenade: 100, super: 100 },
+    "class",
+    searchStats,
+  ), SearchBudgetExceeded);
+});
 
 test("dense locks return exact paired ranges from meet-in-the-middle states", () => {
   const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));

@@ -1,9 +1,12 @@
 // Request execution metadata is deliberately separate from serializable
 // ProblemSpec. Profiles change effort, never the mathematical rules.
 export const SEARCH_PROFILES = Object.freeze({
-  fast: Object.freeze({maxTimeMs: 200, maxNodes: 100000, maxStates: 10000, fastMode: true, proveFuzzy: false, exhaustive: false}),
-  balanced: Object.freeze({maxTimeMs: 3000, maxNodes: 2000000, maxStates: 50000, fastMode: false, proveFuzzy: false, exhaustive: false}),
-  deep: Object.freeze({maxTimeMs: 15000, maxNodes: 20000000, maxStates: 250000, fastMode: false, proveFuzzy: true, exhaustive: true}),
+  // maxNodes = streamed/DFS primitive visits; maxStates = retained states
+  // (join buckets/frontiers); maxEvaluations = expensive full evaluator calls;
+  // maxTimeMs = wall-clock safety limit. Profiles change effort only.
+  fast: Object.freeze({maxTimeMs: 200, maxNodes: 100000, maxStates: 10000, maxEvaluations: 3000, fastMode: true, proveFuzzy: false, exhaustive: false}),
+  balanced: Object.freeze({maxTimeMs: 3000, maxNodes: 2000000, maxStates: 50000, maxEvaluations: 50000, fastMode: false, proveFuzzy: false, exhaustive: false}),
+  deep: Object.freeze({maxTimeMs: 15000, maxNodes: 20000000, maxStates: 250000, maxEvaluations: 250000, fastMode: false, proveFuzzy: true, exhaustive: true}),
 });
 export const SEARCH_STAGES_MS = Object.freeze([150, 500, 1500, 3000]);
 
@@ -15,7 +18,8 @@ export function withSearchProfile(operation, payload = {}) {
   return {...payload, searchProfile: profile,
     runtimeOptions: {...payload.runtimeOptions, fastMode: options.fastMode, proveFuzzy: options.proveFuzzy},
     searchLimits: {...payload.searchLimits, maxTimeMs: options.maxTimeMs,
-      maxNodes, maxStates: options.maxStates, exhaustive: options.exhaustive},
+      maxNodes, maxStates: options.maxStates, maxEvaluations: options.maxEvaluations,
+      exhaustive: options.exhaustive},
   };
 }
 
@@ -78,7 +82,13 @@ export function createSearchSession({operation, generation, profile = "balanced"
     finish(result, termination = "completed") {
       if (budgetReached) termination = "budget";
       if (result) this.publish(result, result.searchStats);
-      const priority = value => ({EXACT_TARGET_PROVEN: 4, RULE_FEASIBLE_PROVEN: 3, SEARCH_LIMIT_REACHED: 1}[value?.certificate?.status] || 0);
+      // Terminal truth ordering, not witness presence ordering. A trusted
+      // complete negative proof must outrank an earlier incomplete positive
+      // candidate, while any proven positive witness is never demoted by a
+      // weaker terminal state (a contradictory terminal negative cannot be
+      // issued by the same certificate boundary in the first place).
+      const priority = value => ({EXACT_TARGET_PROVEN: 4, RULE_FEASIBLE_PROVEN: 3,
+        INFEASIBLE_PROVEN: 2, SEARCH_LIMIT_REACHED: 1}[value?.certificate?.status] || 0);
       const chosen = priority(lastResult) > priority(result) ? lastResult : result || lastResult;
       nodes = Math.max(nodes, chosen?.searchStats?.statesExamined || 0, chosen?.certificate?.proof?.statesExamined || 0);
       if (chosen?.searchStats) coverage = {...chosen.searchStats, ...coverage};

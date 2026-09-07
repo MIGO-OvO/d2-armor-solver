@@ -39,7 +39,7 @@ import {
   visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
-import { createSolutionDisplayModel, assertSolutionConsistency } from "./core/solver-v3-contract.mjs";
+import { createCanonicalId, createSolutionDisplayModel, assertSolutionConsistency } from "./core/solver-v3-contract.mjs";
 import { buildRepository } from "./core/build-repository.mjs";
 import {
   BUILD_CHANNEL,
@@ -692,6 +692,7 @@ function getFragments() {
 }
 
 function toggleExoticMode({ syncInventory = true, refreshInventory = true } = {}) {
+  invalidateOwnedPlanCache();
   const enabled = document.getElementById('useExoticMode')?.checked;
   const showSettings = enabled && calculatorMode !== 'upgrade';
   document.getElementById('exoticSettingsBody').style.display = showSettings ? 'block' : 'none';
@@ -1399,7 +1400,7 @@ async function solve() {
     msgs.innerHTML = `<div class="msg ${certifiedFeasible(solvedSolutions) ? 'info' : 'warn'}">${escapeHtml(searchProofLabel(solvedSolutions))}</div>`;
     if (allSolutions[0]) {
       refreshInventoryPlansFromSolutions({rerender: false});
-      displayAllResults(allSolutions[0], targets, fragments);
+      displayAllResults(allSolutions[0], targets, fragments, {forceOwnedPlan: true});
     }
   } catch (error) {
     if (error.name === 'AbortError') return;
@@ -1518,7 +1519,6 @@ function readConstraints() {
 
 async function refineWithPriorities() {
   if (!lastTargets || allSolutions.length === 0) return;
-  const revision = beginSearch();
 
   const constraints = readConstraints();
   if (lastExoticSettings) {
@@ -1531,6 +1531,9 @@ async function refineWithPriorities() {
     alert(l('请至少选择一个优化目标或约束条件。','請至少選擇一個最佳化目標或限制條件。','Select at least one optimization goal or constraint.'));
     return;
   }
+  // Validate before entering the search UI state: an empty refinement must
+  // never flash "searching…" and immediately return.
+  const revision = beginSearch();
 
   const adjTarget = {...lastTargets};
 
@@ -1576,7 +1579,7 @@ async function refineWithPriorities() {
     // the main per-stat target rules, so keep its historical score-based labels.
 
     // Full refresh (comparison, pieces, refine card, nav)
-    displayAllResults(newResult, lastTargets, lastFragments);
+    displayAllResults(newResult, lastTargets, lastFragments, {forceOwnedPlan: true});
 
     // Add before/after cost analysis on top
     const newFinal = createSolutionDisplayModel(newResult).visibleTotals;
@@ -1840,8 +1843,8 @@ function renderWitnessBreakdown(witness) {
   </details>`;
 }
 
-function displayAllResults(result, targets, fragments, { scroll = true } = {}) {
-  result = getOwnedArmorPlan(result)?.matchedSolution || result;
+function displayAllResults(result, targets, fragments, { scroll = true, forceOwnedPlan = false } = {}) {
+  result = getOwnedArmorPlan(result, { force: forceOwnedPlan })?.matchedSolution || result;
   const results = document.getElementById('results');
   results.classList.add('show');
   document.getElementById('floatJump').style.display = 'flex';
@@ -1958,9 +1961,45 @@ function createOwnedArmorPlanRequest(solutions, maxResults, { allowEmpty = false
   };
 }
 
-function getOwnedArmorPlan(solution, { allowEmpty = true } = {}) {
+// Owned/farm matching is derived from {solution, physical inventory snapshot,
+// class/exotic filters, set requirement}. Cache by canonical solution identity
+// plus an explicit revision of every input that can mutate the match, so
+// progressive partials do not re-rank a 1300-item inventory on every arrival.
+let ownedPlanRevision = 0;
+const ownedPlanCache = new Map();
+const OWNED_PLAN_CACHE_LIMIT = 64;
+function invalidateOwnedPlanCache() {
+  ownedPlanRevision++;
+  ownedPlanCache.clear();
+}
+
+function ownedPlanCacheKey(solution, allowEmpty) {
+  if (calculatorMode !== 'solve' || !solution) return null;
+  const classItemSettings = document.getElementById('useExoticMode')?.checked
+    ? getExoticSettings()
+    : null;
+  const classId = classItemSettings?.classId || importClassFilter || null;
+  const canonicalId = solution?.canonicalId || createCanonicalId(solution);
+  const requirementKey = JSON.stringify(snapshotSetRequirement());
+  // The revision covers physical item state; the remaining identity fields
+  // distinguish filter/exotic/requirement configurations cheaply.
+  const exoticKey = classItemSettings
+    ? `class-item:${classId}`
+    : `${inventoryExoticSlotFilter || ''}:${inventoryFixedExoticKey || ''}`;
+  return `${ownedPlanRevision}|${Number(Boolean(allowEmpty))}|${canonicalId}|${requirementKey}|${classId || ''}|${exoticKey}`;
+}
+
+function getOwnedArmorPlan(solution, { allowEmpty = true, force = false } = {}) {
+  const key = ownedPlanCacheKey(solution, allowEmpty);
+  if (key && !force && ownedPlanCache.has(key)) return ownedPlanCache.get(key);
   const request = createOwnedArmorPlanRequest([solution], 1, { allowEmpty });
-  return request ? rankInventoryPlans(request)[0] || null : null;
+  if (!request) return null;
+  const plan = rankInventoryPlans(request)[0] || null;
+  if (key && !ownedPlanCache.has(key) && ownedPlanCache.size >= OWNED_PLAN_CACHE_LIMIT) {
+    ownedPlanCache.delete(ownedPlanCache.keys().next().value);
+  }
+  if (key) ownedPlanCache.set(key, plan);
+  return plan;
 }
 
 function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
@@ -1981,7 +2020,7 @@ function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
   );
   currentSolutionIdx = Math.max(0, allSolutions.indexOf(plans[0]?.solution));
   if (rerender && allSolutions.length > 0) {
-    displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false });
+    displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false, forceOwnedPlan: true });
   }
 }
 
@@ -2291,6 +2330,7 @@ function addManualOwnedArmor() {
     setHash: null,
     manualOwned: true,
   });
+  invalidateOwnedPlanCache();
   manualOwnedEditorOpen = true;
   saveUpgradeDraft();
   refreshInventoryPlansFromSolutions();
@@ -2298,12 +2338,14 @@ function addManualOwnedArmor() {
 
 function removeManualOwnedArmor(sourceId) {
   manualOwnedItems = manualOwnedItems.filter(item => item.sourceId !== sourceId);
+  invalidateOwnedPlanCache();
   saveUpgradeDraft();
   refreshInventoryPlansFromSolutions();
 }
 
 function clearOwnedGear() {
   manualOwnedItems = [];
+  invalidateOwnedPlanCache();
   saveUpgradeDraft();
   refreshInventoryPlansFromSolutions();
 }
@@ -2955,6 +2997,7 @@ function updateLocalOwnedArmorItemState(verification) {
       item.equipped = observed.equipped;
     }
   }
+  invalidateOwnedPlanCache();
   if (bungieProfileState) Object.assign(bungieProfileState.characterInventories, verification.characterInventories || {});
 }
 
@@ -3614,6 +3657,7 @@ async function handleBungieOAuthCallback() {
 function applyImportedInventory(items, source, { passive = false } = {}) {
   importedInventory = items;
   importSource = source;
+  invalidateOwnedPlanCache();
   if (!passive) {
     inventoryImportExpanded = true;
     clearInventoryResults();
@@ -3699,6 +3743,7 @@ function handleDimCsvFile(input) {
 function updateImportOptions() {
   importTier5Only = document.getElementById("importTier5Only")?.checked !== false;
   importClassFilter = document.getElementById("importClass")?.value || "";
+  invalidateOwnedPlanCache();
   if (!importClassFilter) {
     inventoryExoticSlotFilter = "";
     inventoryFixedExoticKey = "";
@@ -3734,6 +3779,7 @@ function updateInventoryExoticSlot() {
       scheduleRealtimeRanges();
     }
   }
+  invalidateOwnedPlanCache();
   renderUpgradeImportPanel();
   saveCurrentDraft();
 }
@@ -3743,6 +3789,7 @@ function updateInventorySolveOptions({ refreshPlans = true } = {}) {
   const nameSelect = document.getElementById("inventoryFixedExoticName");
   if (slotSelect) inventoryExoticSlotFilter = slotSelect.value || "";
   if (nameSelect) inventoryFixedExoticKey = nameSelect.value || "";
+  invalidateOwnedPlanCache();
   const exoticClassItemMode = calculatorMode === 'solve' &&
     document.getElementById('useExoticMode')?.checked === true;
   if (slotSelect) slotSelect.disabled = exoticClassItemMode || !importClassFilter;
@@ -3773,6 +3820,7 @@ function updateInventorySolveOptions({ refreshPlans = true } = {}) {
 
 function setImportClass(classId) {
   importClassFilter = classId || "";
+  invalidateOwnedPlanCache();
   syncBungieTargetCharacter();
   const select = document.getElementById("importClass");
   if (select) select.value = importClassFilter;
@@ -4199,6 +4247,7 @@ function updateSetRequirementMode(value) {
     }
     setRequirement = { type: "split", a: aValue, b: bValue };
   }
+  invalidateOwnedPlanCache();
   // The replacement plan is stat-only and unaffected by the set selection, so
   // it stays valid; only the owned-armor results are invalidated above.
   renderSetEffects();
@@ -4549,6 +4598,7 @@ function loadUpgradeDraft() {
     : [];
   manualOwnedSequence = manualOwnedItems.length;
   inventoryImportExpanded = importedInventory.length > 0 && draft?.inventoryImportExpanded !== false;
+  invalidateOwnedPlanCache();
   const reassign = document.getElementById('upgradeReassignModifiers');
   if (reassign) reassign.checked = draft?.reassignModifiers !== false;
   const upgradeOnlyPlus5 = document.getElementById('upgradeOnlyPlus5');
@@ -4934,6 +4984,7 @@ let selectedInventoryResultIndex = 0;
 let inventorySolveRevision = 0;
 
 function clearInventoryResults() {
+  invalidateOwnedPlanCache();
   inventorySolveRevision++;
   lastInventoryResult = null;
   lastInventoryTargets = null;

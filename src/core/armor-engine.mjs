@@ -236,15 +236,27 @@ export function calculateReachability({
       certificateForWitness({problemSpec, witness: null, witnessDomain: STAT_DOMAIN.VISIBLE,
         executionStatus: EXECUTION_STATUS.NOT_APPLICABLE, proof: createProofEvidence(problemSpec, {method: "effort-budget", truncated: true})}));
   }
-  const probe = probeTarget ? findReachabilityWitness({
-    fixedPiece,
-    numPlus5,
-    numPlus10,
-    numPlus3,
-    fragments,
-    visibleTarget: probeTarget,
-    problemSpec,
-  }) : null;
+  let probe = null;
+  if (probeTarget) {
+    try {
+      probe = findReachabilityWitness({
+        fixedPiece,
+        numPlus5,
+        numPlus10,
+        numPlus3,
+        fragments,
+        visibleTarget: probeTarget,
+        problemSpec,
+        search,
+      });
+    } catch (error) {
+      if (!(error instanceof SearchBudgetExceeded)) throw error;
+      return attachResultCertificate({feasible: false, ranges: {}, searchStats: {complete: false}},
+        certificateForWitness({problemSpec, witness: null, witnessDomain: STAT_DOMAIN.VISIBLE,
+          executionStatus: EXECUTION_STATUS.NOT_APPLICABLE,
+          proof: createProofEvidence(problemSpec, {method: "effort-budget", truncated: true})}));
+    }
+  }
   if (probe) result.probe = probe;
   const probeVerification = probe?.witness
     ? verifyWitness(problemSpec, probe.witness)

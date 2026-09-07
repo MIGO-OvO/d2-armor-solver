@@ -215,7 +215,9 @@ export function solveInventoryLoadout({
       || keyOf([a.candidate.piece]).localeCompare(keyOf([b.candidate.piece])));
     for (const {candidate} of ordered) {
       search?.checkpoint(1, searchStats);
-      if (searchStats.statesExamined >= searchStats.maxStates || examined >= searchStats.maxEvaluations) {
+      // DFS/streamed primitive budget is maxNodes, not maxStates (maxStates
+      // only bounds the retained meet-in-the-middle join table).
+      if (searchStats.statesExamined >= searchStats.maxNodes || examined >= searchStats.maxEvaluations) {
         stop("node-or-evaluation-limit"); break;
       }
       if (performance.now() - started >= searchStats.maxTimeMs) { stop("time-limit"); break; }

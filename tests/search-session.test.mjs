@@ -3,6 +3,15 @@ import test from "node:test";
 import {createSearchSession, withSearchProfile, SearchBudgetExceeded} from "../src/core/search-session.mjs";
 import {certifiedFeasible, proofPresentation} from "../src/core/solver-presentation.mjs";
 import {readFileSync} from "node:fs";
+import {BASE_CONFIGS, STATS} from "../src/core/armor-model.mjs";
+import {
+  RESULT_STATUS,
+  attachResultCertificate,
+  createProblemSpec,
+  createProofEvidence,
+  createResultCertificate,
+  verifyWitness,
+} from "../src/core/solver-v3-contract.mjs";
 const witness = status => ({certificate: {status, witnessVerification: {valid: true}, proof: {complete: false}}});
 
 test("profiles change effort but leave the original mathematical request immutable", () => {
@@ -17,6 +26,99 @@ test("profiles change effort but leave the original mathematical request immutab
   assert.equal(deep.searchLimits.exhaustive, true);
   assert.ok(fast.searchLimits.maxTimeMs < balanced.searchLimits.maxTimeMs);
   assert.ok(balanced.searchLimits.maxNodes < deep.searchLimits.maxNodes);
+  assert.ok(fast.searchLimits.maxEvaluations < balanced.searchLimits.maxEvaluations);
+  assert.ok(balanced.searchLimits.maxEvaluations < deep.searchLimits.maxEvaluations);
+  assert.equal(balanced.searchLimits.maxEvaluations, 50000);
+  assert.equal(deep.searchLimits.maxEvaluations, 250000);
+  assert.equal(deep.searchLimits.maxStates, 250000);
+});
+
+const zeroStats = () => Object.fromEntries(STATS.map(stat => [stat, 0]));
+const exactRules = () => ({exact: Object.fromEntries(STATS.map(stat => [stat, true]))});
+const witnessConfig = () => ({
+  config: Array.from({length: 5}, () => ({...BASE_CONFIGS[0], baseStats: {...BASE_CONFIGS[0].baseStats}})),
+  tuningAssignments: Array.from({length: 5}, () => ({mode: "+5-5", from: "health", to: "melee"})),
+  modAssignments: Object.fromEntries(Array.from({length: 5}, (_, index) => [index, null])),
+});
+const computedWitnessTotals = verifyWitness(
+  createProblemSpec({operation: "solve", target: zeroStats()}),
+  witnessConfig(),
+).armorTotals;
+const certifyContainer = (result, spec, status, proof) =>
+  attachResultCertificate(result, createResultCertificate({
+    status,
+    problemSpec: spec,
+    witness: result.length === 1 ? result[0] : null,
+    proof,
+  }));
+const truncatedProof = spec => createProofEvidence(spec, {method: "effort-budget", truncated: true});
+const infeasiblePointProof = spec => createProofEvidence(spec, {
+  producer: "exact-target-oracle", method: "exact-target-oracle",
+  complete: true, scope: "target-point", outcome: "infeasible", statesExamined: 1,
+  assumptions: ["known-data"],
+});
+const incompleteInfeasiblePointProof = spec => createProofEvidence(spec, {
+  producer: "exact-target-oracle", method: "exact-target-oracle",
+  complete: false, truncated: true, scope: "target-point", outcome: "infeasible", statesExamined: 1,
+  assumptions: ["known-data"],
+});
+const pointSpec = target => createProblemSpec({operation: "solve", target, constraints: exactRules()});
+
+test("terminal complete infeasibility outranks an older search-limit incumbent (Case A)", () => {
+  const spec = pointSpec({health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100});
+  const early = certifyContainer([witnessConfig()], spec, RESULT_STATUS.SEARCH_LIMIT_REACHED, truncatedProof(spec));
+  assert.equal(early.certificate.witnessVerification.valid, true, "fixture: early result is a verified candidate");
+  const terminal = certifyContainer([witnessConfig()], spec, RESULT_STATUS.INFEASIBLE_PROVEN, infeasiblePointProof(spec));
+  assert.equal(terminal.certificate.status, RESULT_STATUS.INFEASIBLE_PROVEN,
+    "fixture: terminal certificate survived the contract boundary");
+  const session = createSearchSession({operation: "solve", generation: 1, now: () => 0});
+  session.publish(early);
+  const final = session.finish(terminal);
+  assert.equal(final.certificate.status, RESULT_STATUS.INFEASIBLE_PROVEN);
+  assert.equal(final.search.coverage.complete, true);
+});
+
+test("a terminal negative never demotes a proven exact witness (Case B)", () => {
+  const exactSpec = pointSpec(computedWitnessTotals);
+  const exact = certifyContainer([witnessConfig()], exactSpec, RESULT_STATUS.EXACT_TARGET_PROVEN, truncatedProof(exactSpec));
+  assert.equal(exact.certificate.status, RESULT_STATUS.EXACT_TARGET_PROVEN);
+  // A same-ruleset complete negative cannot coexist with a rule-satisfying
+  // witness at the certificate boundary, so this terminal certificate is
+  // issued against an unrelated point spec: the session itself must still
+  // prefer the proven positive witness over any terminal negative.
+  const otherSpec = pointSpec({health: 80, melee: 80, grenade: 80, super: 80, class: 80, weapons: 80});
+  const terminal = certifyContainer([], otherSpec, RESULT_STATUS.INFEASIBLE_PROVEN, infeasiblePointProof(otherSpec));
+  assert.equal(terminal.certificate.status, RESULT_STATUS.INFEASIBLE_PROVEN);
+  const session = createSearchSession({operation: "solve", generation: 1, now: () => 0});
+  session.publish(exact);
+  const final = session.finish(terminal);
+  assert.equal(final, exact, "the exact incumbent object is retained");
+  assert.equal(final.certificate.status, RESULT_STATUS.EXACT_TARGET_PROVEN);
+  assert.ok(final[0].config.length === 5);
+});
+
+test("a search-limit terminal never demotes a rule-feasible witness (Case C)", () => {
+  const ruleSpec = createProblemSpec({operation: "solve", target: zeroStats(),
+    constraints: {minimums: {health: 1}}});
+  const ruleWitness = witnessConfig();
+  const early = certifyContainer([ruleWitness], ruleSpec, RESULT_STATUS.RULE_FEASIBLE_PROVEN, truncatedProof(ruleSpec));
+  assert.equal(early.certificate.status, RESULT_STATUS.RULE_FEASIBLE_PROVEN);
+  const terminal = certifyContainer([], ruleSpec, RESULT_STATUS.SEARCH_LIMIT_REACHED, truncatedProof(ruleSpec));
+  const session = createSearchSession({operation: "solve", generation: 1, now: () => 0});
+  session.publish(early);
+  const final = session.finish(terminal);
+  assert.equal(final.certificate.status, RESULT_STATUS.RULE_FEASIBLE_PROVEN);
+});
+
+test("an incomplete infeasible claim is demoted at the contract and never promoted by finish (Case D)", () => {
+  const spec = pointSpec({health: 100, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100});
+  const terminal = certifyContainer([witnessConfig()], spec, RESULT_STATUS.INFEASIBLE_PROVEN, incompleteInfeasiblePointProof(spec));
+  assert.equal(terminal.certificate.status, RESULT_STATUS.SEARCH_LIMIT_REACHED,
+    "the certificate contract demotes the incomplete infeasible claim");
+  const session = createSearchSession({operation: "solve", generation: 1, now: () => 0});
+  const final = session.finish(terminal);
+  assert.equal(final.certificate.status, RESULT_STATUS.SEARCH_LIMIT_REACHED);
+  assert.equal(final.search.coverage.complete, false);
 });
 
 test("one session publishes verified results before completion across monotone stages", () => {

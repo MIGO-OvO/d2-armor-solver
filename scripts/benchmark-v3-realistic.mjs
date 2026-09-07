@@ -6,36 +6,42 @@ import { performance } from "node:perf_hooks";
 
 const root = path.resolve(process.argv[2] || ".");
 const cases = ["easy-exact", "hard-exact", "middle-exact", "late-exact", "no-exact", "hard-rules", "exotic-set", "equivalent", "upgrade"];
+const profiles = ["fast", "balanced", "deep"];
 const fixtureSeed = 0x1300cafe;
 if (!process.argv[3]) {
   const rows = [];
   for (const name of cases) {
-    const started = performance.now();
-    const row = await new Promise(resolve => {
-      const child = spawn(process.execPath, ["--expose-gc", "--max-old-space-size=512", fileURLToPath(import.meta.url), root, name], { windowsHide: true });
-      let output = "";
-      let diagnostics = "";
-      const timer = setTimeout(() => child.kill(), 30000);
-      child.stdout.on("data", data => { output += data; });
-      child.stderr.on("data", data => { diagnostics += data; });
-      child.on("close", code => {
-        clearTimeout(timer);
-        try { resolve(JSON.parse(output)); }
-        catch { resolve({ name, outcome: "RESOURCE_LIMIT", elapsedMs: performance.now() - started, exitCode: code,
-          reason: /heap/i.test(diagnostics) ? "heap limit" : "30 second process deadline" }); }
+    for (const searchProfile of profiles) {
+      const started = performance.now();
+      const row = await new Promise(resolve => {
+        const child = spawn(process.execPath, ["--expose-gc", "--max-old-space-size=512", fileURLToPath(import.meta.url), root, name, searchProfile], { windowsHide: true });
+        let output = "";
+        let diagnostics = "";
+        const timer = setTimeout(() => child.kill(), 45000);
+        child.stdout.on("data", data => { output += data; });
+        child.stderr.on("data", data => { diagnostics += data; });
+        child.on("close", code => {
+          clearTimeout(timer);
+          try { resolve(JSON.parse(output)); }
+          catch { resolve({ name, searchProfile, outcome: "RESOURCE_LIMIT", elapsedMs: performance.now() - started, exitCode: code,
+            reason: /heap/i.test(diagnostics) ? "heap limit" : "45 second process deadline" }); }
+        });
       });
-    });
-    rows.push(row);
-    console.log(JSON.stringify(row));
+      rows.push(row);
+      console.log(JSON.stringify(row));
+    }
   }
   const output = process.env.BENCH_OUTPUT;
   if (output) writeFileSync(output, JSON.stringify({ root, node: process.version, seed: fixtureSeed, rows }, null, 2));
 } else {
   const load = file => import(pathToFileURL(path.join(root, "src/core", file)));
   const { BASE_CONFIGS, STATS } = await load("armor-model.mjs");
-  const { solveInventory, analyzeUpgrade } = await load("armor-engine.mjs");
+  const { solveInventory, analyzeUpgrade, createSearchLimitResult } = await load("armor-engine.mjs");
+  const { createSearchSession, withSearchProfile, SearchBudgetExceeded } = await load("search-session.mjs");
   const { createUpgradePieceFromItem, getManualUpgradeArmorTotals } = await load("upgrade-optimizer.mjs");
+  const reference = await import(pathToFileURL(path.join(root, "tests/helpers/reference-witness.mjs")));
   const name = process.argv[3];
+  const searchProfile = process.argv[4] || "balanced";
   const slots = ["helmet", "arms", "chest", "legs", "classItem"];
   const zero = Object.fromEntries(STATS.map(s => [s, 0]));
   let rng = fixtureSeed;
@@ -65,20 +71,61 @@ if (!process.argv[3]) {
   const normalizeMs = performance.now() - startNormalize;
   const start = performance.now();
   const exact = Object.fromEntries(STATS.map(s => [s, true]));
-  const result = name === "upgrade" ? analyzeUpgrade({pieces: selected, targets: target, fragments: zero,
-    reassignModifiers: true, constraints: {exact}}) : solveInventory({items, targets: target, fragments: zero,
+  const operation = name === "upgrade" ? "analyzeUpgrade" : "solveInventory";
+  const basePayload = name === "upgrade"
+    ? {pieces: selected, targets: target, fragments: zero, reassignModifiers: true, constraints: {exact}}
+    : {items, targets: target, fragments: zero,
       setRequirement: name === "exotic-set" ? {type: "set", setHash: 700, count: 4} : {type: "none"},
       reassignModifiers: name === "hard-rules", userConstraints: name === "hard-rules"
         ? {minimums: {melee: 90, grenade: 90}, maximums: {health: 50, weapons: 100}, priorityLevels: {super: 1}}
-        : {exact}, maxResults: 3 });
+        : {exact}};
+  const payload = withSearchProfile(operation, {...basePayload, searchProfile, maxResults: 3});
+  const session = createSearchSession({operation, generation: 1, profile: searchProfile});
+  let result;
+  try {
+    result = name === "upgrade" ? analyzeUpgrade(payload, session) : solveInventory(payload, session);
+  } catch (error) {
+    if (!(error instanceof SearchBudgetExceeded)) throw error;
+    result = session.lastResult || createSearchLimitResult(operation, payload);
+  }
+  result = session.finish(result);
   const searchMs = performance.now() - start;
   const memory = process.memoryUsage();
+  const search = result.search || {};
+  const stats = result.searchStats || {};
   const entries = result.results || [{finalTotals: result.plan?.evaluation?.finalTotals || result.baseline?.finalTotals}];
   const exactHit = entries.some(entry => STATS.every(stat => entry.finalTotals?.[stat] === target[stat]));
-  console.log(JSON.stringify({name, seed: fixtureSeed, knownIndex, targets: target, items: items.length, normalizeMs, searchMs,
-    outcome: result.status || (exactHit ? "LEGACY_EXACT_HIT" : "LEGACY_PARTIAL"), exactHit,
+  const rebuildVerified = result.results ? result.results.every(entry => {
+    if (!entry.pieces || !entry.tuningAssignments || !entry.modAssignments) return false;
+    try {
+      const rebuilt = reference.rebuildReference(entry.pieces, entry.tuningAssignments, entry.modAssignments, zero);
+      return STATS.every(stat => rebuilt.visible[stat] === entry.finalTotals?.[stat]);
+    } catch { return false; }
+  }) : null;
+  const evaluations = Number.isSafeInteger(result.examined) ? result.examined : null;
+  const canonicalId = result.results?.[0]?.canonicalId ?? result.plan?.canonicalId ?? result.certificate?.canonicalId ?? null;
+  const termination = search.termination && search.termination !== "completed"
+    ? search.termination
+    : stats.frontierComplete === false && stats.termination && stats.termination !== "exhausted"
+      ? stats.termination
+      : search.termination ?? stats.termination;
+  console.log(JSON.stringify({name, searchProfile, seed: fixtureSeed, knownIndex, targets: target, items: items.length, normalizeMs, searchMs,
+    elapsedMs: search.elapsedMs ?? searchMs,
+    status: result.certificate?.status ?? result.status,
+    termination,
+    coverageComplete: search.coverage?.complete ?? null,
+    frontierComplete: stats.frontierComplete ?? null,
+    statesExamined: stats.statesExamined ?? search.coverage?.statesExamined ?? null,
+    nodes: search.nodes ?? null,
+    evaluations,
+    peakStates: stats.peakStates ?? null,
+    firstFeasibleMs: search.firstFeasibleMs ?? null,
+    firstExactMs: search.firstExactMs ?? null,
+    exactHit, rebuildVerified,
+    canonicalId: canonicalId === null ? null : String(canonicalId).slice(0, 96),
+    canonicalLength: canonicalId === null ? 0 : String(canonicalId).length,
     resultCount: result.results?.length ?? Number(Boolean(result.plan || result.baseline)),
-    states: result.searchStats || {}, heapUsed: memory.heapUsed, arrayBuffers: memory.arrayBuffers,
+    heapUsed: memory.heapUsed, arrayBuffers: memory.arrayBuffers,
     maxRSS: process.resourceUsage().maxRSS * 1024,
     note: "heapUsed/arrayBuffers are end-of-search samples; maxRSS is OS process high-water; proof included in searchMs"}));
 }

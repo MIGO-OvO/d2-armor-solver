@@ -304,6 +304,7 @@ export function calculateReachableStatRange(
         if (usedPlus3 > numPlus3) continue;
         for (const option of purpleOptions[mode]) {
           searchStats.statesExamined++;
+          if ((searchStats.statesExamined & 1023) === 0) searchStats.checkpoint?.(1024);
           const lockValues = state.lockValues.map((value, index) =>
             value + option.lockValues[index]
           );
@@ -582,6 +583,7 @@ export function findReachabilityWitness({
     fragments, numPlus5, numPlus10, numPlus3,
     pieces: fixedPiece ? [fixedPiece] : [],
   }),
+  search = null,
 }) {
   if (!problemSpec.valid || !fixedPiece
       || STATS.some(stat => !Number.isSafeInteger(Number(visibleTarget[stat])))) {
@@ -604,7 +606,7 @@ export function findReachabilityWitness({
       let witness = null;
       let statesExamined = 0;
       for (const point of preimage.targets) {
-        const pointStats = {};
+        const pointStats = {checkpoint: search?.checkpoint};
         const found = findExactTargetWitnesses({target: point, numPlus5, numPlus10, numPlus3,
           fixedConfig: fixedPiece, searchStats: pointStats});
         statesExamined += pointStats.statesExamined;
@@ -618,7 +620,7 @@ export function findReachabilityWitness({
           assumptions: ["known-data", "complete-catalog", "exhausted-clamp-preimage"]})};
     }
     const ranged = calculateReachableRanges(fixedPiece, numPlus5, numPlus10, numPlus3,
-      problemSpec.constraintModel.fragments, problemSpec.constraintModel.target);
+      problemSpec.constraintModel.fragments, problemSpec.constraintModel.target, search);
     const complete = ranged.searchStats.complete !== false;
     const witness = ranged.witness || null;
     if (witness) witness.visibleTotals = Object.fromEntries(STATS.map(stat =>
@@ -633,7 +635,7 @@ export function findReachabilityWitness({
         limitation: ranged.searchStats.limitation}),
     };
   }
-  const searchStats = {};
+  const searchStats = {checkpoint: search?.checkpoint};
   const witnesses = findExactTargetWitnesses({
     target: armorTarget,
     numPlus5,
