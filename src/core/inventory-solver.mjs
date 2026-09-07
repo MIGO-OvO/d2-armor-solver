@@ -1,490 +1,254 @@
-import { STATS } from "./armor-model.mjs";
-import {
-  STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEvidence,
-  satisfiesConstraintModel,
-} from "./solver-v3-contract.mjs";
-import {
-  applyManualUpgradeModifiers,
-  compareUpgradeMetrics,
-  createUpgradePieceFromItem,
-  evaluateUpgradePieces,
-  getUpgradeConfig,
-  getUpgradeTuningCapability,
-} from "./upgrade-optimizer.mjs";
+import {STATS} from "./armor-model.mjs";
+import {STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEvidence,
+  satisfiesConstraintModel, hasCompletePieceMath, verifyWitness} from "./solver-v3-contract.mjs";
+import {applyManualUpgradeModifiers, compareUpgradeMetrics, createUpgradePieceFromItem,
+  evaluateUpgradePieces, getUpgradeConfig, getUpgradeTuningCapability} from "./upgrade-optimizer.mjs";
 
-const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
+const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
+const keyOf = pieces => pieces.map(piece => `${piece.slot}:id:${piece.sourceId || piece.id || ""}`).sort().join("|");
+const compare = (a, b) => Number(b.feasible) - Number(a.feasible)
+  || compareUpgradeMetrics(a.evaluation.metrics, b.evaluation.metrics) || a.key.localeCompare(b.key);
 
-// Build a five-piece loadout from the imported inventory that satisfies the
-// set-bonus requirement (or none) and comes as close as possible to the stat
-// targets. This is the "no farming" option: every piece is already owned.
-// Slot order matches UPGRADE_SLOTS so results can drop straight into the editor.
+function project(piece) {
+  return piece.optimizationBaseStats ? {...piece,
+    physicalBaseStats: {...(piece.physicalBaseStats || piece.baseStats)},
+    requiresMasterwork: STATS.some(stat => piece.optimizationBaseStats[stat] !== piece.baseStats[stat]),
+    baseStats: {...piece.optimizationBaseStats},
+  } : {...piece};
+}
+function coverage(piece, requirement) {
+  const hash = Number(piece.setHash);
+  return requirement.type === "set" ? [Number(hash === Number(requirement.setHash)), 0]
+    : requirement.type === "split" ? [Number(hash === Number(requirement.a)), Number(hash === Number(requirement.b))] : [0, 0];
+}
+function legal(pieces, requirement) {
+  if (pieces.length !== 5 || pieces.some(piece => !piece)
+      || new Set(pieces.map(piece => piece.slot)).size !== 5
+      || pieces.filter(piece => piece.exotic).length > 1) return false;
+  if (new Set(pieces.map(piece => piece.classId).filter(Boolean)).size > 1) return false;
+  const counts = pieces.map(piece => coverage(piece, requirement));
+  return requirement.type === "set" ? counts.reduce((sum, value) => sum + value[0], 0) >= requirement.count
+    : requirement.type === "split" ? Number(requirement.a) !== Number(requirement.b)
+      && counts.reduce((sum, value) => sum + value[0], 0) >= 2
+      && counts.reduce((sum, value) => sum + value[1], 0) >= 2 : true;
+}
+function bounds(piece, reassign, onlyPlus5) {
+  const config = getUpgradeConfig(piece);
+  const manual = applyManualUpgradeModifiers(config, piece);
+  if (!reassign) return {min: STATS.map(stat => manual[stat]), max: STATS.map(stat => manual[stat])};
+  const capability = getUpgradeTuningCapability(piece, onlyPlus5);
+  const destinations = capability.allowedDirectionalStats || [];
+  return {
+    min: STATS.map(stat => Math.min(manual[stat], config.baseStats[stat]
+      - Number(destinations.some(to => to !== stat)) * 5)),
+    // Mod sizes may move between pieces; add the global budget only once.
+    max: STATS.map(stat => Math.max(manual[stat], config.baseStats[stat]
+      + Math.max(Number(destinations.includes(stat)) * 5,
+        Number(capability.allowBalanced && config.masterworkStats.includes(stat))))),
+  };
+}
+
+// Streaming target-directed search. No materialized Cartesian frontier.
+// Resource exhaustion is explicit and never authorizes a negative proof.
 export function solveInventoryLoadout({
-  items,
-  targets,
-  fragments,
-  setRequirement,
-  reassignModifiers = true,
-  currentPieces = null,
-  requiredStats = [],
-  onlyPlus5Tuning = false,
-  maxResults = 12,
-  userConstraints = {},
-  searchLimits = {},
-}, problemSpec = createProblemSpec({
-  operation: "solveInventory", targets, fragments, constraints: userConstraints,
+  items = [], targets, fragments = {}, setRequirement, reassignModifiers = true,
+  currentPieces = null, requiredStats = [], onlyPlus5Tuning = false,
+  maxResults = 12, userConstraints = {}, searchLimits = {},
+}, problemSpec = createProblemSpec({operation: "solveInventory", targets, fragments, constraints: userConstraints,
   targetDomain: STAT_DOMAIN.VISIBLE, pieces: items,
-  inventoryContext: { setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces },
+  inventoryContext: {setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces},
 })) {
   if (!setRequirement) return null;
-  const normalizedRequiredStats = [...new Set(requiredStats)]
-    .filter(stat => STATS.includes(stat));
-
-  const bySlot = new Map();
-  for (const slot of SLOT_ORDER) bySlot.set(slot, []);
-  for (const item of items) {
-    if (item?.slot && bySlot.has(item.slot)) bySlot.get(item.slot).push(item);
-  }
-  const evaluate = pieces => evaluateUpgradePieces(
-    pieces, targets, fragments, reassignModifiers, normalizedRequiredStats,
-    onlyPlus5Tuning, userConstraints
-  );
-  const lockedPiecesBySlot = new Map(
-    (Array.isArray(currentPieces) ? currentPieces : [])
-      .filter(piece => piece?.locked && SLOT_ORDER.includes(piece.slot))
-      .map(piece => [piece.slot, projectInventoryPiece(piece)]),
-  );
-  const keyOf = pieces => pieces
-    .map(piece => `${piece.slot}:${getPieceInstanceKey(piece)}`)
-    .sort()
-    .join("|");
-
-  const results = [];
   const limit = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
-  const searchStats = { frontierComplete: true, assignmentComplete: !reassignModifiers,
+  maxResults = limit(maxResults, 12);
+  const started = performance.now();
+  const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers,
     statesExamined: 0, equivalentItems: 0, mergedStates: 0, peakStates: 0,
-    maxStates: limit(searchLimits.maxStates, 50000),
-    maxEvaluations: limit(searchLimits.maxEvaluations, 50000) };
+    prunedBounds: 0, prunedSets: 0, layers: [0, 0, 0, 0, 0], firstFeasibleMs: null, firstExactMs: null,
+    maxStates: limit(searchLimits.maxStates, 50000), maxNodes: limit(searchLimits.maxNodes, 2000000),
+    maxEvaluations: limit(searchLimits.maxEvaluations, 50000),
+    maxTimeMs: limit(searchLimits.maxTimeMs, 3000), termination: "exhausted"};
+  const required = [...new Set(requiredStats)].filter(stat => STATS.includes(stat));
+  const locked = new Map((currentPieces || []).filter(piece => piece.locked).map(piece => {
+    const source = items.find(item => String(item.id) === String(piece.sourceId || piece.id) && item.slot === piece.slot);
+    const current = source ? {...createUpgradePieceFromItem(source, SLOTS.indexOf(piece.slot)), locked: true, classId: source.classId} : piece;
+    return [piece.slot, project(current)];
+  }));
+  const currentKey = currentPieces?.length === 5 ? keyOf(currentPieces) : null;
+  const rows = [];
+  for (let index = 0; index < 5; index++) {
+    const slot = SLOTS[index];
+    const candidates = locked.has(slot) ? [locked.get(slot)]
+      : items.filter(item => item.slot === slot).map(item => ({...project(createUpgradePieceFromItem(item, index)), classId: item.classId}));
+    const compressed = new Map();
+    for (const piece of candidates) {
+      const key = createPieceCapability(piece, index).equivalenceKey;
+      const previous = compressed.get(key);
+      const candidate = {piece, ...bounds(piece, reassignModifiers, onlyPlus5Tuning), cover: coverage(piece, setRequirement)};
+      if (previous) searchStats.equivalentItems++;
+      if (!previous || keyOf([piece]).localeCompare(keyOf([previous.piece])) < 0) compressed.set(key, candidate);
+    }
+    rows.push({slotIndex: index, candidates: [...compressed.values()]});
+  }
+  rows.sort((a, b) => a.candidates.length - b.candidates.length || a.slotIndex - b.slotIndex);
+  const combinations = rows.reduce((count, row) => count * row.candidates.length, 1);
+  const modMaximum = reassignModifiers ? rows.reduce((sum, row) => sum
+    + Math.max(0, ...row.candidates.map(candidate => candidate.piece.armorModSize || 0)), 0) : 0;
+  const suffix = Array.from({length: 6}, () => ({min: Array(6).fill(0), max: Array(6).fill(0), cover: [0, 0]}));
+  for (let depth = 4; depth >= 0; depth--) {
+    const candidates = rows[depth].candidates;
+    for (let stat = 0; stat < 6; stat++) {
+      suffix[depth].min[stat] = suffix[depth + 1].min[stat] + Math.min(Infinity, ...candidates.map(candidate => candidate.min[stat]));
+      suffix[depth].max[stat] = suffix[depth + 1].max[stat] + Math.max(-Infinity, ...candidates.map(candidate => candidate.max[stat]));
+    }
+    for (let index = 0; index < 2; index++) suffix[depth].cover[index] = suffix[depth + 1].cover[index]
+      + Number(candidates.some(candidate => candidate.cover[index]));
+  }
+  const minimumCoverage = setRequirement.type === "set" ? [Number(setRequirement.count), 0]
+    : setRequirement.type === "split" ? [2, 2] : [0, 0];
+  const rules = problemSpec.constraintModel.rules;
+  const results = [];
+  let examined = 0;
+  let feasibleFound = false;
+  let exactCount = 0;
+  let rejectedWitnesses = 0;
+  let stopped = false;
   const seen = new Set();
-  const push = (pieces, evaluation) => {
-    if (!isLegalArmorLoadout(pieces)) return;
+  const evaluate = pieces => {
+    if (!legal(pieces, setRequirement)) return;
     const key = keyOf(pieces);
     if (seen.has(key)) return;
+    const evaluation = evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers, required, onlyPlus5Tuning, userConstraints);
+    examined++;
+    // A stale current assignment or unknown item must not occupy the identity
+    // cache, Top-K list or exact quota and hide a verifiable inventory result.
+    const feasible = satisfiesConstraintModel({visibleTotals: evaluation.finalTotals}, problemSpec.constraintModel, STAT_DOMAIN.VISIBLE);
+    const exact = feasible && STATS.every(stat => evaluation.finalTotals[stat] === Number(targets[stat]));
+    const entry = {pieces: [...pieces], evaluation, key, feasible};
+    if (results.length >= maxResults && compare(entry, results.at(-1)) >= 0) {
+      return;
+    }
+    if (problemSpec.runtimeOptions.verifyInventoryCandidates && !verifyWitness(problemSpec, {pieces,
+      tuningAssignments: evaluation.tuningAssignments, modAssignments: evaluation.modAssignments}).valid) {
+      rejectedWitnesses++;
+      return;
+    }
     seen.add(key);
-    results.push({ pieces, evaluation, key });
+    if (feasible) { feasibleFound = true; searchStats.firstFeasibleMs ??= performance.now() - started; }
+    if (exact) { exactCount++; searchStats.firstExactMs ??= performance.now() - started; }
+    results.push(entry);
+    results.sort(compare);
+    if (results.length > maxResults) results.length = maxResults;
   };
-
-  let examined = 0;
-  const assignments = enumerateSetAssignments(bySlot, setRequirement);
-  for (const assignment of assignments) {
-    const freeSlots = assignment.free.filter(slot => !lockedPiecesBySlot.has(slot));
-    const constrainedAssignment = { ...assignment, free: freeSlots };
-    const exhaustivePieces = enumerateSmallAssignmentLoadouts(
-      bySlot, constrainedAssignment, lockedPiecesBySlot
-    );
-    if (exhaustivePieces) {
-      for (const pieces of exhaustivePieces) {
-        if (examined >= searchStats.maxEvaluations) { searchStats.frontierComplete = false; break; }
-        if (!isLegalArmorLoadout(pieces)) continue;
-        if (!satisfiesRequirement(pieces, setRequirement)) continue;
-        push(pieces, evaluate(pieces));
-        examined++;
+  if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)) evaluate(currentPieces.map(project));
+  const chosen = Array(5);
+  const partialMin = Array(6).fill(0);
+  const partialMax = Array(6).fill(0);
+  const canReachRules = depth => rules.every((rule, index) =>
+    (rule.armorMaximum === null || partialMin[index] + suffix[depth].min[index] <= rule.armorMaximum)
+    && (rule.armorMinimum === null || partialMax[index] + suffix[depth].max[index] + modMaximum >= rule.armorMinimum));
+  const stop = reason => {
+    stopped = true; searchStats.frontierComplete = false; searchStats.termination = reason;
+  };
+  const pointTarget = !reassignModifiers && rules.every(rule => rule.armorMinimum !== null
+    && rule.armorMinimum === rule.armorMaximum);
+  // Exact fixed-assignment inventory is a 2+3 sum join, not five nested
+  // evaluations. Index two slots; stream the other three and keep identities
+  // in the bucket so sets, Exotics, classes and execution alternatives survive.
+  const meetInMiddle = () => {
+    const table = new Map();
+    let retained = 0;
+    for (const a of rows[0].candidates) for (const b of rows[1].candidates) {
+      if (retained >= searchStats.maxStates) return false;
+      const sum = a.min.map((value, index) => value + b.min[index]);
+      const key = sum.join(",");
+      const bucket = table.get(key) || [];
+      bucket.push([a, b]); table.set(key, bucket); retained++;
+    }
+    searchStats.peakStates = retained;
+    searchStats.method = "fixed-assignment-2+3-join";
+    const target = rules.map(rule => rule.armorMinimum);
+    for (const c of rows[2].candidates) for (const d of rows[3].candidates) for (const e of rows[4].candidates) {
+      if (searchStats.statesExamined >= searchStats.maxNodes || performance.now() - started >= searchStats.maxTimeMs) {
+        stop("join-resource-limit"); return true;
       }
-      continue;
+      searchStats.statesExamined++;
+      const key = target.map((value, index) => value - c.min[index] - d.min[index] - e.min[index]).join(",");
+      const bucket = table.get(key);
+      if (!bucket) continue;
+      for (const [a, b] of bucket) {
+        [a, b, c, d, e].forEach((candidate, index) => { chosen[rows[index].slotIndex] = candidate.piece; });
+        if (examined >= searchStats.maxEvaluations) { stop("evaluation-limit"); return true; }
+        evaluate(chosen);
+      }
+      if (searchLimits.exhaustive !== true && combinations > 4096 && exactCount >= maxResults) { stop("exact-witness-quota"); return true; }
     }
-    const exactPieces = searchAssignmentExact(
-      bySlot, constrainedAssignment, lockedPiecesBySlot, setRequirement,
-      reassignModifiers, onlyPlus5Tuning,
-      searchStats,
-    );
-    for (const pieces of exactPieces) {
-      if (examined >= searchStats.maxEvaluations) { searchStats.frontierComplete = false; break; }
-      if (!isLegalArmorLoadout(pieces)) continue;
-      if (!satisfiesRequirement(pieces, setRequirement)) continue;
-      push(pieces, evaluate(pieces));
-      examined++;
+    return true;
+  };
+  const visit = (depth, exotics, cover, classId, strict) => {
+    if (stopped) return;
+    if (depth === 5) { evaluate(chosen); return; }
+    if (strict && !canReachRules(depth)) { searchStats.prunedBounds++; return; }
+    if (minimumCoverage.some((value, index) => cover[index] + suffix[depth].cover[index] < value)) {
+      searchStats.prunedSets++; return;
     }
-  }
-
-  const currentKey = Array.isArray(currentPieces)
-    ? keyOf(currentPieces)
-    : null;
-  if (currentKey && isLegalArmorLoadout(currentPieces)
-    && satisfiesRequirement(currentPieces, setRequirement)) {
-    push(currentPieces.map(piece => ({ ...piece })), evaluate(currentPieces));
-  }
-
-  const validResults = results.filter(entry =>
-    isLegalArmorLoadout(entry.pieces)
-    && satisfiesRequirement(entry.pieces, setRequirement));
-  validResults.sort((left, right) =>
-    compareUpgradeMetrics(left.evaluation.metrics, right.evaluation.metrics)
-    || left.key.localeCompare(right.key)
-  );
-  const hasUnknownCapabilityData = problemSpec.pieceCapabilities.some(
-    capability => !capability.executionKnown,
-  );
-  return {
-    requirement: setRequirement,
-    requiredStats: normalizedRequiredStats,
-    examined,
-    searchStats,
+    const row = rows[depth];
+    const ordered = row.candidates.map(candidate => {
+      let distance = 0;
+      for (let index = 0; index < 6; index++) {
+        const target = rules[index].preferredArmor;
+        const low = partialMin[index] + candidate.min[index] + suffix[depth + 1].min[index];
+        const high = partialMax[index] + candidate.max[index] + suffix[depth + 1].max[index] + modMaximum;
+        const gap = Math.max(low - target, target - high, 0);
+        const center = (low + high) / 2 - target;
+        distance += gap * gap * 1000 + center * center;
+      }
+      return {candidate, distance};
+    }).sort((a, b) => a.distance - b.distance
+      || a.candidate.min.join(",").localeCompare(b.candidate.min.join(","))
+      || keyOf([a.candidate.piece]).localeCompare(keyOf([b.candidate.piece])));
+    for (const {candidate} of ordered) {
+      if (searchStats.statesExamined >= searchStats.maxStates || examined >= searchStats.maxEvaluations) {
+        stop("node-or-evaluation-limit"); break;
+      }
+      if (performance.now() - started >= searchStats.maxTimeMs) { stop("time-limit"); break; }
+      if (searchLimits.exhaustive !== true && combinations > 4096 && exactCount >= maxResults) { stop("exact-witness-quota"); break; }
+      searchStats.statesExamined++; searchStats.layers[depth]++;
+      const exoticCount = exotics + Number(candidate.piece.exotic);
+      if (exoticCount > 1 || classId && candidate.piece.classId && classId !== candidate.piece.classId) continue;
+      chosen[row.slotIndex] = candidate.piece;
+      for (let index = 0; index < 6; index++) {
+        partialMin[index] += candidate.min[index]; partialMax[index] += candidate.max[index];
+      }
+      searchStats.peakStates = Math.max(searchStats.peakStates, depth + 1);
+      visit(depth + 1, exoticCount, cover.map((value, index) => value + candidate.cover[index]),
+        classId || candidate.piece.classId, strict);
+      for (let index = 0; index < 6; index++) {
+        partialMin[index] -= candidate.min[index]; partialMax[index] -= candidate.max[index];
+      }
+      if (stopped) break;
+    }
+  };
+  let joined = false;
+  if (combinations > 4096 && pointTarget) joined = meetInMiddle();
+  if (combinations > 0 && !joined) visit(0, 0, [0, 0], null, combinations > 4096);
+  // After proving no rule-feasible combination, spend remaining resources on
+  // a nearest incumbent. This second pass cannot strengthen a negative proof.
+  if (!stopped && !feasibleFound && combinations > 4096) visit(0, 0, [0, 0], null, false);
+  const unknown = problemSpec.pieceCapabilities.some(capability => !hasCompletePieceMath(capability, reassignModifiers));
+  const complete = searchStats.frontierComplete && searchStats.assignmentComplete && !unknown;
+  return {requirement: setRequirement, requiredStats: required, examined, searchStats, rejectedWitnesses,
     proof: createProofEvidence(problemSpec, {
-      producer: "inventory-frontier",
-      method: "complete-inventory-frontier",
-      complete: searchStats.frontierComplete && !reassignModifiers && !hasUnknownCapabilityData,
-      truncated: reassignModifiers || !searchStats.frontierComplete,
-      statesExamined: examined,
-      assumptions: hasUnknownCapabilityData ? [] : ["known-data", "fixed-modifier-assignments"],
-      outcome: validResults.some(entry => satisfiesConstraintModel(
-        entry.evaluation, problemSpec.constraintModel, STAT_DOMAIN.VISIBLE,
-      )) ? "feasible" : "infeasible",
-      limitation: !searchStats.frontierComplete ? "inventory resource limit reached" : hasUnknownCapabilityData
-        ? "one or more inventory capabilities contain unknown data"
-        : reassignModifiers ? "modifier assignment evaluator is bounded" : null,
+      producer: "inventory-frontier", method: "complete-inventory-frontier", complete,
+      truncated: !searchStats.frontierComplete || !searchStats.assignmentComplete, statesExamined: searchStats.statesExamined,
+      assumptions: unknown ? [] : ["known-data", "fixed-modifier-assignments"],
+      outcome: feasibleFound ? "feasible" : "infeasible",
+      limitation: unknown ? "one or more inventory capabilities contain unknown data"
+        : !searchStats.frontierComplete ? `inventory resource limit: ${searchStats.termination}`
+        : reassignModifiers ? "nearest modifier assignment evaluator is bounded" : null,
     }),
-    results: validResults.slice(0, maxResults).map(entry => ({
-      pieces: entry.pieces,
-      isCurrent: entry.key === currentKey,
-      score: entry.evaluation.score,
-      metrics: entry.evaluation.metrics,
-      finalTotals: entry.evaluation.finalTotals,
-      tuningAssignments: entry.evaluation.tuningAssignments,
-      modAssignments: entry.evaluation.modAssignments,
-    })),
+    results: results.map(entry => ({pieces: entry.pieces, isCurrent: entry.key === currentKey,
+      score: entry.evaluation.score, metrics: entry.evaluation.metrics, finalTotals: entry.evaluation.finalTotals,
+      tuningAssignments: entry.evaluation.tuningAssignments, modAssignments: entry.evaluation.modAssignments})),
   };
-}
-
-function enumerateSmallAssignmentLoadouts(bySlot, assignment, lockedPiecesBySlot) {
-  const candidatesBySlot = [];
-  let combinationCount = 1;
-  for (const slot of SLOT_ORDER) {
-    const lockedPiece = lockedPiecesBySlot.get(slot);
-    if (lockedPiece) {
-      candidatesBySlot.push([{ piece: { ...lockedPiece } }]);
-      continue;
-    }
-    const requiredSetHash = assignment.fixed.get(slot);
-    const items = requiredSetHash
-      ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
-      : bySlot.get(slot);
-    if (items.length === 0) return [];
-    combinationCount *= items.length;
-    if (combinationCount > 4096) return null;
-    candidatesBySlot.push(items.map(item => ({ item })));
-  }
-
-  const loadouts = [];
-  const chosen = Array(SLOT_ORDER.length);
-  const enumerate = (slotIndex, exoticCount) => {
-    if (slotIndex === SLOT_ORDER.length) {
-      loadouts.push(chosen.map((candidate, index) => candidate.piece
-        ? { ...candidate.piece }
-        : createInventorySearchPiece(candidate.item, index)));
-      return;
-    }
-    for (const candidate of candidatesBySlot[slotIndex]) {
-      const nextExoticCount = exoticCount + Number(Boolean(
-        candidate.piece?.exotic ?? candidate.item?.exotic,
-      ));
-      if (nextExoticCount > 1) continue;
-      chosen[slotIndex] = candidate;
-      enumerate(slotIndex + 1, nextExoticCount);
-    }
-  };
-  enumerate(0, 0);
-  return loadouts;
-}
-
-function projectInventoryPiece(piece) {
-  return piece?.optimizationBaseStats
-    ? { ...piece, physicalBaseStats: { ...piece.baseStats },
-      requiresMasterwork: STATS.some(stat => piece.optimizationBaseStats[stat] !== piece.baseStats[stat]),
-      baseStats: { ...piece.optimizationBaseStats } }
-    : { ...piece };
-}
-
-function createInventorySearchPiece(item, slotIndex) {
-  return projectInventoryPiece(createUpgradePieceFromItem(item, slotIndex));
-}
-
-function getRequirementCoverage(piece, requirement) {
-  if (requirement.type === "set") {
-    return [Number(piece.setHash) === Number(requirement.setHash) ? 1 : 0, 0];
-  }
-  if (requirement.type === "split") {
-    return [
-      Number(piece.setHash) === Number(requirement.a) ? 1 : 0,
-      Number(piece.setHash) === Number(requirement.b) ? 1 : 0,
-    ];
-  }
-  return [0, 0];
-}
-
-function getEvaluationContribution(piece, reassignModifiers, onlyPlus5Tuning) {
-  const config = getUpgradeConfig(piece);
-  if (!reassignModifiers) {
-    return {
-      stats: applyManualUpgradeModifiers(config, piece),
-      descriptor: "",
-    };
-  }
-
-  const capability = getUpgradeTuningCapability(piece, onlyPlus5Tuning);
-  const tuning = `balanced:${Number(capability.allowBalanced)}:directional:${
-    capability.allowedDirectionalStats?.join(",") || "unknown"}`;
-  return {
-    stats: config.baseStats,
-    descriptor: `${tuning}:mod${piece.armorModSize || 0}`,
-  };
-}
-
-function getStateKey(state, includeCoverage = true) {
-  const stats = STATS.map(stat => state.stats[stat]).join(",");
-  // Modifier budgets and rolled tuning destinations affect the five-piece
-  // total as a multiset; their armor-slot order does not. Canonicalizing that
-  // multiset avoids retaining equivalent permutations in large inventories.
-  const descriptors = [...state.descriptors].sort().join("|");
-  const capabilities = [...state.capabilityKeys].sort().join("|");
-  const coverage = includeCoverage ? `|${state.coverageA}|${state.coverageB}` : "";
-  return `${stats}#${descriptors}#${capabilities}#${state.exoticCount}${coverage}`;
-}
-
-// Large inventories use an exhaustive state frontier. States merge only when
-// their aggregate stats, Tuning/mod descriptors, set coverage, Exotic count,
-// and execution capabilities are future-equivalent. No width or Top-N limit
-// participates in reachability.
-function searchAssignmentExact(
-  bySlot, assignment, lockedPiecesBySlot, requirement,
-  reassignModifiers, onlyPlus5Tuning,
-  searchStats,
-) {
-  const candidatesBySlot = [];
-  // Exact interning, not a hash: different full capability strings cannot
-  // collide. State keys need the equality class, not thousands of repeated
-  // characters. Scope is one search so IDs cannot leak into a cache/witness.
-  const capabilityIds = new Map();
-  const internCapability = key => {
-    if (!capabilityIds.has(key)) capabilityIds.set(key, capabilityIds.size + 1);
-    return capabilityIds.get(key);
-  };
-  for (const slot of SLOT_ORDER) {
-    const slotIndex = SLOT_ORDER.indexOf(slot);
-    const lockedPiece = lockedPiecesBySlot.get(slot);
-    const requiredSetHash = assignment.fixed.get(slot);
-    const rawCandidates = lockedPiece
-      ? [{ ...lockedPiece }]
-      : (requiredSetHash
-        ? bySlot.get(slot).filter(item => item.setHash === requiredSetHash)
-        : bySlot.get(slot)
-      ).map(item => createInventorySearchPiece(item, slotIndex));
-    if (rawCandidates.length === 0) return [];
-
-    const compressed = new Map();
-    for (const piece of rawCandidates) {
-      const contribution = getEvaluationContribution(
-        piece, reassignModifiers, onlyPlus5Tuning
-      );
-      const coverage = getRequirementCoverage(piece, requirement);
-      const capabilityKey = internCapability(createPieceCapability(piece, slotIndex).equivalenceKey);
-      const key = [
-        ...STATS.map(stat => contribution.stats[stat]),
-        contribution.descriptor,
-        capabilityKey,
-        ...coverage,
-      ].join(":");
-      const candidate = { piece, contribution, coverage, capabilityKey };
-      const existing = compressed.get(key);
-      if (existing) searchStats.equivalentItems++;
-      if (!existing || getPieceInstanceKey(piece).localeCompare(
-        getPieceInstanceKey(existing.piece),
-      ) < 0) {
-        compressed.set(key, candidate);
-      }
-    }
-    candidatesBySlot.push({
-      slotIndex,
-      candidates: [...compressed.values()].sort((left, right) =>
-        getPieceInstanceKey(left.piece).localeCompare(getPieceInstanceKey(right.piece))),
-    });
-  }
-
-  // Fewer distinct candidates first keeps intermediate state maps small; the
-  // piece array remains in canonical slot order for the evaluator and UI.
-  candidatesBySlot.sort((left, right) =>
-    left.candidates.length - right.candidates.length
-  );
-  let states = new Map([["start", {
-    pieces: Array(SLOT_ORDER.length),
-    stats: Object.fromEntries(STATS.map(stat => [stat, 0])),
-    descriptors: Array(SLOT_ORDER.length).fill(""),
-    capabilityKeys: Array(SLOT_ORDER.length).fill(""),
-    identityKeys: Array(SLOT_ORDER.length).fill(""),
-    exoticCount: 0,
-    coverageA: 0,
-    coverageB: 0,
-  }]]);
-
-  for (let candidateIndex = 0; candidateIndex < candidatesBySlot.length; candidateIndex++) {
-    const { slotIndex, candidates } = candidatesBySlot[candidateIndex];
-    const next = new Map();
-    for (const state of states.values()) {
-      for (const candidate of candidates) {
-        searchStats.statesExamined++;
-        const exoticCount = state.exoticCount + Number(Boolean(candidate.piece.exotic));
-        if (exoticCount > 1) continue;
-        const pieces = [...state.pieces];
-        pieces[slotIndex] = candidate.piece;
-        const descriptors = [...state.descriptors];
-        descriptors[slotIndex] = candidate.contribution.descriptor;
-        const capabilityKeys = [...state.capabilityKeys];
-        capabilityKeys[slotIndex] = candidate.capabilityKey;
-        const identityKeys = [...state.identityKeys];
-        identityKeys[slotIndex] = getPieceInstanceKey(candidate.piece);
-        const nextState = {
-          pieces,
-          descriptors,
-          capabilityKeys,
-          identityKeys,
-          exoticCount,
-          coverageA: Math.min(
-            state.coverageA + candidate.coverage[0],
-            requirement.type === "set" ? requirement.count : 2,
-          ),
-          coverageB: Math.min(
-            state.coverageB + candidate.coverage[1],
-            requirement.type === "split" ? 2 : 0,
-          ),
-          stats: Object.fromEntries(STATS.map(stat => [
-            stat,
-            state.stats[stat] + candidate.contribution.stats[stat],
-          ])),
-        };
-        const key = getStateKey(nextState);
-        const previous = next.get(key);
-        if (previous) searchStats.mergedStates++;
-        if (!previous || identityKeys.join("|").localeCompare(
-          previous.identityKeys.join("|"),
-        ) < 0) {
-          next.set(key, nextState);
-        }
-        if (next.size >= searchStats.maxStates) {
-          searchStats.frontierComplete = false;
-          break;
-        }
-      }
-      if (!searchStats.frontierComplete) break;
-    }
-    searchStats.peakStates = Math.max(searchStats.peakStates, next.size);
-    states = next;
-    if (states.size === 0) return [];
-  }
-
-  const loadouts = [];
-  for (const state of [...states.values()].sort((left, right) =>
-    left.identityKeys.join("|").localeCompare(right.identityKeys.join("|")))) {
-    if (!satisfiesRequirement(state.pieces, requirement)) continue;
-    loadouts.push(state.pieces);
-  }
-  return loadouts;
-}
-
-function combinations(items, count) {
-  const out = [];
-  const pick = (start, chosen) => {
-    if (chosen.length === count) {
-      out.push([...chosen]);
-      return;
-    }
-    for (let index = start; index < items.length; index++) {
-      chosen.push(items[index]);
-      pick(index + 1, chosen);
-      chosen.pop();
-    }
-  };
-  pick(0, []);
-  return out;
-}
-
-function enumerateSetAssignments(bySlot, requirement) {
-  if (requirement.type === "set") {
-    return enumerateCountAssignments(bySlot, Number(requirement.setHash), requirement.count);
-  }
-  if (requirement.type === "split") {
-    return enumerateSplitAssignments(bySlot, Number(requirement.a), Number(requirement.b));
-  }
-  // No set requirement: every slot is free to pick any owned piece.
-  return [{ fixed: new Map(), free: [...SLOT_ORDER] }];
-}
-
-// Choose `count` slots (out of five) that carry the required set's piece.
-function enumerateCountAssignments(bySlot, setHash, count) {
-  const setSlots = SLOT_ORDER.filter(slot =>
-    bySlot.get(slot).some(item => item.setHash === setHash)
-  );
-  const out = [];
-  for (const chosen of combinations(setSlots, count)) {
-    const fixed = new Map();
-    for (const slot of chosen) {
-      fixed.set(slot, setHash);
-    }
-    out.push({ fixed, free: SLOT_ORDER.filter(slot => !chosen.includes(slot)) });
-  }
-  return out;
-}
-
-// Two different sets, two pieces each, one slot left free.
-function enumerateSplitAssignments(bySlot, aHash, bHash) {
-  if (aHash === bHash) return [];
-  const aSlots = SLOT_ORDER.filter(slot =>
-    bySlot.get(slot).some(item => item.setHash === aHash)
-  );
-  const out = [];
-  for (const aChosen of combinations(aSlots, 2)) {
-    const remaining = SLOT_ORDER.filter(slot => !aChosen.includes(slot));
-    const bSlots = remaining.filter(slot =>
-      bySlot.get(slot).some(item => item.setHash === bHash)
-    );
-    for (const bChosen of combinations(bSlots, 2)) {
-      const fixed = new Map();
-      for (const slot of aChosen) {
-        fixed.set(slot, aHash);
-      }
-      for (const slot of bChosen) {
-        fixed.set(slot, bHash);
-      }
-      out.push({
-        fixed,
-        free: remaining.filter(slot => !bChosen.includes(slot)),
-      });
-    }
-  }
-  return out;
-}
-
-function getPieceInstanceKey(piece) {
-  if (piece?.sourceId) return `id:${piece.sourceId}`;
-  if (piece?.id) return `id:${piece.id}`;
-  const stats = STATS.map(stat => piece?.baseStats?.[stat] || 0).join(",");
-  return `hash:${piece?.hash || 0}:${stats}`;
-}
-
-function isLegalArmorLoadout(pieces) {
-  return pieces.filter(piece => piece?.exotic).length <= 1;
-}
-
-function satisfiesRequirement(pieces, requirement) {
-  const counts = new Map();
-  for (const piece of pieces) {
-    if (piece?.setHash) {
-      counts.set(piece.setHash, (counts.get(piece.setHash) || 0) + 1);
-    }
-  }
-  if (requirement.type === "set") {
-    return (counts.get(Number(requirement.setHash)) || 0) >= requirement.count;
-  }
-  if (requirement.type === "split") {
-    return (counts.get(Number(requirement.a)) || 0) >= 2
-      && (counts.get(Number(requirement.b)) || 0) >= 2;
-  }
-  return true;
 }

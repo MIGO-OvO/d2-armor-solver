@@ -1508,6 +1508,21 @@ try {
       .some(url => url.includes("armor-engine.worker")),
     "the solver should execute through the Worker Adapter",
   );
+  const workerProbe = await page.evaluate(fixedPiece => new Promise((resolve, reject) => {
+    const worker = new Worker(window.__armorWorkerUrls.find(url => url.includes("armor-engine.worker")), {type: "module"});
+    const timer = setTimeout(() => { worker.terminate(); reject(new Error("audit Worker probe timed out")); }, 15000);
+    worker.onmessage = ({data}) => {
+      clearTimeout(timer); worker.terminate();
+      if (data.error) reject(new Error(data.error.message)); else resolve(data.result);
+    };
+    worker.onerror = event => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
+    const target = {health: 200, melee: 75, grenade: 125, super: 25, class: 25, weapons: 25};
+    worker.postMessage({id: "audit-clamp", operation: "calculateReachability", payload: {
+      fixedPiece, numPlus3: "0", numPlus5: "0", numPlus10: "5", fragments: {}, lockedTargets: {}, probeTarget: target,
+    }});
+  }), BASE_CONFIGS[0]);
+  assert.equal(workerProbe.status, "EXACT_TARGET_PROVEN");
+  assert.equal(workerProbe.certificate.witnessVerification.armorTotals.health, 225);
 
   await page.evaluate(() => window.setCalculatorMode("upgrade"));
   assert.equal(await page.locator("#upgradeBuildCard").getAttribute("hidden"), null);

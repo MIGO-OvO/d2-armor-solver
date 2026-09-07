@@ -356,14 +356,18 @@ test("upgrade planning uses full-masterwork projections for kept DIM pieces", ()
   assert.equal(analysis.plan.metrics.allReached, true);
   assert.equal(
     analysis.plan.replacementCount, 2,
-    "only legs and class item need farming after retained pieces are projected"
+    "two replacements are sufficient and minimal after retained pieces are projected"
   );
-  assert.notEqual(analysis.plan.replacementProof?.minimal, true,
-    "a visible target at the 0 clamp boundary is not a point proof");
-  assert.deepEqual(
-    analysis.plan.replacements.map(replacement => replacement.slotIndex).sort(),
-    [3, 4]
-  );
+  assert.equal(analysis.plan.replacementProof?.minimal, true,
+    "all budget-consistent clamp preimages at smaller replacement depths were exhausted");
+  // Interval-complete search may choose another equally minimal pair. Assert
+  // the physical projection/lock invariant, not the old heuristic's tie.
+  const replaced = new Set(analysis.plan.replacements.map(replacement => replacement.slotIndex));
+  assert.equal(replaced.has(1), false, "the locked Exotic must be retained");
+  for (let index = 0; index < 5; index++) {
+    if (!replaced.has(index)) assert.deepEqual(analysis.plan.pieces[index].baseStats, fullStats);
+  }
+  assert.deepEqual(analysis.plan.evaluation.finalTotals, targets);
   assert.ok(analysis.plan.pieces.every(piece => piece.tuningMode !== "plus3"));
 });
 

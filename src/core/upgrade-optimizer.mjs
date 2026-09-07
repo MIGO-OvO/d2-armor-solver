@@ -13,8 +13,9 @@ import {
   sameImmutableCapabilities,
   stableSerialize,
   STAT_DOMAIN,
+  normalizePieceNumbers,
 } from "./solver-v3-contract.mjs";
-import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
+import { findExactPartialConfigWitnesses, findFixedTargetWitness, findFixedRuleWitness, visibleArmorTargets } from "./exact-target-oracle.mjs";
 
 export const UPGRADE_SLOTS = [
   { id:'helmet', labels:['头盔','頭盔','Helmet'] },
@@ -73,6 +74,7 @@ export function createDefaultUpgradePiece(slotIndex) {
 }
 
 export function normalizeUpgradePiece(piece, slotIndex) {
+  piece = normalizePieceNumbers(piece || {});
   const fallback = createDefaultUpgradePiece(slotIndex);
   const normalized = { ...fallback, ...(piece || {}), slot: UPGRADE_SLOTS[slotIndex].id };
   normalized.archetypeId = normalizeArchetypeId(
@@ -163,6 +165,7 @@ export function normalizeUpgradePiece(piece, slotIndex) {
 // masterwork; farming advice uses that projection, matching the from-scratch
 // solver's T5/full-masterwork contract.
 export function createUpgradePieceFromItem(item, slotIndex) {
+  item = normalizePieceNumbers(item);
   const archetypeId = item.archetypeId
     || inferArchetypeFromStats(item.baseStats)
     || ARCHETYPES[0].id;
@@ -368,15 +371,17 @@ function getUpgradeEvaluationConstraints(armorTarget, requiredStats, userConstra
 export function satisfiesUpgradeStatRule(stat, finalTotals, targets, constraints = {}, fragments = {}) {
   const value = finalTotals[stat];
   const ceiling = constraints.maximums?.[stat];
-  const floor = constraints.minimums?.[stat] || 0;
+  const floor = constraints.minimums?.[stat];
   const exact = Boolean(constraints.exact?.[stat]);
   const fragment = fragments[stat] || 0;
   if (exact) return value === targets[stat];
-  if (ceiling !== undefined && floor > 0) {
-    return value >= floor + fragment && value <= ceiling + fragment;
+  const bound = input => Math.max(0, Math.min(200, Number(input) + fragment));
+  if (constraints.force0?.[stat] && value !== 0 || constraints.le100?.[stat] && value > 100) return false;
+  if (ceiling !== undefined && floor !== undefined) {
+    return value >= bound(floor) && value <= bound(ceiling);
   }
-  if (ceiling !== undefined) return value <= ceiling + fragment;
-  if (floor > 0) return value >= floor + fragment;
+  if (ceiling !== undefined) return value <= bound(ceiling);
+  if (floor !== undefined) return value >= bound(floor);
   return value >= targets[stat];
 }
 
@@ -391,12 +396,12 @@ export function getUpgradeMetrics(
   const deficits = STATS.map(stat => {
     const final = finalTotals[stat];
     const ceiling = constraints.maximums?.[stat];
-    const floor = constraints.minimums?.[stat] || 0;
+    const floor = constraints.minimums?.[stat];
     const exact = Boolean(constraints.exact?.[stat]);
     const fragment = fragments[stat] || 0;
     if (exact) return Math.abs(final - targets[stat]);
-    if (ceiling !== undefined && floor <= 0) return 0;
-    if (floor > 0) return Math.max(0, floor + fragment - final);
+    if (ceiling !== undefined && floor === undefined) return 0;
+    if (floor !== undefined) return Math.max(0, Math.max(0, Math.min(200, Number(floor) + fragment)) - final);
     return Math.max(0, targets[stat] - final);
   });
   const excesses = STATS.map(stat => {
@@ -405,7 +410,7 @@ export function getUpgradeMetrics(
     const exact = Boolean(constraints.exact?.[stat]);
     const fragment = fragments[stat] || 0;
     if (exact) return Math.abs(final - targets[stat]);
-    if (ceiling !== undefined) return Math.max(0, final - (ceiling + fragment));
+    if (ceiling !== undefined) return Math.max(0, final - Math.max(0, Math.min(200, Number(ceiling) + fragment)));
     return Math.max(0, final - targets[stat]);
   });
   const reachedCount = STATS.filter(stat =>
@@ -420,15 +425,18 @@ export function getUpgradeMetrics(
   // or picked over one that respects it. Constraints are in the armor-needed
   // domain, so add the fragment bonus back to evaluate the final totals.
   const constraintBoundaryViolations = STATS.filter(stat => {
-    const floor = constraints.minimums?.[stat] || 0;
+    const floor = constraints.minimums?.[stat];
     const ceiling = constraints.maximums?.[stat];
     const fragment = fragments[stat] || 0;
-    return (ceiling !== undefined && finalTotals[stat] > ceiling + fragment)
-      || (floor > 0 && finalTotals[stat] < floor + fragment);
+    return (ceiling !== undefined && finalTotals[stat] > Math.max(0, Math.min(200, Number(ceiling) + fragment)))
+      || (floor !== undefined && finalTotals[stat] < Math.max(0, Math.min(200, Number(floor) + fragment)));
   }).length;
   const constraintExactViolations = STATS.filter(stat =>
     constraints.exact?.[stat] && finalTotals[stat] !== targets[stat]).length;
   return {
+    hardRulesSatisfied: constraintBoundaryViolations === 0 && constraintExactViolations === 0
+      && STATS.every(stat => (!constraints.force0?.[stat] || finalTotals[stat] === 0)
+        && (!constraints.le100?.[stat] || finalTotals[stat] <= 100)),
     allReached: reachedCount === STATS.length
       && constraintBoundaryViolations === 0
       && constraintExactViolations === 0,
@@ -451,6 +459,10 @@ export function getUpgradeMetrics(
 }
 
 export function compareUpgradeMetrics(left, right) {
+  if (left.hardRulesSatisfied !== right.hardRulesSatisfied
+      && left.hardRulesSatisfied !== undefined && right.hardRulesSatisfied !== undefined) {
+    return left.hardRulesSatisfied ? -1 : 1;
+  }
   const boundaryOrder = (left.constraintBoundaryViolations || 0)
     - (right.constraintBoundaryViolations || 0);
   if (boundaryOrder !== 0) return boundaryOrder;
@@ -543,7 +555,25 @@ export function evaluateUpgradePieces(
     });
     const tuningCapabilities = pieces.map(piece =>
       getUpgradeTuningCapability(piece, onlyPlus5Tuning));
-    const automaticEvaluation = evaluateConfig(
+    let exact = findFixedTargetWitness({configs, target: armorTarget,
+      numPlus5: budget.numPlus5, numPlus10: budget.numPlus10, tuningCapabilities});
+    if (!exact && STATS.some(stat => targets[stat] === 0 || targets[stat] === 200)) {
+      const baseTotal = configs.reduce((sum, config) => sum + STATS.reduce((value, stat) => value + config.baseStats[stat], 0), 0);
+      for (const balanced of budget.allowedPlus3Counts) {
+        const total = baseTotal + balanced * 3 + budget.numPlus5 * 5 + budget.numPlus10 * 10;
+        for (const point of visibleArmorTargets(targets, fragments, total, 8).targets) {
+          exact = findFixedTargetWitness({configs, target: point, numPlus5: budget.numPlus5, numPlus10: budget.numPlus10, tuningCapabilities});
+          if (exact) break;
+        }
+        if (exact) break;
+      }
+    }
+    if (exact && !getUpgradeMetrics(finalizeUpgradeTotals(exact.totals, fragments), targets,
+      0, normalizedRequiredStats, null, userConstraints, fragments).hardRulesSatisfied) exact = null;
+    const automaticEvaluation = exact ? {...exact,
+      rank: scoreStatsRank(exact.totals, scoringTarget, constraints),
+      score: scoreStats(exact.totals, scoringTarget, constraints),
+    } : evaluateConfig(
       configs, scoringTarget, budget.numPlus5, budget.numPlus10, 0, constraints,
       null,
       // The legacy Upgrade outer search evaluates many thousands of candidate
@@ -571,14 +601,39 @@ export function evaluateUpgradePieces(
     }
   }
   const finalTotals = finalizeUpgradeTotals(evaluation.totals, fragments);
+  const metrics = getUpgradeMetrics(finalTotals, targets, evaluation.score, normalizedRequiredStats,
+    evaluation.rank, userConstraints, fragments);
+  if (reassignModifiers && !metrics.hardRulesSatisfied) {
+    const budget = getUpgradeModifierBudget(pieces, {reassignModifiers: true, onlyPlus5Tuning});
+    const lower = STATS.map(stat => {
+      const fragment = fragments[stat] || 0;
+      const visible = userConstraints.exact?.[stat] ? targets[stat]
+        : userConstraints.minimums?.[stat] === undefined ? 0 : Math.max(0, Math.min(200, Number(userConstraints.minimums[stat]) + fragment));
+      return visible <= 0 ? null : visible - fragment;
+    });
+    const upper = STATS.map(stat => {
+      const fragment = fragments[stat] || 0;
+      let visible = userConstraints.exact?.[stat] ? targets[stat]
+        : userConstraints.maximums?.[stat] === undefined ? 200 : Math.max(0, Math.min(200, Number(userConstraints.maximums[stat]) + fragment));
+      if (userConstraints.force0?.[stat]) visible = 0;
+      if (userConstraints.le100?.[stat]) visible = Math.min(visible, 100);
+      return visible >= 200 ? null : visible - fragment;
+    });
+    const feasible = findFixedRuleWitness({configs, numPlus5: budget.numPlus5, numPlus10: budget.numPlus10,
+      tuningCapabilities: pieces.map(piece => getUpgradeTuningCapability(piece, onlyPlus5Tuning)), minimums: lower, maximums: upper});
+    if (feasible) {
+      const final = finalizeUpgradeTotals(feasible.totals, fragments);
+      const rank = scoreStatsRank(feasible.totals, scoringTarget, constraints);
+      const score = scoreStats(feasible.totals, scoringTarget, constraints);
+      const feasibleMetrics = getUpgradeMetrics(final, targets, score, normalizedRequiredStats, rank, userConstraints, fragments);
+      if (compareUpgradeMetrics(feasibleMetrics, metrics) < 0) return {...feasible, configs, finalTotals: final, rank, score, metrics: feasibleMetrics};
+    }
+  }
   return {
     ...evaluation,
     configs,
     finalTotals,
-    metrics: getUpgradeMetrics(
-      finalTotals, targets, evaluation.score, normalizedRequiredStats,
-      evaluation.rank, userConstraints, fragments
-    ),
+    metrics,
   };
 }
 
@@ -1202,13 +1257,9 @@ function findExactUpgradePlanIterative(
   onlyPlus5Tuning, userConstraints = {},
 ) {
   if (!reassignModifiers) return null;
-  const exactPointModelComplete = STATS.every(stat =>
-    userConstraints.exact?.[stat] === true
-    && targets[stat] > 0
-    && targets[stat] < 200);
-  // This producer searches one exact Armor-domain point. Fuzzy rules and the
-  // visible 0/200 clamp describe intervals, so they belong to the bounded
-  // fallback until an interval-complete replacement oracle exists.
+  const exactPointModelComplete = STATS.every(stat => userConstraints.exact?.[stat] === true);
+  // Full visible targets use every budget-consistent armor preimage. Partial
+  // fuzzy rules use the bounded fallback and cannot claim minimum replacement.
   if (!exactPointModelComplete) return null;
   const unlocked = pieces
     .map((piece, index) => piece.locked ? -1 : index)
@@ -1223,7 +1274,7 @@ function findExactUpgradePlanIterative(
   });
   const tuningModelComplete = pieces.every(piece =>
     getUpgradeTuningCapability(piece, onlyPlus5Tuning).complete);
-  const proofModelComplete = tuningModelComplete && exactPointModelComplete;
+  let proofModelComplete = tuningModelComplete && exactPointModelComplete;
 
   for (let replacementDepth = 0; replacementDepth <= unlocked.length; replacementDepth++) {
     let bestAtDepth = null;
@@ -1243,17 +1294,32 @@ function findExactUpgradePlanIterative(
       const allowedFreePlus3Counts = onlyPlus5Tuning
         ? [0]
         : Array.from({ length: replacementDepth + 1 }, (_, count) => count);
-      const witnesses = findExactPartialConfigWitnesses({
-        fixedEntries,
-        freePieceCount: replacementDepth,
-        target: armorTarget,
-        numPlus5: budget.numPlus5,
-        numPlus10: budget.numPlus10,
-        allowedFreePlus3Counts,
-        // This is an existential query at the current depth. One witness is
-        // sufficient; depths with no witness are still enumerated completely.
-        maxWitnesses: 1,
-      });
+      const baseTotal = fixedEntries.reduce((sum, entry) => sum + STATS.reduce((value, stat) =>
+        value + entry.config.baseStats[stat], 0), replacementDepth * 90);
+      const points = new Map();
+      if (STATS.some(stat => targets[stat] === 0 || targets[stat] === 200)) {
+        for (const balanced of budget.allowedPlus3Counts) {
+          const preimage = visibleArmorTargets(targets, fragments,
+            baseTotal + balanced * 3 + budget.numPlus5 * 5 + budget.numPlus10 * 10, 128);
+          if (!preimage.complete) proofModelComplete = false;
+          for (const point of preimage.targets) points.set(STATS.map(stat => point[stat]).join(","), point);
+        }
+      } else points.set("point", armorTarget);
+      const witnesses = [];
+      for (const point of points.values()) {
+        witnesses.push(...findExactPartialConfigWitnesses({
+          fixedEntries,
+          freePieceCount: replacementDepth,
+          target: point,
+          numPlus5: budget.numPlus5,
+          numPlus10: budget.numPlus10,
+          allowedFreePlus3Counts,
+          // This is an existential query at the current depth. One witness is
+          // sufficient; depths with no witness are still enumerated completely.
+          maxWitnesses: 1,
+        }));
+        if (witnesses.length) break;
+      }
 
       for (const witness of witnesses) {
         const fixedCount = fixed.length;
@@ -1312,7 +1378,7 @@ function findExactUpgradePlanIterative(
               ...(proofModelComplete ? { minimal: true } : {
                 limitation: !tuningModelComplete
                   ? "one or more Tuning capabilities are unknown"
-                  : "minimum proof requires six exact, non-clamped visible rules",
+                  : "clamp preimage exceeded its exact enumeration budget",
               }),
             },
           };
@@ -1520,6 +1586,7 @@ function getSingleSwapSeeds(pieces, rankings) {
 export function analyzeUpgradeCandidates(
   pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}
 ) {
+  pieces = pieces.map(normalizePieceNumbers);
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   // "Only +5/-5" applies to every plan this analysis proposes: the owned +3
   // pieces are read as +5/-5 pieces up front, so no seed, refinement, plan
@@ -1540,6 +1607,20 @@ export function analyzeUpgradeCandidates(
     ? evaluateUpgradePieces(enteredPieces, targets, fragments, false, normalizedRequiredStats, false, userConstraints)
     : evaluatePieces(enteredPieces, false);
   const baseline = evaluatePieces(pieces, reassignModifiers);
+  const modifierBudget = getUpgradeModifierBudget(pieces, {reassignModifiers, onlyPlus5Tuning});
+  const maximumBudget = pieces.reduce((sum, piece) => {
+    const current = STATS.reduce((total, stat) => total + getUpgradeConfig(piece).baseStats[stat], 0);
+    return sum + (piece.locked ? current : Math.max(90, current));
+  }, 0) + (onlyPlus5Tuning ? 0 : 15) + modifierBudget.numPlus5 * 5 + modifierBudget.numPlus10 * 10;
+  const minimumGoalBudget = STATS.reduce((sum, stat) => {
+    const physicalMinimum = pieces.reduce((total, piece) => total + Math.min(
+      getUpgradeConfig(piece).baseStats[stat] - 5, piece.locked ? Infinity : 0), 0);
+    const goalMinimum = userConstraints.maximums?.[stat] !== undefined && !userConstraints.exact?.[stat]
+      ? userConstraints.minimums?.[stat] ?? -Infinity
+      : targets[stat] > 0 ? targets[stat] - (fragments[stat] || 0) : -Infinity;
+    return sum + Math.max(physicalMinimum, goalMinimum);
+  }, 0);
+  const fullGoalBudgetImpossible = minimumGoalBudget > maximumBudget;
   let rankings = [];
   let plan = null;
   if (!baseline.metrics.allReached) {
@@ -1563,6 +1644,11 @@ export function analyzeUpgradeCandidates(
     );
     let fullTargetSearch = fullTargetSearchCache.has(fullTargetCacheKey)
       ? structuredClone(fullTargetSearchCache.get(fullTargetCacheKey)) : null;
+    if (!fullTargetSearch && fullGoalBudgetImpossible && !allStatsRequired) {
+      // This only rules out all UX goals together; it is not an infeasibility
+      // certificate for the user's smaller hard/required-rule domain.
+      fullTargetSearch = {plan: null, rankings: []};
+    }
     if (!fullTargetSearch) {
       const fullTargetEvaluator = allStatsRequired
         ? evaluatePieces

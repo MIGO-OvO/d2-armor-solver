@@ -133,7 +133,7 @@ export function solveLoadout({
 // targets in the visible domain. Convert once, before ProblemSpec creation.
 function upgradeVisibleConstraints(constraints = {}, fragments = {}, targets = {}, requiredStats = []) {
   const convert = values => Object.fromEntries(Object.entries(values || {}).map(([stat, value]) =>
-    [stat, Math.max(0, Math.min(200, value + (fragments[stat] || 0)))]));
+    [stat, Math.max(0, Math.min(200, Number(value) + Number(fragments[stat] || 0)))]));
   const minimums = convert(constraints.minimums);
   const maximums = convert(constraints.maximums);
   for (const stat of requiredStats) if (maximums[stat] === undefined) minimums[stat] = Math.max(minimums[stat] ?? 0, targets[stat] ?? 0);
@@ -149,7 +149,7 @@ export function calculateReachability({
   lockedTargets,
   probeTarget = null,
 }) {
-  const targetForSpec = probeTarget || lockedTargets;
+  const targetForSpec = {...(lockedTargets || {}), ...(probeTarget || {})};
   const constraints = {
     exact: Object.fromEntries(Object.keys(targetForSpec || {}).map(stat => [stat, true])),
   };
@@ -164,6 +164,15 @@ export function calculateReachability({
     numPlus3,
     pieces: fixedPiece ? [fixedPiece] : [],
   });
+  if (probeTarget && Object.entries(lockedTargets || {}).some(([stat, value]) =>
+    probeTarget[stat] !== undefined && Number(probeTarget[stat]) !== Number(value))) {
+    problemSpec.valid = false;
+    problemSpec.errors.push("probeTarget contradicts lockedTargets");
+  }
+  if (!fixedPiece) {
+    problemSpec.valid = false;
+    problemSpec.errors.push("fixedPiece is required for reachability");
+  }
   if (!problemSpec.valid) {
     return attachResultCertificate(
       { feasible: false, ranges: {} },
@@ -176,6 +185,11 @@ export function calculateReachability({
       }),
     );
   }
+  ({numPlus5, numPlus10, numPlus3} = problemSpec.budget);
+  fixedPiece = problemSpec.solverContext.fixedConfig;
+  fragments = problemSpec.constraintModel.fragments;
+  lockedTargets = Object.fromEntries(Object.keys(lockedTargets || {}).map(stat =>
+    [stat, problemSpec.constraintModel.target[stat]]));
   const result = calculateReachableRanges(
     fixedPiece,
     numPlus5,
@@ -197,18 +211,19 @@ export function calculateReachability({
   const probeVerification = probe?.witness
     ? verifyWitness(problemSpec, probe.witness)
     : null;
+  if (probeVerification?.valid) result.feasible = true;
   const hasClampBoundary = [
     ...Object.values(lockedTargets || {}),
     ...Object.values(probeTarget || {}),
   ].some(value => Number(value) === 0 || Number(value) === 200);
   // The current DP proves point rules only. A caller-supplied intervalProof
   // Boolean is not an interval-complete producer.
-  const clampSearchLimited = hasClampBoundary;
+  const clampSearchLimited = hasClampBoundary && result.searchStats?.complete === false;
   const probeStatus = probe?.witness && !probeVerification?.valid
     ? RESULT_STATUS.SEARCH_LIMIT_REACHED
     : probe?.status;
   return attachResultCertificate(result, createResultCertificate({
-    status: clampSearchLimited
+    status: probeStatus === RESULT_STATUS.EXACT_TARGET_PROVEN ? probeStatus : clampSearchLimited
       ? RESULT_STATUS.SEARCH_LIMIT_REACHED
       : probeStatus || (result.feasible
         ? RESULT_STATUS.RULE_FEASIBLE_PROVEN
@@ -218,7 +233,7 @@ export function calculateReachability({
     witness: probe?.witness || null,
     proof: probe?.proof || createProofEvidence(problemSpec, {
       producer: "reachability-dp",
-      method: "point-rule-dynamic-programming",
+      method: hasClampBoundary ? "interval-complete-dynamic-programming" : "point-rule-dynamic-programming",
       complete: !clampSearchLimited,
       statesExamined: result.searchStats?.statesExamined ?? 0,
       assumptions: ["known-data", "complete-catalog", "point-rules-only"],
@@ -269,8 +284,8 @@ export function analyzeUpgrade({
   }
   const result = analyzeUpgradeCandidates(
     pieces,
-    targets,
-    fragments,
+    problemSpec.constraintModel.target,
+    problemSpec.constraintModel.fragments,
     reassignModifiers,
     requiredStats,
     onlyPlus5Tuning,
@@ -356,6 +371,7 @@ export function solveInventory(payload) {
     constraints: upgradeVisibleConstraints(payload?.userConstraints, payload?.fragments, payload?.targets, payload?.requiredStats),
     targetDomain: STAT_DOMAIN.VISIBLE,
     pieces: payload?.items,
+    runtimeOptions: {verifyInventoryCandidates: true},
     inventoryContext: {
       setRequirement: payload?.setRequirement || null,
       reassignModifiers: payload?.reassignModifiers !== false,
@@ -378,7 +394,8 @@ export function solveInventory(payload) {
       proof: createProofEvidence(problemSpec, { method: "input-validation" }),
     }));
   }
-  const result = solveInventoryLoadout(payload, problemSpec);
+  const result = solveInventoryLoadout({...payload,
+    targets: problemSpec.constraintModel.target, fragments: problemSpec.constraintModel.fragments}, problemSpec);
   if (!result) return result;
   for (const entry of result.results || []) {
     const verification = sealWitness(problemSpec, entry);
@@ -409,7 +426,7 @@ export function solveInventory(payload) {
       witnessDomain: STAT_DOMAIN.VISIBLE, executionStatus: entry.execution?.executionStatus || EXECUTION_STATUS.UNVERIFIED,
       proof: result.proof }));
   }
-  result.unverifiedCount = result.results.filter(entry => !entry.verified).length;
+  result.unverifiedCount = (result.rejectedWitnesses || 0) + result.results.filter(entry => !entry.verified).length;
   result.results = result.results.filter(entry => entry.verified);
   return attachResultCertificate(result, certificateForWitness({
     problemSpec,

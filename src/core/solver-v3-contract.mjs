@@ -1,4 +1,4 @@
-import { ARCHETYPES, BASE_CONFIGS, STATS } from "./armor-model.mjs";
+import { ARCHETYPES, BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
 
 export const SOLVER_V3_SCHEMA_VERSION = 3;
 
@@ -31,7 +31,7 @@ const EXECUTION_STATUS_VALUES = new Set(Object.values(EXECUTION_STATUS));
 const issuedProofEvidence = new WeakSet();
 const PROOF_PRODUCERS = Object.freeze({
   "exact-target-oracle": ["exact-target-oracle"],
-  "reachability-dp": ["point-rule-dynamic-programming", "interval-complete-dynamic-programming"],
+  "reachability-dp": ["point-rule-dynamic-programming", "interval-complete-dynamic-programming", "budget-reduced-interval-oracle"],
   "inventory-frontier": ["complete-inventory-frontier"],
   "global-fuzzy-enumeration": ["complete-global-fuzzy-enumeration"],
 });
@@ -255,6 +255,19 @@ export function physicalBaseStats(piece = {}) {
   return base;
 }
 
+// Numeric strings are accepted at the API boundary. Never let the search
+// consume the pre-normalization vectors after the contract accepted them.
+export function normalizePieceNumbers(piece) {
+  const normalized = {...piece};
+  for (const key of ["baseStats", "effectiveBaseStats", "optimizationBaseStats", "physicalBaseStats"]) {
+    if (piece[key]) normalized[key] = Object.fromEntries(Object.entries(piece[key]).map(([stat, value]) => [stat, Number(value)]));
+  }
+  for (const key of ["armorModSize", "masterworkTier", "setHash"]) {
+    if (piece[key] !== undefined && piece[key] !== null) normalized[key] = Number(piece[key]);
+  }
+  return normalized;
+}
+
 function projectedPhysicalBaseStats(piece, base) {
   if (piece.optimizationBaseStats) return { ...piece.optimizationBaseStats };
   const projected = { ...base };
@@ -290,8 +303,9 @@ function normalizeSocketCapability(socket) {
 export function createPieceCapability(piece = {}, slotIndex = 0) {
   piece ||= {};
   const errors = [];
+  const rawBaseStats = physicalBaseStats(piece);
   const baseStats = normalizeStatObject(
-    physicalBaseStats(piece),
+    rawBaseStats,
     0,
     `pieces[${slotIndex}].baseStats`,
     errors,
@@ -310,8 +324,15 @@ export function createPieceCapability(piece = {}, slotIndex = 0) {
   const allowedTuningStats = normalizeAllowedTuningStats(piece);
   const fixed = own(piece, "tunedStat") ? piece.tunedStat : piece.tuningTo ?? piece.tuningStat;
   const tunedStat = !piece.exotic && STATS.includes(fixed) ? fixed : null;
+  const masterworkStats = getMasterworkStats(piece);
+  if (Array.isArray(piece.masterworkStats) && (!masterworkStats
+      || stableSerialize([...piece.masterworkStats].sort()) !== stableSerialize([...masterworkStats].sort()))) {
+    errors.push(`pieces[${slotIndex}] has contradictory masterwork stats`);
+  }
+  const mathDataKnown = errors.length === 0 && piece.dataConfidence?.stats !== "unknown"
+    && STATS.every(stat => own(rawBaseStats, stat) && finiteInteger(rawBaseStats[stat]) !== null);
   const executionKnown = sockets.length > 0
-    && sockets.every(socket => socket.candidateState === "known")
+    && sockets.every(socket => ["known", "full"].includes(socket.candidateState))
     && tuningConfidence !== "unknown"
     && energyCapacity !== null && energyUsed !== null;
 
@@ -358,6 +379,8 @@ export function createPieceCapability(piece = {}, slotIndex = 0) {
       capacity: energyCapacity,
       used: energyUsed,
     },
+    masterworkStats,
+    mathDataKnown,
     executionKnown,
     valid: errors.length === 0,
     errors,
@@ -389,6 +412,17 @@ export function createPieceCapability(piece = {}, slotIndex = 0) {
     equipped: capability.equipped,
   });
   return capability;
+}
+
+export function hasCompletePieceMath(capability, reassignModifiers = false) {
+  if (!capability.mathDataKnown) return false;
+  if (reassignModifiers) return Array.isArray(capability.allowedTuningStats)
+    && capability.tuningConfidence !== "unknown" && capability.masterworkStats?.length === 3;
+  if (capability.tuningInstalled === false) return true;
+  const { mode, from, to } = capability.tuningAssignment;
+  if (["plus3", "+3"].includes(mode)) return capability.masterworkStats?.length === 3;
+  return ["shift", "+5-5"].includes(mode) && STATS.includes(from) && from !== to
+    && capability.allowedTuningStats?.includes(to) === true;
 }
 
 export function createProblemSpec({
@@ -434,6 +468,14 @@ export function createProblemSpec({
     ? Object.fromEntries(Object.entries(exoticSettings)
       .filter(([key]) => key !== "config"))
     : null;
+  const fixedInput = exoticSettings?.config
+    || (operation === "calculateReachability" ? pieces?.[0] : null);
+  const fixedCapability = fixedInput ? createPieceCapability(fixedInput) : null;
+  const fixedConfig = fixedInput ? {
+    ...fixedInput, baseStats: {...fixedCapability.baseStats},
+    masterworkStats: fixedCapability.masterworkStats,
+  } : null;
+  if (fixedConfig && !fixedConfig.masterworkStats) errors.push("fixed config has no valid framework");
 
   return {
     schemaVersion: SOLVER_V3_SCHEMA_VERSION,
@@ -443,7 +485,7 @@ export function createProblemSpec({
     budget,
     runtimeOptions: { ...runtimeOptions },
     solverContext: {
-      fixedConfig: exoticSettings?.config || null,
+      fixedConfig,
       exoticSelection,
     },
     inventoryContext,
@@ -596,7 +638,8 @@ export function normalizeProofEvidence(problemSpec, proof = {}) {
   }
   if (["solve", "calculateReachability"].includes(problemSpec?.operation)
       && problemSpec.pieceCapabilities.some(capability =>
-        Object.values(capability.baseStats).some(value => value < 5))) {
+        !capability.mathDataKnown || !capability.masterworkStats
+        || Object.values(capability.baseStats).some(value => value < 5))) {
     errors.push("fixed-piece data is outside the nonnegative tuning proof domain");
   }
   if (proof.producer === "reachability-dp"
@@ -604,7 +647,9 @@ export function normalizeProofEvidence(problemSpec, proof = {}) {
     errors.push("non-point rules require an interval-complete proof");
   }
   if (proof.producer === "inventory-frontier"
-      && problemSpec?.pieceCapabilities?.some(capability => !capability.executionKnown)) {
+      && problemSpec?.pieceCapabilities?.some(capability => !hasCompletePieceMath(
+        capability, problemSpec.inventoryContext?.reassignModifiers !== false,
+      ))) {
     errors.push("one or more inventory capabilities contain unknown data");
   }
   if (!["target-point", "rule-domain"].includes(proof.scope)) errors.push("unknown proof scope");
@@ -701,15 +746,7 @@ export function satisfiesConstraintModel(witness, constraintModel, domain = STAT
   });
 }
 
-function resolveMasterworkStats(piece) {
-  const archetypeId = piece?.archetype || piece?.archetypeId;
-  const archetype = ARCHETYPES.find(candidate => candidate.id === archetypeId);
-  if (!archetype || !STATS.includes(piece?.tertiary)) return null;
-  return STATS.filter(stat =>
-    stat !== archetype.primary
-    && stat !== archetype.secondary
-    && stat !== piece.tertiary);
-}
+const resolveMasterworkStats = getMasterworkStats;
 
 export function samePhysicalPiece(left, right) {
   const a = left?.sourceId ?? left?.id ?? left?.instanceId;
