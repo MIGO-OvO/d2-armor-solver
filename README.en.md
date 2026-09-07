@@ -16,6 +16,12 @@ A six-stat armor solver for Destiny 2 Armor 3.0. You can work out whether a targ
 
 It's a fully static browser app: no backend, and no signup for this project. The root path is a portal with online and offline entry points, and the solver lives under `app/`. Stat targets, DIM lists, and saved builds stay in the current browser. Bungie login only reads your real inventory; when a build is made entirely of items you own, you can equip it in game in one click.
 
+## Solver V3 result semantics
+
+All four solving paths share one integer constraint model, canonical comparator, and result certificate. `EXACT_TARGET_PROVEN` means the returned config, Tuning, and stat mods recompute to the exact target; `RULE_FEASIBLE_PROVEN` means the witness satisfies every hard rule; `INFEASIBLE_PROVEN` is emitted only after exhaustive search; and `SEARCH_LIMIT_REACHED` means current-best witness only, never “no exact solution” or “globally closest.” Presentation limits are applied only after the correctness conclusion.
+
+Execution capability is separate. Complete socket, energy, plug, and fixed-Tuning evidence is `VERIFIED`; incomplete evidence is `UNVERIFIED`; a missing owned instance or failed socket preflight is `BLOCKED`. Algorithmic feasibility does not by itself promise one-click equip, so the UI reports both conclusions.
+
 ## Live Site
 
 Portal: [https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)
@@ -49,7 +55,7 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 ### v2.0.7 (latest)
 
 - Improved real-inventory search to rank target quality first and keep a broader, target-aware frontier for large inventories, so an exact build is not discarded by an early local score or by saving one more owned piece.
-- Aligned exact rules between the existing-loadout and from-scratch paths. When the fast replacement search misses an exact build, the complete solver now supplies a feasible plan while preserving fixed Legendary `+5` rolls and freely selectable Exotic tuning.
+- Aligned exact rules between the existing-loadout and from-scratch paths. When the fast replacement search misses an exact build, an independent exact-target query now supplies a feasible witness while preserving fixed Legendary `+5` rolls and freely selectable Exotic tuning.
 - Fixed Exotic Class Item right-column tertiary-stat priorities, correcting eight affected `30/25/20` perk combinations involving Wormhusk, Armamentarium, Starfire, Swarm, and Harmony; added regression coverage for all 192 combinations across the three classes.
 
 ### v2.0.6

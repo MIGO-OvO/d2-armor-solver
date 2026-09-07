@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ARCHETYPES, BASE_CONFIGS, createExoticConfig } from "../src/core/armor-model.mjs";
+import { ARCHETYPES, BASE_CONFIGS, STATS as STAT_IDS, createExoticConfig } from "../src/core/armor-model.mjs";
 import { rankInventoryPlans, assignmentCanReachExact } from "../src/core/inventory-plan.mjs";
 import { runSolver } from "../src/core/solver.mjs";
+import { createProblemSpec } from "../src/core/solver-v3-contract.mjs";
 import { normalizeDimItem, parseCsv } from "../src/core/dim-csv.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
@@ -17,7 +18,8 @@ function makeSolution(configs = BASE_CONFIGS.slice(0, 5), exoticIndex = null) {
       to: index % 2 === 0 ? "melee" : "grenade",
     })),
     modAssignments: Object.fromEntries(configs.map((_, index) => [index, null])),
-    totals: {},
+    totals: Object.fromEntries(STAT_IDS.map(stat => [stat, configs.reduce((sum, c, index) =>
+      sum + c.baseStats[stat] + (stat === 'health' ? -5 : stat === (index % 2 === 0 ? 'melee' : 'grenade') ? 5 : 0), 0)])),
     score: 0,
     exoticIndex,
   };
@@ -39,6 +41,11 @@ function makeItem(solution, index, overrides = {}) {
     tertiary: config.tertiary,
     tuningMode: tuning.mode === "+3" ? "plus3" : "shift",
     tuningTo: tuning.to,
+    tunedStat: tuning.to,
+    allowedTuningStats: [...STAT_IDS],
+    baseStats: {...config.baseStats},
+    effectiveBaseStats: {...config.baseStats},
+    optimizationBaseStats: {...config.baseStats},
     setHash: null,
     ...overrides,
   };
@@ -143,7 +150,7 @@ test("set farming never assigns a regular set to the fixed Exotic slot", () => {
   assert.equal(plan.pieces.filter(piece => piece.farmSetHash === setHash).length, 4);
 });
 
-test("a named Exotic recommends the closest roll when no copy is usable", () => {
+test("a named Exotic with unknown directional capability is not treated as usable", () => {
   const solution = makeSolution();
   const fixedExotic = {
     classId: "hunter",
@@ -151,13 +158,14 @@ test("a named Exotic recommends the closest roll when no copy is usable", () => 
     hash: 9001,
     name: "Selected Exotic",
   };
-  // Both copies run a +3 Tuning mod, which cannot serve the solution's +5/-5
-  // slot; the closest roll is still recommended for farming reference.
+  // A +3 assignment alone does not reveal which directional destinations the
+  // Exotic supports, so neither copy is a verified match for this solution.
   const closeRoll = makeItem(solution, 0, {
     id: "close-roll",
     hash: fixedExotic.hash,
     name: fixedExotic.name,
     exotic: true,
+    dataConfidence: { tuning: "unknown" },
     tuningMode: "plus3",
     tuningTo: null,
   });
@@ -182,7 +190,36 @@ test("a named Exotic recommends the closest roll when no copy is usable", () => 
   assert.equal(plan.farmCount, 1);
   assert.equal(plan.pieces[0].item, null);
   assert.equal(plan.pieces[0].closestItem.id, "close-roll");
-  assert.deepEqual(plan.pieces[0].closestMismatch.fields, ["tuningMode"]);
+  assert.deepEqual(plan.pieces[0].closestMismatch.fields, ["tuningCapability"]);
+});
+
+test("a named Exotic can change assignment without changing owned identity", () => {
+  const solution = makeSolution();
+  const fixedExotic = {
+    classId: "hunter",
+    slot: "helmet",
+    hash: 9001,
+    name: "Selected Exotic",
+  };
+  const flexibleRoll = makeItem(solution, 0, {
+    id: "flexible-roll",
+    hash: fixedExotic.hash,
+    name: fixedExotic.name,
+    exotic: true,
+    allowedTuningStats: [...STATS],
+    tuningMode: "plus3",
+    tuningTo: null,
+  });
+  const legendaryPieces = [1, 2, 3, 4].map(index => makeItem(solution, index));
+  const [plan] = rankInventoryPlans({
+    solutions: [solution],
+    items: [flexibleRoll, ...legendaryPieces],
+    classId: "hunter",
+    fixedExotic,
+  });
+
+  assert.equal(plan.farmCount, 0);
+  assert.equal(plan.pieces[0].item.id, "flexible-roll");
 });
 
 test("Exotic Class Item solutions map the fixed config to the class item slot", () => {
@@ -222,7 +259,14 @@ const EXOTIC_SETTINGS = {
 const SOLVE_TARGET = { health: 90, melee: 60, grenade: 45, super: 75, class: 60, weapons: 120 };
 
 function solveExoticSolution() {
-  return runSolver(SOLVE_TARGET, 0, 0, 0, {}, EXOTIC_SETTINGS)[0];
+  return runSolver(createProblemSpec({
+    target: SOLVE_TARGET,
+    numPlus5: 0,
+    numPlus10: 0,
+    numPlus3: 0,
+    pieces: [EXOTIC_SETTINGS.config],
+    exoticSettings: EXOTIC_SETTINGS,
+  }))[0];
 }
 
 const DIM_HEADER = [
@@ -239,8 +283,10 @@ const DIM_HEADER = [
 const DIM_EXOTIC_CLASS_ITEM_ROW = [
   "Relativism", "2809120022", "relativism-1", "Exotic", "5", "猎人披风", "猎人",
   "", "", "", "5", "Vault", "false", "500",
-  "10", "20", "10", "20", "10", "35", "105",
-  "5", "25", "5", "20", "5", "30", "90",
+  // Raw non-framework values are 0; tier-5 masterwork raises them to 5.
+  // This fixture must physically match the solver's 90-point config, not 105.
+  "5", "20", "5", "20", "5", "35", "90",
+  "0", "25", "0", "20", "0", "30", "75",
 ].join(",");
 
 function makeExoticClassItemFromDIM() {

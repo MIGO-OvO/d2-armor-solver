@@ -84,6 +84,7 @@ test("armor items map to the full solver shape with correct types", () => {
   assert.equal(typeof item.archetypeId, "string");
   assert.equal(typeof item.tertiary, "string");
   assert.equal(item.tuningStat, null);
+  assert.equal(item.tunedStat, null);
   assert.equal(typeof item.masterworkTier, "number");
   assert.equal(typeof item.owner, "string");
   assert.equal(typeof item.equipped, "boolean");

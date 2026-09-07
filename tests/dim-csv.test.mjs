@@ -37,6 +37,7 @@ test("normalizeDimItem maps DIM fields and set membership", () => {
   assert.equal(item.archetypeId, "Powerhouse");
   assert.equal(item.tertiary, "super");
   assert.equal(item.tuningStat, "melee");
+  assert.equal(item.tunedStat, "melee");
   assert.equal(sumBaseStats(item), 75);
   assert.ok(item.setHash);
 });

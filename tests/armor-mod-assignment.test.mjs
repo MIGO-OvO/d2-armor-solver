@@ -8,6 +8,7 @@ import {
   TUNING_MOD_HASH_BY_TUNING,
 } from "../src/core/armor-mods.data.mjs";
 import { CANDIDATE_STATE, SOCKET_ROLE } from "../src/core/armor-sockets.mjs";
+import { EXECUTION_STATUS } from "../src/core/solver-v3-contract.mjs";
 
 const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
 
@@ -121,6 +122,8 @@ test("five +10 stat mods all fit and produce one write per piece", () => {
   assert.equal(result.valid, true, JSON.stringify(result.unassignedMods));
   assert.equal(result.plugOperations.length, 10);
   assert.ok(result.plugOperations.every(op => op.plugItemHash > 0));
+  assert.equal(result.executionStatus, EXECUTION_STATUS.VERIFIED);
+  assert.deepEqual(result.unverifiedMods, []);
 });
 
 test("+10 to +5 swap releases energy and is a single direct write", () => {
@@ -154,6 +157,7 @@ test("insufficient energy is a blocking unassigned, never a skipped success", ()
   assert.equal(energyMiss.slot, "chest");
   // The other four pieces still resolve; only the energy-infeasible one blocks.
   assert.equal(result.unassignedMods.length, 1);
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
 });
 
 test("tuning only enters the legendary armor whose fixed stat matches", () => {
@@ -250,6 +254,9 @@ test("unknown candidates never reject: the plan stays valid and writes proceed",
   const result = assignArmorMods({ pieces: makePieces(), inventory: items, tuningAssignments, modAssignments });
   assert.equal(result.valid, true, JSON.stringify(result.unassignedMods));
   assert.equal(result.plugOperations.length, 10);
+  assert.equal(result.executionStatus, EXECUTION_STATUS.UNVERIFIED);
+  assert.ok(result.unverifiedMods.some(item =>
+    item.reason === "candidateAvailabilityUnknown"));
 });
 
 test("a known plug set rejects plugs absent from it (known empty blocks)", () => {

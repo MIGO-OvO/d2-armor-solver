@@ -1,5 +1,6 @@
 import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
 import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
+import { createPieceCapability, physicalBaseStats } from "./solver-v3-contract.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -16,8 +17,22 @@ function archetypeIdForName(name) {
   return normalizeArchetypeId(name);
 }
 
-function getItemTuningTo(item) {
-  return item?.tuningTo || item?.tuningStat || null;
+function getItemTunedStat(item) {
+  return Object.prototype.hasOwnProperty.call(item || {}, "tunedStat")
+    ? item.tunedStat : item?.tuningStat || item?.tuningTo || null;
+}
+
+function getItemDirectionalStats(item) {
+  if (!item) return null;
+  if (item.dataConfidence?.tuning === "unknown") return null;
+  if (!item.exotic) {
+    const tunedStat = getItemTunedStat(item);
+    return tunedStat ? [tunedStat] : null;
+  }
+  if (Array.isArray(item.allowedTuningStats)) {
+    return [...new Set(item.allowedTuningStats)].filter(stat => STATS.includes(stat));
+  }
+  return null;
 }
 
 function getItemKey(item) {
@@ -25,10 +40,9 @@ function getItemKey(item) {
 }
 
 function getEligibilityKey({
-  slot, archetypeId, tertiary, tuningMode, exotic,
+  slot, archetypeId, tertiary, exotic,
 }) {
-  const normalizedMode = tuningMode === "plus3" ? "plus3" : "shift";
-  return `${slot}|${archetypeId}|${tertiary}|${normalizedMode}|${Number(Boolean(exotic))}`;
+  return `${slot}|${archetypeId}|${tertiary}|${Number(Boolean(exotic))}`;
 }
 
 function getSetRequirement(requirement = { type: "none" }) {
@@ -56,6 +70,7 @@ function getSolutionRequirements(solution, fixedExotic = null) {
       archetype: config.archetype,
       archetypeId: archetypeIdForName(config.archetype),
       tertiary: config.tertiary,
+      baseStats: { ...config.baseStats },
       tuningMode: tuning?.mode === "+3" ? "plus3" : "shift",
       tuningTo: tuning?.mode === "+3" ? null : tuning?.to,
       exotic: isClassItem || slot === fixedExotic?.slot,
@@ -86,12 +101,9 @@ function getFixedExoticMismatch(item, requirement) {
     fields.push("tertiary");
     score += 20;
   }
-  const itemTuningMode = item.tuningMode === "plus3" ? "plus3" : "shift";
-  if (itemTuningMode !== requirement.tuningMode) {
-    fields.push("tuningMode");
-    score += 10;
-  } else if (requirement.tuningMode === "shift" && getItemTuningTo(item) !== requirement.tuningTo) {
-    fields.push("tuningTo");
+  if (requirement.tuningMode === "shift"
+      && !getItemDirectionalStats(item)?.includes(requirement.tuningTo)) {
+    fields.push("tuningCapability");
     score += 5;
   }
   return { score, fields };
@@ -102,16 +114,14 @@ function isItemEligible(item, requirement, options) {
   if (options.classId && item.classId !== options.classId) return false;
   if (item.archetypeId !== requirement.archetypeId) return false;
   if (item.tertiary !== requirement.tertiary) return false;
-  // The tuning MODE is installed on the piece and read from the export. The
-  // fixed +5 side of a +5/-5 roll is rolled onto LEGENDARY armor and cannot be
-  // re-picked (only the -5 source is free), so a legendary piece only serves a
-  // shift requirement whose +5 destination matches its fixed roll. Exotic armor
-  // accepts any directional tuning, so its +5 side is never filtered here.
-  if (requirement.tuningMode === "plus3") {
-    if (item.tuningMode !== "plus3") return false;
-  } else {
-    if (item.tuningMode === "plus3") return false;
-    if (!item.exotic && getItemTuningTo(item) !== requirement.tuningTo) return false;
+  const base = item.optimizationBaseStats || physicalBaseStats(item);
+  if (STATS.some(stat => base[stat] !== requirement.baseStats[stat])) return false;
+  // Installed mode/source are assignment state. Balanced can be installed on
+  // any compatible piece; a directional assignment only checks the immutable
+  // Legendary tunedStat (Exotics expose a set of allowed destinations).
+  if (requirement.tuningMode === "shift") {
+    const allowedDirectionalStats = getItemDirectionalStats(item);
+    if (!allowedDirectionalStats?.includes(requirement.tuningTo)) return false;
   }
 
   const fixedExotic = options.fixedExotic || null;
@@ -176,8 +186,8 @@ function getMaximumSetCoverage(setRequirement) {
 }
 
 // Candidate identity is irrelevant to exact stat reachability once slot,
-// archetype, tertiary, and tuning mode have matched. Only the pinned +5 side
-// and (when requested) set membership can change the assignment outcome.
+// archetype and tertiary have matched. Only directional Tuning capability and
+// (when requested) set membership can change the assignment outcome.
 // Keeping the first sorted item for each signature preserves equipped/locked/
 // masterwork preferences without re-exploring equivalent search states.
 function compressAssignmentCandidates(candidates, setRequirement) {
@@ -187,7 +197,8 @@ function compressAssignmentCandidates(candidates, setRequirement) {
     const setKey = setRequirement.type === "none"
       ? ""
       : Number(item.setHash) || 0;
-    const key = `${getItemTuningTo(item) || "free"}|${setKey}`;
+    const capabilityKey = getItemDirectionalStats(item)?.join(",") || "unknown";
+    const key = `${capabilityKey}|${setKey}|${createPieceCapability(item).equivalenceKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     compressed.push(item);
@@ -253,13 +264,7 @@ function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequi
   const maximumSetCoverage = getMaximumSetCoverage(setRequirement);
 
   function canReachExact() {
-    const pinnedCounts = Object.fromEntries(STATS.map(stat => [stat, 0]));
-    for (let index = 0; index < chosen.length; index++) {
-      if (solution.tuningAssignments?.[index]?.mode === "+3") continue;
-      const tuningTo = getItemTuningTo(chosen[index]);
-      if (tuningTo) pinnedCounts[tuningTo]++;
-    }
-    const key = STATS.map(stat => pinnedCounts[stat]).join(",");
+    const key = chosen.map(item => item ? getItemKey(item) : "farm").join("|");
     if (!exactnessCache.has(key)) {
       exactnessCache.set(key, assignmentCanReachExact(solution, chosen));
     }
@@ -317,99 +322,41 @@ function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequi
 }
 
 // ============================================================
-// EXACT-REACHABILITY OF AN OWNED ASSIGNMENT
+// RECONSTRUCTION OF THE ALREADY-SELECTED ASSIGNMENT
 // ============================================================
-// An owned LEGENDARY piece pins only its fixed +5 roll (the +5 side of a Tuning
-// Mod). Exotic armor accepts any directional tuning, so its +5 side stays free.
-// The -5 sources, the armor mods, and every roll of a farmed piece stay free.
-// This checks whether the solution's exact totals are still reachable given
-// the pinned +5 rolls, by counting how the +5/+10 mods and the free +5 sides
-// can absorb the residual. (mods contribute +5s without a matching -5, so the
-// -5 budget is exactly one per shift piece, while the +5 budget is one per
-// shift piece plus every mod.)
-function forEachModAllocation(numPlus5, numPlus10, visit) {
-  const m = Object.fromEntries(STATS.map(stat => [stat, 0]));
-  function walk(statIndex, c5Left, c10Left) {
-    if (statIndex === STATS.length) {
-      if (c5Left === 0 && c10Left === 0) visit(m);
-      return;
-    }
-    const stat = STATS[statIndex];
-    for (let c5 = 0; c5 <= c5Left; c5++) {
-      for (let c10 = 0; c10 <= c10Left; c10++) {
-        m[stat] = c5 * 5 + c10 * 10;
-        walk(statIndex + 1, c5Left - c5, c10Left - c10);
-      }
-    }
-    m[stat] = 0;
-  }
-  walk(0, numPlus5, numPlus10);
-}
-
+// Matching never authorizes a second optimization. Physical bases and the
+// fixed per-piece assignments must reproduce the source solution exactly.
 export function assignmentCanReachExact(solution, chosen) {
-  const config = solution?.config;
-  const totals = solution?.totals;
-  const hasTotals = Boolean(totals) &&
-    STATS.every(stat => Number.isFinite(totals[stat]));
-  if (!config || config.length !== 5 || !hasTotals) return true;
-
-  let numPlus5 = 0;
-  let numPlus10 = 0;
-  for (const assignment of Object.values(solution.modAssignments || {})) {
-    if (assignment?.size === 5) numPlus5++;
-    else if (assignment?.size === 10) numPlus10++;
-  }
-
-  const base = Object.fromEntries(STATS.map(stat => [stat, 0]));
-  const pinned = Object.fromEntries(STATS.map(stat => [stat, 0]));
-  let numShift = 0;
-  let freeCount = 0;
+  // Keep the proved assignment. An existential re-optimization is not the
+  // assignment displayed alongside this plan.
+  if (solution?.config?.length !== 5 || solution?.tuningAssignments?.length !== 5) return false;
+  const rebuilt = Object.fromEntries(STATS.map(stat => [stat, 0]));
   for (let index = 0; index < 5; index++) {
-    const piece = config[index];
-    for (const stat of STATS) base[stat] += piece.baseStats[stat];
-    if (solution.tuningAssignments?.[index]?.mode === "+3") {
-      for (const stat of piece.masterworkStats || []) base[stat] += 1;
-      continue;
-    }
-    numShift++;
+    const config = solution.config[index];
     const item = chosen[index];
-    // Exotic armor accepts any directional tuning, so its +5 side is free to
-    // re-roll and never pins a stat. Only a legendary piece's rolled +5 is
-    // fixed and pins that stat.
-    const pinnedTo = item && !item.exotic ? getItemTuningTo(item) : null;
-    if (pinnedTo) pinned[pinnedTo]++;
-    else freeCount++;
-  }
-  // Nothing pinned: the stored solution itself is the exact witness.
-  if (freeCount === numShift) return true;
-
-  const residual = Object.fromEntries(STATS.map(stat => [
-    stat, totals[stat] - base[stat] - 5 * pinned[stat],
-  ]));
-
-  // For a given mod placement the residual must decompose into the free +5
-  // sides (t) and free -5 sources (f) of the shift pieces. With to/from counts
-  // t_s/f_s: need_s = (residual - mods)/5 = t_s - f_s, sum(t) = sum(f) =
-  // numShift, t_s >= pinned_s. Hall's condition on the "from != to" pairing
-  // reduces to t_s <= (numShift + need_s)/2 per stat, so a closed form works.
-  let feasible = false;
-  forEachModAllocation(numPlus5, numPlus10, m => {
-    if (feasible) return;
-    let lowerSum = 0;
-    let upperSum = 0;
+    const base = item ? item.optimizationBaseStats || physicalBaseStats(item) : config.baseStats;
+    if (item && STATS.some(stat => base?.[stat] !== config.baseStats?.[stat])) return false;
     for (const stat of STATS) {
-      const value = residual[stat] - m[stat];
-      if (value % 5 !== 0) return;
-      const need = value / 5;
-      const lower = Math.max(pinned[stat], need);
-      const upper = Math.floor((numShift + need) / 2);
-      if (lower > upper) return;
-      lowerSum += lower;
-      upperSum += upper;
+      if (!Number.isSafeInteger(base?.[stat])) return false;
+      rebuilt[stat] += base[stat];
     }
-    if (lowerSum <= numShift && numShift <= upperSum) feasible = true;
-  });
-  return feasible;
+    const tuning = solution.tuningAssignments[index];
+    if (tuning.mode === "+3") {
+      if (config.masterworkStats?.length !== 3) return false;
+      for (const stat of config.masterworkStats) rebuilt[stat]++;
+    } else {
+      if (!STATS.includes(tuning.from) || !STATS.includes(tuning.to) || tuning.from === tuning.to) return false;
+      if (item && !getItemDirectionalStats(item)?.includes(tuning.to)) return false;
+      rebuilt[tuning.from] -= 5;
+      rebuilt[tuning.to] += 5;
+    }
+    const mod = solution.modAssignments?.[index];
+    if (mod) {
+      if (![5, 10].includes(mod.size) || !STATS.includes(mod.stat)) return false;
+      rebuilt[mod.stat] += mod.size;
+    }
+  }
+  return STATS.every(stat => rebuilt[stat] === solution.totals?.[stat]);
 }
 
 function combinations(items, count) {
@@ -459,7 +406,6 @@ function comparePlans(left, right) {
     return left.fixedExoticDistance - right.fixedExoticDistance;
   }
   if (left.farmability !== right.farmability) return left.farmability - right.farmability;
-  if (left.score !== right.score) return left.score - right.score;
   return right.ownedCount - left.ownedCount;
 }
 
@@ -531,7 +477,7 @@ export function rankInventoryPlans({
       ownedCount: assignment.ownedCount,
       farmCount: assignment.farmCount,
       setCoverage: assignment.setCoverage,
-      feasible: assignmentCanReachExact(solution, assignment.chosen),
+      feasible: assignment.setFeasible && assignmentCanReachExact(solution, assignment.chosen),
       fixedExoticDistance: !fixedExotic || fixedExoticPiece?.item
         ? 0
         : fixedExoticPiece?.closestMismatch?.score ?? Number.MAX_SAFE_INTEGER,
