@@ -2770,6 +2770,27 @@ a:focus-visible {
   white-space: nowrap;
 }
 .owned-gear-summary strong { color: var(--accent-strong); }
+.owned-gear-header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.owned-gear-target {
+  display: grid;
+  grid-template-columns: auto minmax(124px, 190px);
+  align-items: center;
+  gap: 7px;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 650;
+}
+.owned-gear-target select {
+  min-height: 34px;
+  padding: 5px 26px 5px 8px;
+  font-size: .75rem;
+}
 .owned-armor-match-list {
   display: grid;
   margin-top: 14px;
@@ -2777,7 +2798,7 @@ a:focus-visible {
 }
 .owned-armor-match {
   display: grid;
-  grid-template-columns: 64px minmax(72px, max-content) minmax(0, 1fr);
+  grid-template-columns: 64px minmax(72px, max-content) minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 11px 0;
@@ -2815,6 +2836,42 @@ a:focus-visible {
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+.owned-armor-match-actions {
+  display: grid;
+  min-width: max-content;
+  justify-items: end;
+  gap: 3px;
+}
+.owned-armor-match-actions small {
+  color: var(--text-dim);
+  font-size: .6875rem;
+  line-height: 1.25;
+}
+.owned-armor-action {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: .35em;
+  padding: 6px 9px;
+  border-color: color-mix(in oklab, var(--accent) 60%, var(--border));
+  color: var(--accent-strong);
+  font-size: .75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.owned-armor-action .icon {
+  width: .9rem;
+  height: .9rem;
+}
+.owned-armor-action:disabled {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+.owned-armor-action-status {
+  margin-top: 10px;
+}
+.owned-armor-action-status .msg { margin: 0; }
 .owned-armor-empty {
   margin: 14px 0 0;
   padding: 11px 12px;
@@ -3369,6 +3426,16 @@ a:focus-visible {
     gap: 10px;
   }
   .owned-gear-summary { align-self: flex-start; }
+  .owned-gear-header-actions {
+    width: 100%;
+    align-items: stretch;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .owned-gear-target {
+    flex: 1 1 100%;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
   .owned-armor-match {
     grid-template-columns: 58px minmax(72px, max-content) minmax(0, 1fr);
   }

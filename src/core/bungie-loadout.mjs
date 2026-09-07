@@ -308,6 +308,121 @@ function transferRequest(item, membershipType, characterId, transferToVault) {
   };
 }
 
+// A compact, single-piece counterpart to buildCustomLoadoutPlan. It is used
+// by the from-scratch result's "owned armor" rows, where moving one piece to
+// a character must not also change the rest of the suggested loadout or write
+// any plugs. The action deliberately progresses in two user-visible steps:
+// transfer an off-character item into the target inventory, then equip it on
+// a later click. That avoids replacing an equipped slot as a side effect of
+// merely pulling an item out of the Vault.
+export function buildBungieArmorItemActionPlan({
+  membershipType,
+  targetCharacterId,
+  targetClassId = null,
+  itemId,
+  inventory,
+  targetCharacterInventory = null,
+}) {
+  const errors = [];
+  const targetId = String(targetCharacterId || "");
+  const sourceId = String(itemId || "");
+  const item = (inventory || []).find(candidate => String(candidate?.id ?? "") === sourceId);
+
+  if (!membershipType || !targetId) errors.push({ code: "missingTarget" });
+  if (!item || !item.id || !item.hash) errors.push({ code: "missingItem" });
+  if (item && !item.owner) errors.push({ code: "missingOwner" });
+  if (item?.classId && targetClassId && item.classId !== targetClassId) {
+    errors.push({ code: "classMismatch" });
+  }
+
+  const onTarget = item && String(item.owner) === targetId;
+  const action = onTarget
+    ? (item.equipped ? "equipped" : "equip")
+    : "transfer";
+  if (action === "equip" && item?.canEquip === false &&
+      PERMANENT_EQUIP_FAILURE_REASONS.has(Number(item.cannotEquipReason) || 0)) {
+    errors.push({ code: "itemCannotEquip", reason: Number(item.cannotEquipReason) || 0 });
+  }
+
+  const moveAsideTransfers = [];
+  const preparationTransfers = [];
+  const sourceEquips = [];
+  const transfers = [];
+
+  if (item && action === "transfer") {
+    // An equipped item cannot be moved from another character directly. Put a
+    // compatible spare on that character first, following the same safety
+    // rule as a complete custom-loadout apply.
+    if (item.owner !== "Vault" && item.equipped) {
+      const replacement = (inventory || []).find(candidate =>
+        String(candidate?.id ?? "") !== sourceId &&
+        candidate?.slot === item.slot && candidate?.classId === item.classId &&
+        !candidate?.equipped && !candidate?.exotic &&
+        (String(candidate?.owner) === String(item.owner) || candidate?.owner === "Vault"),
+      ) || (inventory || []).find(candidate =>
+        String(candidate?.id ?? "") !== sourceId &&
+        candidate?.slot === item.slot && candidate?.classId === item.classId &&
+        !candidate?.equipped &&
+        (String(candidate?.owner) === String(item.owner) || candidate?.owner === "Vault"),
+      );
+      if (!replacement) {
+        errors.push({ code: "equippedElsewhereNoReplacement", slot: item.slot, owner: item.owner });
+      } else {
+        if (replacement.owner === "Vault") {
+          preparationTransfers.push(transferRequest(
+            replacement, membershipType, item.owner, false,
+          ));
+        }
+        sourceEquips.push({
+          characterId: String(item.owner),
+          itemIds: [String(replacement.id)],
+        });
+      }
+    }
+
+    // Free one target inventory slot before bringing this item in. The
+    // character inventory contains only backpack entries, so an equipped
+    // target item is never accidentally chosen for a move-aside request.
+    if (Array.isArray(targetCharacterInventory)) {
+      const freeSlots = CHARACTER_INVENTORY_CAPACITY - targetCharacterInventory.length;
+      if (freeSlots < 1) {
+        const candidate = targetCharacterInventory.find(entry =>
+          String(entry?.itemInstanceId ?? "") !== sourceId,
+        );
+        if (candidate?.itemInstanceId) {
+          moveAsideTransfers.push({
+            itemReferenceHash: Number(candidate.itemHash) || 0,
+            stackSize: 1,
+            transferToVault: true,
+            itemId: String(candidate.itemInstanceId),
+            characterId: targetId,
+            membershipType: Number(membershipType),
+          });
+        }
+      }
+    }
+
+    if (item.owner !== "Vault") {
+      transfers.push(transferRequest(item, membershipType, item.owner, true));
+    }
+    transfers.push(transferRequest(item, membershipType, targetId, false));
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    action,
+    item,
+    itemId: sourceId,
+    membershipType: Number(membershipType),
+    targetCharacterId: targetId,
+    moveAsideTransfers,
+    preparationTransfers,
+    sourceEquips,
+    transfers,
+  };
+}
+
 const MISS_REASON_TO_ERROR_CODE = {
   statSocketUnknown: "statSocketUnknown",
   tuningSocketUnknown: "tuningSocketUnknown",
@@ -564,6 +679,102 @@ function equipStatusByInstanceId(response) {
     if (id) byId.set(id, Number(result?.equipStatus));
   }
   return byId;
+}
+
+// Execute one owned-armor row action. This intentionally omits socket writes
+// and verification: it only transfers an item into the selected character's
+// inventory or equips an item that is already there.
+export async function applyBungieArmorItemAction(plan, { onProgress = null, delays = true } = {}) {
+  if (!plan?.valid) throw new BungieLoadoutPlanError(plan?.errors || []);
+  const completed = {
+    moveAsideTransfers: 0,
+    preparationTransfers: 0,
+    sourceEquips: 0,
+    transfers: 0,
+    targetEquip: 0,
+  };
+  let stage = "ready";
+  const progress = detail => onProgress?.({ stage, completed: { ...completed }, ...detail });
+  const pause = delays ? sleep : () => {};
+
+  try {
+    if (plan.action === "equipped") {
+      return { action: "equipped", completed, equipFailure: null };
+    }
+
+    stage = "space";
+    for (const request of plan.moveAsideTransfers || []) {
+      progress({ action: "move-aside" });
+      await bungiePost("/Destiny2/Actions/Items/TransferItem/", request);
+      completed.moveAsideTransfers++;
+      await pause(WRITE_DELAY_MS);
+    }
+
+    stage = "prepare";
+    for (const request of plan.preparationTransfers || []) {
+      progress({ action: "transfer" });
+      await bungiePost("/Destiny2/Actions/Items/TransferItem/", request);
+      completed.preparationTransfers++;
+      await pause(WRITE_DELAY_MS);
+    }
+
+    stage = "unequip-source";
+    for (const source of plan.sourceEquips || []) {
+      progress({ action: "equip-source", characterId: source.characterId });
+      const response = await bungiePost("/Destiny2/Actions/Items/EquipItems/", {
+        itemIds: source.itemIds,
+        characterId: source.characterId,
+        membershipType: plan.membershipType,
+      });
+      const statusById = equipStatusByInstanceId(response);
+      const failedItemId = source.itemIds.find(
+        itemId => statusById.get(String(itemId)) !== PLATFORM_SUCCESS,
+      );
+      if (failedItemId) {
+        const error = new Error("Source replacement equip failed");
+        error.itemId = String(failedItemId);
+        error.errorCode = statusById.get(String(failedItemId)) ?? null;
+        throw error;
+      }
+      completed.sourceEquips++;
+      await pause(WRITE_DELAY_MS);
+    }
+
+    if (plan.action === "transfer") {
+      stage = "transfer";
+      for (const request of plan.transfers || []) {
+        progress({ action: "transfer" });
+        await bungiePost("/Destiny2/Actions/Items/TransferItem/", request);
+        completed.transfers++;
+        await pause(WRITE_DELAY_MS);
+      }
+      return { action: "transferred", completed, equipFailure: null };
+    }
+
+    if (plan.action === "equip") {
+      stage = "equip";
+      progress({ action: "equip-target" });
+      const response = await bungiePost("/Destiny2/Actions/Items/EquipItems/", {
+        itemIds: [plan.itemId],
+        characterId: plan.targetCharacterId,
+        membershipType: plan.membershipType,
+      });
+      const status = equipStatusByInstanceId(response).get(String(plan.itemId));
+      if (status !== PLATFORM_SUCCESS) {
+        return {
+          action: "equip",
+          completed,
+          equipFailure: { itemId: String(plan.itemId), errorCode: status ?? null },
+        };
+      }
+      completed.targetEquip++;
+      return { action: "equipped", completed, equipFailure: null };
+    }
+
+    return { action: plan.action, completed, equipFailure: null };
+  } catch (cause) {
+    throw new BungieLoadoutApplyError(stage, completed, cause);
+  }
 }
 
 // Re-read the profile after writing and confirm every expected instance is

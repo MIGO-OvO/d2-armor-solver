@@ -1332,6 +1332,39 @@ async function checkBungieAuthFlow(browser) {
     assert.equal(writeRequests.equipItems[0].itemIds.length, 5);
     assert.ok(writeRequests.insertPlug.every(body => body.plug?.socketArrayType === 0));
 
+    // --- (e2) from-scratch owned armor exposes the live Bungie target picker.
+    // The single-item action sequence itself is covered at the API boundary in
+    // bungie-loadout.test.mjs, where its transfer/equip requests are exact.
+    await page.evaluate(() => {
+      window.setCalculatorMode("solve");
+      for (const stat of ["health", "melee", "grenade", "super", "class", "weapons"]) {
+        const fragment = document.getElementById(`fragVal_${stat}`);
+        if (fragment) {
+          fragment.textContent = "0";
+          fragment.style.color = "";
+        }
+      }
+      document.getElementById("numPlus5").value = "0";
+      document.getElementById("numPlus10").value = "5";
+      window.resetTargetStats();
+      const ownedArmorTargets = {
+        health: 195,
+        grenade: 145,
+        melee: 110,
+        super: 25,
+        class: 25,
+        weapons: 0,
+      };
+      for (const [stat, value] of Object.entries(ownedArmorTargets)) {
+        const input = document.getElementById(`target_${stat}`);
+        input.value = String(value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      window.solve();
+    });
+    await page.locator("#results.show").waitFor();
+    assert.equal(await page.locator("#ownedGearSection .owned-gear-target select").count(), 1);
+
     // --- (f) error paths keep the user signed in and render classified copy ---
     for (const [mode, expectedText] of [
       ["throttle", "请求限流"],

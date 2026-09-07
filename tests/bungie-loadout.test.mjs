@@ -5,7 +5,9 @@ import { saveToken } from "../src/core/bungie-api.mjs";
 import {
   BungieLoadoutApplyError,
   LOADOUT_WRITE_COMPONENTS,
+  applyBungieArmorItemAction,
   applyCustomLoadoutPlan,
+  buildBungieArmorItemActionPlan,
   buildCustomLoadoutPlan,
   decodeArmorPlugHashes,
   equipSavedLoadout,
@@ -265,6 +267,172 @@ test("buildCustomLoadoutPlan never moves a loadout piece aside", () => {
   });
   assert.equal(plan.moveAsideTransfers.length, 5);
   assert.ok(!plan.moveAsideTransfers.some(request => request.itemId === "100"));
+});
+
+function armorItemActionFixture({ owner = "Vault", equipped = false } = {}) {
+  return {
+    membershipType: 3,
+    targetCharacterId: "character-1",
+    targetClassId: "hunter",
+    itemId: "100",
+    inventory: [{
+      id: "100",
+      hash: 1000,
+      slot: "helmet",
+      classId: "hunter",
+      owner,
+      equipped,
+      canEquip: true,
+    }],
+  };
+}
+
+test("single owned-armor actions transition from transfer to equip to equipped", () => {
+  const vaultPlan = buildBungieArmorItemActionPlan(armorItemActionFixture());
+  assert.equal(vaultPlan.valid, true, JSON.stringify(vaultPlan.errors));
+  assert.equal(vaultPlan.action, "transfer");
+  assert.deepEqual(vaultPlan.transfers, [{
+    itemReferenceHash: 1000,
+    stackSize: 1,
+    transferToVault: false,
+    itemId: "100",
+    characterId: "character-1",
+    membershipType: 3,
+  }]);
+
+  const backpackPlan = buildBungieArmorItemActionPlan(
+    armorItemActionFixture({ owner: "character-1" }),
+  );
+  assert.equal(backpackPlan.valid, true, JSON.stringify(backpackPlan.errors));
+  assert.equal(backpackPlan.action, "equip");
+  assert.equal(backpackPlan.transfers.length, 0);
+
+  const equippedPlan = buildBungieArmorItemActionPlan(
+    armorItemActionFixture({ owner: "character-1", equipped: true }),
+  );
+  assert.equal(equippedPlan.valid, true, JSON.stringify(equippedPlan.errors));
+  assert.equal(equippedPlan.action, "equipped");
+});
+
+test("single owned-armor action safely frees a source slot and target inventory space", () => {
+  const fixture = armorItemActionFixture({ owner: "source-character", equipped: true });
+  fixture.inventory.push({
+    id: "101",
+    hash: 1001,
+    slot: "helmet",
+    classId: "hunter",
+    owner: "Vault",
+    equipped: false,
+    exotic: false,
+  });
+  fixture.targetCharacterInventory = Array.from({ length: 10 }, (_, index) => ({
+    itemInstanceId: String(200 + index),
+    itemHash: 2000 + index,
+  }));
+  const plan = buildBungieArmorItemActionPlan(fixture);
+  assert.equal(plan.valid, true, JSON.stringify(plan.errors));
+  assert.equal(plan.action, "transfer");
+  assert.deepEqual(plan.preparationTransfers, [{
+    itemReferenceHash: 1001,
+    stackSize: 1,
+    transferToVault: false,
+    itemId: "101",
+    characterId: "source-character",
+    membershipType: 3,
+  }]);
+  assert.deepEqual(plan.sourceEquips, [{
+    characterId: "source-character",
+    itemIds: ["101"],
+  }]);
+  assert.deepEqual(plan.transfers.map(request => request.transferToVault), [true, false]);
+  assert.equal(plan.moveAsideTransfers.length, 1);
+  assert.equal(plan.moveAsideTransfers[0].characterId, "character-1");
+});
+
+test("single owned-armor action writes only a transfer or one item equip", async () => {
+  installAuth();
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+    if (url.endsWith("/EquipItems/")) {
+      return jsonResponse({
+        Response: { equipResults: body.itemIds.map(itemInstanceId => ({ itemInstanceId, equipStatus: 1 })) },
+        ErrorCode: 1,
+      });
+    }
+    return jsonResponse({ Response: 0, ErrorCode: 1 });
+  };
+  try {
+    const transferResult = await applyBungieArmorItemAction(
+      buildBungieArmorItemActionPlan(armorItemActionFixture()),
+      { delays: false },
+    );
+    assert.equal(transferResult.action, "transferred");
+    assert.equal(transferResult.completed.transfers, 1);
+    assert.equal(requests.filter(request => request.url.endsWith("/TransferItem/")).length, 1);
+    assert.equal(requests.filter(request => request.url.endsWith("/EquipItems/")).length, 0);
+
+    const equipResult = await applyBungieArmorItemAction(
+      buildBungieArmorItemActionPlan(armorItemActionFixture({ owner: "character-1" })),
+      { delays: false },
+    );
+    assert.equal(equipResult.action, "equipped");
+    assert.equal(equipResult.completed.targetEquip, 1);
+    const equipRequest = requests.find(request => request.url.endsWith("/EquipItems/"));
+    assert.deepEqual(equipRequest.body, {
+      itemIds: ["100"],
+      characterId: "character-1",
+      membershipType: 3,
+    });
+    assert.equal(requests.some(request => request.url.endsWith("/InsertSocketPlugFree/")), false);
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("a disabled single owned-armor action with a replacement source equips the spare first", async () => {
+  const fixture = armorItemActionFixture({ owner: "source-character", equipped: true });
+  fixture.inventory.push({
+    id: "101",
+    hash: 1001,
+    slot: "helmet",
+    classId: "hunter",
+    owner: "source-character",
+    equipped: false,
+    exotic: false,
+  });
+  const plan = buildBungieArmorItemActionPlan(fixture);
+  assert.equal(plan.valid, true, JSON.stringify(plan.errors));
+  assert.deepEqual(plan.sourceEquips, [{ characterId: "source-character", itemIds: ["101"] }]);
+  assert.deepEqual(plan.transfers.map(request => request.transferToVault), [true, false]);
+
+  installAuth();
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+    if (url.endsWith("/EquipItems/")) {
+      return jsonResponse({
+        Response: { equipResults: body.itemIds.map(itemInstanceId => ({ itemInstanceId, equipStatus: 1 })) },
+        ErrorCode: 1,
+      });
+    }
+    return jsonResponse({ Response: 0, ErrorCode: 1 });
+  };
+  try {
+    const result = await applyBungieArmorItemAction(plan, { delays: false });
+    assert.equal(result.action, "transferred");
+    assert.equal(result.completed.sourceEquips, 1);
+    const equipRequest = requests.find(request => request.url.endsWith("/EquipItems/"));
+    assert.deepEqual(equipRequest.body, {
+      itemIds: ["101"],
+      characterId: "source-character",
+      membershipType: 3,
+    });
+  } finally {
+    restoreGlobals();
+  }
 });
 
 test("energy-incompatible stat mods block the plan and never skip to success", () => {
