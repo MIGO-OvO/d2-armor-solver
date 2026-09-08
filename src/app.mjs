@@ -1770,7 +1770,7 @@ function displayPieceResults(result, _fragments) {
     </div>`).join('');
   const fixedTuningRows = Object.keys(tuneToCount).length > 0
     ? renderSolutionStatRows(tuneToCount, '+5 ')
-    : `<p class="solution-allocation-empty">${l('本方案没有固定 +5 调整。', '本方案沒有固定 +5 調校。', 'This solution has no fixed +5 Tuning.')}</p>`;
+    : `<p class="solution-allocation-empty">${l('本方案没有 +5 调整。', '本方案沒有 +5 調校。', 'This solution has no +5 Tuning.')}</p>`;
   const suggestedMinusRows = Object.keys(tuneFromCount).length > 0
     ? renderSolutionStatRows(tuneFromCount, '−5 ')
     : `<p class="solution-allocation-empty">${l('无需分配 −5。', '無需分配 −5。', 'No −5 allocation needed.')}</p>`;
@@ -1800,9 +1800,9 @@ function displayPieceResults(result, _fragments) {
           <div class="solution-stat-list">${renderSolutionStatRows(tertCount)}</div>
         </div>
         <div class="solution-allocation-group solution-tuning-group">
-          <div class="solution-allocation-title"><strong>${t('tuningMod')}</strong><span>${l('固定 +5 优先核对', '固定 +5 優先核對', 'Check fixed +5 first')}</span></div>
+          <div class="solution-allocation-title"><strong>${t('tuningMod')}</strong><span>${l('传说 +5 固定；异域按可选方向配置', '傳說 +5 固定；異域依可選方向配置', 'Legendary +5 is fixed; configure supported Exotic directions')}</span></div>
           <div class="solution-tuning-primary">
-            <span>${l('固定 +5 属性', '固定 +5 數值', 'Fixed +5 rolls')}</span>
+            <span>${l('方案 +5 分配', '方案 +5 分配', 'Planned +5 allocation')}</span>
             <div class="solution-stat-list">${fixedTuningRows}</div>
           </div>
           ${plus3Count > 0 ? `<div class="solution-tuning-plus3"><span>${l('+3模式', '+3模式', '+3 mode')}</span><strong>×${plus3Count}</strong></div>` : ''}
@@ -1830,7 +1830,7 @@ function displayPieceResults(result, _fragments) {
 
 function renderWitnessBreakdown(witness) {
   const model = createSolutionDisplayModel(witness);
-  return `<details class="upgrade-assignment-details witness-breakdown" data-canonical-id="${escapeHtml(model.canonicalId)}">
+  return `<details class="upgrade-assignment-details witness-breakdown" data-disclosure-key="witness-${escapeHtml(model.canonicalId)}" data-canonical-id="${escapeHtml(model.canonicalId)}">
     <summary>${l('逐件复算数据', '逐件重算資料', 'Per-piece verification data')}</summary>
     ${model.pieces.map((piece, index) => `<div class="witness-piece" data-source-id="${escapeHtml(String(piece.sourceId || ''))}" data-tuning="${escapeHtml(JSON.stringify(model.tuningAssignments[index]))}" data-mod="${escapeHtml(JSON.stringify(model.modAssignments[index] || null))}" data-archetype="${escapeHtml(piece.archetype || piece.archetypeId || '')}" data-tertiary="${piece.tertiary}">
       <strong>${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot))} · ${escapeHtml(piece.itemName || piece.archetype || piece.archetypeId || '')}</strong>
@@ -1844,6 +1844,7 @@ function renderWitnessBreakdown(witness) {
 }
 
 function displayAllResults(result, targets, fragments, { scroll = true, forceOwnedPlan = false } = {}) {
+  const restoreDetails = preserveDisclosureState(document.getElementById('results'));
   result = getOwnedArmorPlan(result, { force: forceOwnedPlan })?.matchedSolution || result;
   const results = document.getElementById('results');
   results.classList.add('show');
@@ -1919,6 +1920,7 @@ function displayAllResults(result, targets, fragments, { scroll = true, forceOwn
 
   // Pieces output
   displayPieceResults(result, fragments);
+  restoreDetails();
   if (scroll) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -2003,6 +2005,7 @@ function getOwnedArmorPlan(solution, { allowEmpty = true, force = false } = {}) 
 }
 
 function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
+  const selectedSolution = rerender ? allSolutions[currentSolutionIdx] : null;
   const request = createOwnedArmorPlanRequest(
     allSolutions,
     Math.max(SOLUTION_PREVIEW_COUNT, 12),
@@ -2018,7 +2021,7 @@ function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
   allSolutions.sort((left, right) =>
     (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER)
   );
-  currentSolutionIdx = Math.max(0, allSolutions.indexOf(plans[0]?.solution));
+  currentSolutionIdx = Math.max(0, allSolutions.indexOf(selectedSolution || plans[0]?.solution));
   if (rerender && allSolutions.length > 0) {
     displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false, forceOwnedPlan: true });
   }
@@ -2190,10 +2193,16 @@ function renderOwnedArmorMatch(piece) {
     : l('清单', '清單', 'Inventory');
   const itemName = item.name || l('手动新增护甲', '手動新增防具', 'Manually added armor');
   const setName = item.setHash ? formatInventoryPlanSet(item.setHash) : '';
+  const requiredTuning = formatInventoryItemTuning(piece);
+  const currentTuning = formatInventoryItemTuning(item);
+  const tuningDetails = `${l('方案', '方案', 'Plan')}: ${requiredTuning}`
+    + (requiredTuning !== currentTuning
+      ? ` · ${l('当前', '目前', 'Current')}: ${currentTuning} (${l('需更换调整模组', '需更換調校模組', 'change Tuning mod')})`
+      : '');
   const details = [
     getArchetypeLabel(item.archetypeId || piece.archetype),
     `${t('tertiaryStat')} ${STAT_LABELS[item.tertiary || piece.tertiary] || '—'}`,
-    formatInventoryItemTuning(item),
+    tuningDetails,
     setName,
   ].filter(Boolean).join(' · ');
   const action = renderOwnedArmorBungieAction(item);
@@ -2473,9 +2482,21 @@ function getInventoryExoticPickerData() {
   return { pool, slots, names };
 }
 
+// Key by content identity, not DOM order: set previews may be reordered.
+function preserveDisclosureState(root) {
+  const states = new Map([...root.querySelectorAll('details[data-disclosure-key]')]
+    .map(element => [element.dataset.disclosureKey, element.open]));
+  return () => {
+    for (const element of root.querySelectorAll('details[data-disclosure-key]')) {
+      if (states.has(element.dataset.disclosureKey)) element.open = states.get(element.dataset.disclosureKey);
+    }
+  };
+}
+
 function renderUpgradeImportPanel() {
   const el = document.getElementById("upgradeImportPanel");
   if (!el) return;
+  const restoreDetails = preserveDisclosureState(el);
   const isScratchMode = calculatorMode === "solve";
   const importHeading = l("已有护甲", "已有防具", "Owned armor");
   const importDescription = isScratchMode
@@ -2587,6 +2608,7 @@ function renderUpgradeImportPanel() {
   updateInventorySolveOptions();
   renderSetEffects();
   renderBungieAuthState();
+  restoreDetails();
 }
 
 function toggleInventoryImportPanel() {
@@ -3212,7 +3234,7 @@ function getSavedBungieLoadoutsHtml() {
   syncBungieTargetCharacter();
   const loadouts = bungieProfileState.savedLoadouts?.[bungieTargetCharacterId] || [];
   const targetOptions = getBungieTargetOptionsHtml();
-  return `<details class="bungie-saved-loadouts">
+  return `<details class="bungie-saved-loadouts" data-disclosure-key="saved-loadouts">
     <summary>${l(
       `游戏内已保存配装（${loadouts.length}）`,
       `遊戲內已儲存配裝（${loadouts.length}）`,
@@ -3544,6 +3566,13 @@ async function importInventoryFromBungie({ silent = false } = {}) {
       `/Destiny2/${membershipType}/Profile/${membershipId}/?components=${components.join(",")}`,
       { auth: true },
     );
+    // A native select popup cannot survive replacing its DOM node. Defer the
+    // passive update while the user is choosing a filter; the next poll retries.
+    if (silent && document.activeElement?.matches('#upgradeImportPanel select')) {
+      isBungieImporting = false;
+      renderBungieAuthState();
+      return;
+    }
     const { items, characters, characterInventories } = buildArmorInventory(response, { language: getPageLanguage() });
     const loadoutState = extractBungieLoadoutState(response);
     for (const [characterId, summary] of Object.entries(characters)) {
@@ -4101,7 +4130,7 @@ function renderSetRequirementPreview(language, ownedSetCounts) {
       </div>`;
     }).join("");
     const notesHtml = isZh && meta.classNotes?.length ? `
-      <details class="set-preview-notes">
+      <details class="set-preview-notes" data-disclosure-key="set-${set.hash}">
         <summary>${l("职业命名差异", "職業命名差異", "Class naming notes")}</summary>
         ${meta.classNotes.map(note => `
           <div class="set-preview-note">
@@ -4117,6 +4146,7 @@ function renderSetRequirementPreview(language, ownedSetCounts) {
 function renderSetEffects() {
   const el = document.getElementById("upgradeSetEffects");
   if (!el) return;
+  const restoreDetails = preserveDisclosureState(el);
   const language = getPageLanguage();
   // Scratch mode has no current five-piece loadout. Do not leak the last
   // upgrade draft's active bonuses into the shared set picker.
@@ -4223,6 +4253,7 @@ function renderSetEffects() {
     <div class="set-requirement-state" id="setRequirementState" aria-live="polite"></div>
   `;
   syncUpgradeLocks();
+  restoreDetails();
 }
 
 function updateSetRequirementMode(value) {

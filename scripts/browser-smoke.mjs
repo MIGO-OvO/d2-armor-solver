@@ -543,8 +543,8 @@ async function checkInventoryPlanning(browser) {
     );
     assert.match(
       await page.locator("#piecesOutput .solution-tuning-primary").innerText(),
-      /Fixed \+5/,
-      "rolled +5 tuning should be the primary tuning information",
+      /Planned \+5/,
+      "planned +5 tuning must not describe freely selectable Exotic tuning as a fixed roll",
     );
     assert.match(
       await page.locator("#piecesOutput .solution-tuning-secondary").innerText(),
@@ -1286,7 +1286,25 @@ async function checkBungieAuthFlow(browser) {
 
     // --- (e) saved game loadout and custom solver result cover all write routes ---
     assert.equal(await page.locator(".bungie-saved-loadouts").count(), 1);
+    await page.locator('#setReqMode').selectOption('set2');
+    await page.locator('#setReqA').selectOption('741162535');
+    await page.locator('.set-preview-notes > summary').click();
     await page.locator(".bungie-saved-loadouts > summary").click();
+    await page.evaluate(() => window.importInventoryFromBungie({ silent: true }));
+    assert.equal(await page.locator('.bungie-saved-loadouts').evaluate(el => el.open), true,
+      'passive inventory refresh must preserve expanded saved loadouts');
+    assert.equal(await page.locator('.set-preview-notes').evaluate(el => el.open), true,
+      'passive inventory refresh must preserve expanded set notes');
+    await page.locator('.set-preview-notes > summary').click();
+    await page.evaluate(() => window.importInventoryFromBungie({ silent: true }));
+    assert.equal(await page.locator('.set-preview-notes').evaluate(el => el.open), false,
+      'passive inventory refresh must also preserve explicitly collapsed sections');
+    await page.locator('#setReqA').focus();
+    const focusedSelect = await page.locator('#setReqA').elementHandle();
+    await page.evaluate(() => window.importInventoryFromBungie({ silent: true }));
+    assert.equal(await focusedSelect.evaluate(el => el.isConnected && document.activeElement === el), true,
+      'a passive refresh must not destroy the native select being used');
+    await page.locator('#setReqMode').selectOption('none');
     await page.locator(".bungie-saved-actions .btn-solve").click();
     await page.waitForFunction(() => /游戏内配装已完整应用/.test(
       document.getElementById("upgradeImportSummary")?.textContent || "",
@@ -1297,7 +1315,6 @@ async function checkBungieAuthFlow(browser) {
       membershipType: 3,
     }]);
 
-    await page.locator(".bungie-saved-loadouts > summary").click();
     await page.locator(".bungie-saved-actions .btn").click();
     await page.locator('[id^="target_"]').evaluateAll(elements => {
       for (const element of elements) {

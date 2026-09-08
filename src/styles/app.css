@@ -5113,6 +5113,11 @@ a:focus-visible {
 }
 /* Existing workbench controls, with status distinct from mathematical proof. */
 .search-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; color: var(--text-dim); font-size: 13px; }
+.solver-actions { flex-wrap: wrap; }
+.solver-actions .search-toolbar { flex: 1 1 420px; margin: 0; text-align: start; min-width: 0; }
+@media (max-width: 760px) {
+  .solver-actions .search-toolbar { flex-basis: auto; width: 100%; }
+}
 .search-toolbar select { min-height: 40px; padding: 7px 12px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
 .search-progress { flex-basis: 100%; display: flex; gap: 12px; align-items: baseline; }
 #searchStatus { color: var(--accent); }

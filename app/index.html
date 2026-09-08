@@ -152,18 +152,6 @@
     </button>
   </div>
 
-  <section class="search-toolbar" aria-label="搜索设置">
-    <label for="searchProfile" id="searchProfileLabel">搜索深度</label>
-    <select id="searchProfile" onchange="setSearchProfile(this.value)" aria-describedby="searchProfileHelp">
-      <option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="deep">深度</option>
-    </select>
-    <span id="searchProfileHelp">先显示已验证结果，再继续扩大搜索。</span>
-    <button type="button" class="btn" id="cancelSearch" onclick="stopSearches()" disabled>停止搜索</button>
-    <div class="search-progress" role="status" aria-live="polite" aria-atomic="true">
-      <span id="searchStatus">等待开始</span><small id="searchStatistics"></small>
-    </div>
-  </section>
-
   <section class="inventory-import-card" id="inventoryImportCard" hidden aria-label="已有护甲" data-i18n-aria="inventoryImportAriaLabel">
     <div id="upgradeImportPanel" class="upgrade-import-panel"></div>
   </section>
@@ -277,7 +265,18 @@
   </div>
   </div>
 
-  <div class="btn-row">
+  <div class="btn-row solver-actions">
+    <section class="search-toolbar" aria-label="搜索设置">
+      <label for="searchProfile" id="searchProfileLabel">搜索深度</label>
+      <select id="searchProfile" onchange="setSearchProfile(this.value)" aria-describedby="searchProfileHelp">
+        <option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="deep">深度</option>
+      </select>
+      <span id="searchProfileHelp">先显示已验证结果，再继续扩大搜索。</span>
+      <button type="button" class="btn" id="cancelSearch" onclick="stopSearches()" disabled>停止搜索</button>
+      <div class="search-progress" role="status" aria-live="polite" aria-atomic="true">
+        <span id="searchStatus">等待开始</span><small id="searchStatistics"></small>
+      </div>
+    </section>
     <button class="btn-solve" id="btnSolve" type="button" onclick="solve()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="solveButton">求解最佳配装</span></button>
     <button class="btn-solve" id="btnUpgradeAnalyze" type="button" onclick="analyzeArmorUpgrades()" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="upgradeAnalyzeButton">分析优先替换</span></button>
     <button class="btn" id="saveBuildButton" type="button" onclick="saveBuild()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
