@@ -2044,20 +2044,20 @@ function appendImperfectWarning() {
   const searchLimited = allSolutions.certificate?.status !== 'INFEASIBLE_PROVEN';
   const warning = searchLimited
     ? l(
-        '\u641c\u7d22\u8fbe\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u4ec5\u4e3a\u5f53\u524d\u6700\u4f73 witness\uff0c\u5c1a\u672a\u8bc1\u660e\u5168\u5c40\u6700\u4f18\u6216\u4e0d\u53ef\u8fbe\u3002',
-        '\u641c\u5c0b\u9054\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u50c5\u70ba\u76ee\u524d\u6700\u4f73 witness\uff0c\u5c1a\u672a\u8b49\u660e\u5168\u57df\u6700\u512a\u6216\u4e0d\u53ef\u9054\u3002',
-        'Search limit reached. The entries below are current-best witnesses; global optimality or infeasibility is not proven.'
+        '\u641c\u7d22\u8fbe\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u4ec5\u4e3a\u5f53\u524d\u6700\u4f73配装\uff0c\u5c1a\u672a\u8bc1\u660e\u5168\u5c40\u6700\u4f18\u6216\u4e0d\u53ef\u8fbe\u3002',
+        '\u641c\u5c0b\u9054\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u50c5\u70ba\u76ee\u524d\u6700\u4f73配裝\uff0c\u5c1a\u672a\u8b49\u660e\u5168\u57df\u6700\u512a\u6216\u4e0d\u53ef\u9054\u3002',
+        'Search limit reached. The entries below are current-best loadouts; global optimality or infeasibility is not proven.'
       )
     : hasFuzzyRules
     ? l(
-        '穷尽搜索已证明没有配装满足全部属性规则；以下是最佳违反规则 witness。',
-        '窮盡搜尋已證明沒有配裝滿足全部數值規則；以下是最佳違反規則 witness。',
-        'Exhaustive search proved that no loadout satisfies every stat rule. The best violating witness is shown below.'
+        '穷尽搜索已证明没有配装满足全部属性规则；以下是最佳未达标搭配。',
+        '窮盡搜尋已證明沒有配裝滿足全部數值規則；以下是最佳未達標搭配。',
+        'Exhaustive search proved that no loadout satisfies every stat rule. The closest available loadout is shown below.'
       )
     : l(
-        '穷尽搜索已证明精确目标不可达；以下是最佳违反目标 witness。',
-        '窮盡搜尋已證明精確目標不可達；以下是最佳違反目標 witness。',
-        'Exhaustive search proved the exact target infeasible. The best violating witness is shown below.'
+        '穷尽搜索已证明精确目标不可达；以下是最接近目标的搭配。',
+        '窮盡搜尋已證明精確目標不可達；以下是最接近目標的搭配。',
+        'Exhaustive search proved the exact target infeasible. The closest available loadout is shown below.'
       );
   msgDiv.insertAdjacentHTML(
     'beforeend',
@@ -2094,9 +2094,9 @@ function renderSolutionNav() {
   const hasFuzzyRules = hasNonExactTargetRules();
   const title = !hasPerfect && allSolutions.certificate?.status === 'SEARCH_LIMIT_REACHED'
     ? l(
-        `\u641c\u7d22\u53d7\u9650\uff1b\u663e\u793a ${total} \u4e2a\u5f53\u524d\u6700\u4f73 witness`,
-        `\u641c\u5c0b\u53d7\u9650\uff1b\u986f\u793a ${total} \u500b\u76ee\u524d\u6700\u4f73 witness`,
-        `Search limited; showing ${total} current-best witnesses`,
+        `\u641c\u7d22\u53d7\u9650\uff1b\u663e\u793a ${total} \u4e2a\u5f53\u524d\u6700\u4f73配装`,
+        `\u641c\u5c0b\u53d7\u9650\uff1b\u986f\u793a ${total} \u500b\u76ee\u524d\u6700\u4f73配裝`,
+        `Search limited; showing ${total} current-best loadouts`,
       )
     : hasPerfect
     ? hasFuzzyRules
@@ -2112,14 +2112,14 @@ function renderSolutionNav() {
         )
     : hasFuzzyRules
       ? l(
-          `已证明没有完全满足方案；显示 ${total} 个违反规则 witness`,
-          `已證明沒有完全滿足方案；顯示 ${total} 個違反規則 witness`,
-          `No fully satisfying solution was proven; ${total} violating witnesses shown`,
+          `已证明没有完全满足方案；显示 ${total} 个未达标搭配`,
+          `已證明沒有完全滿足方案；顯示 ${total} 個未達標搭配`,
+          `No fully satisfying solution was proven; ${total} non-qualifying loadouts shown`,
         )
       : l(
-          `已证明精确目标不可达；显示 ${total} 个最佳违反目标 witness`,
-          `已證明精確目標不可達；顯示 ${total} 個最佳違反目標 witness`,
-          `Exact target proven infeasible; ${total} best violating witnesses shown`,
+          `已证明精确目标不可达；显示 ${total} 个最接近目标的搭配`,
+          `已證明精確目標不可達；顯示 ${total} 個最接近目標的搭配`,
+          `Exact target proven infeasible; ${total} closest available loadouts shown`,
         );
   const shownNote = truncated
     ? l(
@@ -2416,6 +2416,13 @@ function getFilteredInventoryExotics() {
 
 function getSelectedInventoryExotic() {
   if (!inventoryFixedExoticKey || inventoryExoticSlotFilter === 'classItem') return null;
+  if (inventoryFixedExoticKey === 'any-exotic' && importClassFilter && EXOTIC_SLOTS.has(inventoryExoticSlotFilter)) {
+    return {
+      key: 'any-exotic', reserved: true, classId: importClassFilter,
+      slot: inventoryExoticSlotFilter, hash: 0,
+      name: l('任意异域（待获取）', '任意異域（待取得）', 'Any Exotic (to acquire)'),
+    };
+  }
   const item = getFilteredInventoryExotics().find(candidate =>
     candidate.slot === inventoryExoticSlotFilter &&
     getInventoryExoticKey(candidate) === inventoryFixedExoticKey
@@ -2441,7 +2448,7 @@ function escapeHtml(value) {
 function getInventoryExoticPickerData() {
   const pool = getFilteredInventoryExotics();
   const slots = importClassFilter
-    ? EXOTIC_SLOT_ORDER.filter(slot => slot === 'classItem' || pool.some(item => item.slot === slot))
+    ? EXOTIC_SLOT_ORDER
     : [];
   if (!slots.includes(inventoryExoticSlotFilter)) {
     inventoryExoticSlotFilter = "";
@@ -2475,6 +2482,11 @@ function getInventoryExoticPickerData() {
     names = [...groups.values()].sort((left, right) =>
       String(left.item.name || "").localeCompare(String(right.item.name || ""), localeCode())
     );
+    if (importClassFilter && EXOTIC_SLOTS.has(inventoryExoticSlotFilter)) {
+      names.unshift({ key: 'any-exotic', item: {
+        name: l('任意异域', '任意異域', 'Any Exotic'),
+      }, count: 0 });
+    }
   }
   if (!names.some(entry => entry.key === inventoryFixedExoticKey)) {
     inventoryFixedExoticKey = "";
@@ -2568,7 +2580,7 @@ function renderUpgradeImportPanel() {
       <div class="upgrade-import-toolbar" aria-label="${l("已有护甲筛选与操作", "已有防具篩選與操作", "Owned armor filters and actions")}">
       <label class="import-class-select">
         <span>${l("职业", "職業", "Class")}</span>
-        <select id="importClass" data-import-dependent onchange="updateImportOptions()">${classOptions}</select>
+        <select id="importClass" onchange="updateImportOptions()">${classOptions}</select>
       </label>
       <label class="import-tier-toggle">
         <input type="checkbox" id="importTier5Only" data-import-dependent ${importTier5Only ? "checked" : ""} onchange="updateImportOptions()">
@@ -3379,7 +3391,7 @@ function bungiePlanErrorMessage(error) {
 }
 
 function getInventorySolutionEquipState(entry) {
-  if (!entry?.verified) return { available: false, reason: 'UNVERIFIED: witness' };
+  if (!entry?.verified) return { available: false, reason: 'UNVERIFIED: loadout' };
   if (!__BUNGIE_OAUTH_CLIENT_ID__) return { available: false, hidden: true };
   if (!hasToken()) return { available: false, reason: l("请先登录 Bungie。", "請先登入 Bungie。", "Sign in to Bungie first.") };
   if (importSource !== "bungie" || !bungieProfileState) {
@@ -3837,10 +3849,12 @@ function updateInventorySolveOptions({ refreshPlans = true } = {}) {
         ? l('请先选择职业，库存规划不会混用不同职业的护甲。', '請先選擇職業，庫存規劃不會混用不同職業的防具。', 'Choose a class first; inventory planning never mixes armor across classes.')
         : !selected && inventoryExoticSlotFilter && getFilteredInventoryExotics().length > 0
           ? l('已选择部位，请继续选择具体异域名称；同名多件会自动择优。', '已選擇部位，請繼續選擇具體異域名稱；同名多件會自動擇優。', 'Choose an Exotic name for this slot; same-name copies will be compared automatically.')
+          : selected?.reserved
+            ? l('此部位预留给尚未拥有的异域，不匹配已有传说或其他异域；方案会列出待获取的属性要求。', '此部位預留給尚未擁有的異域，不符合現有傳說或其他異域；方案會列出待取得的數值要求。', 'Reserve this slot for an unowned Exotic. Existing Legendary or other Exotic items will not fill it; the plan lists the roll to acquire.')
           : selected
             ? l(`已固定：${selected.name}（${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === selected.slot))}）；会优先使用同名且属性最接近的已有件。`, `已固定：${selected.name}（${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === selected.slot))}）；會優先使用同名且數值最接近的現有件。`, `Fixed: ${selected.name} (${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === selected.slot))}); the closest owned copy is preferred.`)
             : getFilteredInventoryExotics().length === 0
-              ? l('当前职业和 Tier 5 筛选下没有可固定的普通异域。', '目前職業和 Tier 5 篩選下沒有可固定的一般異域。', 'No regular Exotics are available under the current class and Tier 5 filters.')
+              ? l('暂无已有异域；可选择部位和“任意异域”，为尚未拥有的异域预留位置。', '暫無現有異域；可選擇部位和「任意異域」，為尚未擁有的異域預留位置。', 'No owned Exotics. Choose a slot and Any Exotic to reserve it for an unowned item.')
               : l('可选。先选异域部位和名称；没有完全匹配时，结果会显示同名最接近的现有件以及建议刷取属性。', '可選。先選異域部位和名稱；沒有完全符合時，結果會顯示同名最接近的現有件以及建議取得數值。', 'Optional. Choose an Exotic slot and name. If no copy fully matches, the result shows the closest owned copy and the roll to farm.');
   }
   saveUpgradeDraft();
@@ -4157,7 +4171,7 @@ function renderSetEffects() {
   // Owned pieces per set from the imported list, for the picker labels.
   const ownedSetCounts = new Map();
   for (const item of importedInventory) {
-    if (item?.setHash) {
+    if (importClassFilter && item?.classId === importClassFilter && item?.setHash) {
       ownedSetCounts.set(item.setHash, (ownedSetCounts.get(item.setHash) || 0) + 1);
     }
   }
@@ -4942,15 +4956,15 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
       <div>
         <div class="upgrade-eyebrow">${l('搜索受限','搜尋受限','Search limited')}</div>
         <div class="upgrade-recommendation">${rearranged
-          ? l('当前最佳 witness：重配模组','目前最佳 witness：重配模組','Current-best witness after rearranging mods')
-          : l('当前配装是目前最佳 witness','目前配裝是當前最佳 witness','Current loadout is the best witness found')}</div>
+          ? l('当前最佳配装：重配模组','目前最佳配裝：重配模組','Current-best loadout after rearranging mods')
+          : l('当前配装是目前最佳搭配','目前配裝是當前最佳搭配','Current loadout is the best loadout found')}</div>
         <p class="upgrade-recommendation-copy">${l(
-          `受限搜索未找到更好的替换 witness；当前方案还差 ${analysis.baseline.metrics.shortfall} 点，但尚未证明全局最优或不可达。`,
-          `受限搜尋未找到更好的替換 witness；目前方案還差 ${analysis.baseline.metrics.shortfall} 點，但尚未證明全域最優或不可達。`,
-          `The bounded search found no better replacement witness. This setup is ${analysis.baseline.metrics.shortfall} points short; global optimality and infeasibility remain unproven.`
+          `搜索时间内未找到更好的替换方案；当前搭配还差 ${analysis.baseline.metrics.shortfall} 点，仍可能存在更好的搭配。`,
+          `搜尋時間內未找到更好的替換方案；目前搭配還差 ${analysis.baseline.metrics.shortfall} 點，仍可能存在更好的搭配。`,
+          `The bounded search found no better replacement loadout. This setup is ${analysis.baseline.metrics.shortfall} points short; global optimality and infeasibility remain unproven.`
         )}</p>
       </div>
-      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('当前最佳 witness · 无需刷取','目前最佳 witness · 無需刷取','Current-best witness · no farming needed')}</span></div>
+      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('当前最佳配装 · 无需刷取','目前最佳配裝 · 無需刷取','Current-best loadout · no farming needed')}</span></div>
     </div>
     ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
     ${buildUpgradeBaselineNote(analysis)}`;
@@ -4970,8 +4984,8 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
         <div class="upgrade-eyebrow">${reached
           ? (plan.replacementProof?.minimal
             ? l('已证明的最少替换方案','已證明的最少替換方案','Proven minimum-replacement plan')
-            : l('可行替换 witness','可行替換 witness','Feasible replacement witness'))
-          : l('当前最佳替换 witness','目前最佳替換 witness','Current-best replacement witness')}</div>
+            : l('可行替换配装','可行替換配裝','Feasible replacement loadout'))
+          : l('当前最佳替换配装','目前最佳替換配裝','Current-best replacement loadout')}</div>
         <div class="upgrade-recommendation">${reached
           ? l(`换 ${plan.replacementCount} 件就能达标`, `換 ${plan.replacementCount} 件就能達標`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} to meet every target`)
           : l(`换 ${plan.replacementCount} 件后还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件後還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} and remain ${plan.metrics.shortfall} short`)}</div>
@@ -4982,9 +4996,9 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
             'The swaps are already prioritized. Follow the steps below. If you do not want to farm yet, keeping your current armor and rearranging tuning and mods works too, but leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below).'
           )
           : l(
-            '受限搜索尚未找到补齐六项的 witness。下面是当前最佳结果，不代表已证明全局最优或不可达；保留现有护甲重排调整与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点。',
-            '受限搜尋尚未找到補齊六項的 witness。下面是目前最佳結果，不代表已證明全域最優或不可達；保留目前防具重排調校與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點。',
-            'The bounded search has not found a witness meeting all six targets. The result below is current-best, not a proof of global optimality or infeasibility; keeping current armor leaves ' + analysis.baseline.metrics.shortfall + ' points short.'
+            '搜索时间内尚未找到全部达标的搭配。下面是目前找到的最佳方案，仍可能存在更好的搭配；保留现有护甲重排调整与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点。',
+            '搜尋時間內尚未找到全部達標的搭配。下面是目前找到的最佳方案，仍可能存在更好的搭配；保留目前防具重排調校與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點。',
+            'The bounded search has not found a loadout meeting all six targets. The result below is current-best, not a proof of global optimality or infeasibility; keeping current armor leaves ' + analysis.baseline.metrics.shortfall + ' points short.'
           )}</p>
       </div>
       <div class="upgrade-outcome">
@@ -5684,7 +5698,7 @@ function loadBuild(build) {
   if (build.result) {
     try { assertSolutionConsistency(build.result.problemSpec, build.result); }
     catch {
-      document.getElementById('messages').innerHTML = '<div class="msg warn">UNVERIFIED: ' + l('旧方案缺少可验证 witness，请重新求解。', '舊方案缺少可驗證 witness，請重新求解。', 'This saved plan has no valid witness. Solve it again.') + '</div>';
+      document.getElementById('messages').innerHTML = '<div class="msg warn">UNVERIFIED: ' + l('旧方案缺少校验数据，请重新求解。', '舊方案缺少驗證資料，請重新求解。', 'This saved plan is missing verification data. Solve it again.') + '</div>';
       return;
     }
     allSolutions = [build.result];

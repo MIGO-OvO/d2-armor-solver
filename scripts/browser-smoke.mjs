@@ -475,6 +475,12 @@ async function checkInventoryPlanning(browser) {
         baseStats: {},
         setHash: null,
       });
+      inventory[0].setHash = 741162535;
+      inventory[1].setHash = 741162535;
+      for (let index = 0; index < 3; index++) {
+        inventory.push({ ...inventory[index], id: `warlock-set-${index}`,
+          classId: 'warlock', setHash: 741162535 });
+      }
       localStorage.setItem(storageKeys.upgradeDraft, JSON.stringify({
         schemaVersion: 1,
         pieces: [],
@@ -515,6 +521,25 @@ async function checkInventoryPlanning(browser) {
     await page.evaluate(() => window.setCalculatorMode("solve"));
     await page.locator("#pageLanguage").selectOption("en");
     await page.locator("#onlyPlus5Tuning").check();
+    const setOption = page.locator('#setReqA option[value="741162535"]');
+    assert.match(await setOption.innerText(), /owned 2$/);
+    await page.locator('#importClass').selectOption('warlock');
+    assert.match(await setOption.innerText(), /owned 3$/);
+    await page.locator('#importClass').selectOption('');
+    assert.doesNotMatch(await setOption.innerText(), /owned/);
+    await page.locator('#importClass').selectOption('hunter');
+    await page.locator('#inventoryExoticSlotFilter').selectOption('chest');
+    await page.locator('#inventoryFixedExoticName').selectOption('any-exotic');
+    await page.reload({ waitUntil: 'networkidle' });
+    assert.equal(await page.locator('#inventoryFixedExoticName').inputValue(), 'any-exotic',
+      'an unowned reservation must survive draft restore');
+    await page.evaluate(() => window.solve());
+    await page.locator('#ownedGearSection').waitFor({ state: 'visible' });
+    assert.doesNotMatch(await page.locator('#ownedGearSection').innerText(), /Owned chest/);
+    assert.match(await page.locator('.farm-requirement-row', { hasText: 'Any Exotic' }).innerText(), /Chest/);
+    await page.locator('#inventoryFixedExoticName').selectOption('');
+    assert.match(await page.locator('#ownedGearSection').innerText(), /Owned chest/,
+      'clearing the reservation permits Legendary chest matches again');
     await page.locator("#inventoryExoticSlotFilter").selectOption("helmet");
     const fixedExoticValue = await page.locator("#inventoryFixedExoticName option", { hasText: "Regression Exotic" }).getAttribute("value");
     assert.ok(fixedExoticValue, "imported Exotic should be available by name");

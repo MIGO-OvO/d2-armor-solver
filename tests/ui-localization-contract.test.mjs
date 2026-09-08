@@ -60,4 +60,7 @@ test("Solver V3 UI copy distinguishes proof, limits, witnesses, and execution", 
   assert.doesNotMatch(source, /No exact solution;/);
   assert.doesNotMatch(source, /This is the closest setup/);
   assert.doesNotMatch(source, /最接近目标的方案/);
+  assert.match(source, /当前配装是目前最佳搭配/);
+  assert.doesNotMatch(source, /(?:最佳|替换|替換|可验证|可驗證) witness/);
+  assert.doesNotMatch(source, /(?:current-best|replacement|valid) witness/i);
 });

@@ -80,6 +80,9 @@ function getSolutionRequirements(solution, fixedExotic = null) {
 
 function matchesFixedExoticIdentity(item, fixedExotic) {
   if (!item || !fixedExotic) return false;
+  // An unowned Exotic reservation is a farming requirement, not a wildcard
+  // that may silently substitute a different owned Exotic.
+  if (fixedExotic.reserved) return false;
   const fixedName = String(fixedExotic.name || "").trim().toLocaleLowerCase();
   const itemName = String(item.name || "").trim().toLocaleLowerCase();
   if (fixedName && itemName) {

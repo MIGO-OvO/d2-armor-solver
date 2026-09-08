@@ -64,6 +64,22 @@ test("inventory plans count exact owned identities before farming gaps", () => {
   );
 });
 
+test('an unowned Exotic reservation cannot be filled by owned Legendary or Exotic armor', () => {
+  const solution = makeSolution();
+  const items = solution.config.map((_, index) => makeItem(solution, index));
+  items.push(makeItem(solution, 2, { id: 'other-exotic', exotic: true, name: 'Other Exotic' }));
+  const [plan] = rankInventoryPlans({ solutions: [solution], items, classId: 'hunter',
+    fixedExotic: { reserved: true, slot: 'chest', classId: 'hunter' },
+    setRequirement: { type: 'none' },
+  });
+  const chest = plan.pieces.find(piece => piece.slot === 'chest');
+  assert.equal(chest.exotic, true);
+  assert.equal(chest.item, null);
+  assert.equal(chest.closestItem, null);
+  assert.equal(chest.farmSetHash, null);
+  assert.equal(plan.ownedCount, 4);
+});
+
 test("target quality outranks matching more owned armor", () => {
   const better = {
     ...makeSolution(BASE_CONFIGS.slice(0, 5)),

@@ -1258,9 +1258,17 @@ function visitPermutations(values, visit, depth = 0) {
 function findExactUpgradePlanIterative(
   pieces, targets, fragments, reassignModifiers, evaluatePieces,
   onlyPlus5Tuning, userConstraints = {}, search = null,
+  { feasibilityOnly = false, maxReplacements = pieces.length } = {},
 ) {
   if (!reassignModifiers) return null;
-  const exactPointModelComplete = STATS.every(stat => userConstraints.exact?.[stat] === true);
+  // The UI converts visible exact 0/200 into armor ceilings/floors. These
+  // remain exact *visible* rules, not fuzzy goals: use the same clamp preimages
+  // as Scratch instead of silently falling through to the heuristic sweep.
+  const exactPointModelComplete = STATS.every(stat => userConstraints.exact?.[stat] === true
+    || targets[stat] === 0 && userConstraints.maximums?.[stat] !== undefined
+      && userConstraints.maximums[stat] + (fragments[stat] || 0) <= 0
+    || targets[stat] === 200 && userConstraints.minimums?.[stat] !== undefined
+      && userConstraints.minimums[stat] + (fragments[stat] || 0) >= 200);
   // Full visible targets use every budget-consistent armor preimage. Partial
   // fuzzy rules use the bounded fallback and cannot claim minimum replacement.
   if (!exactPointModelComplete) return null;
@@ -1279,7 +1287,8 @@ function findExactUpgradePlanIterative(
     getUpgradeTuningCapability(piece, onlyPlus5Tuning).complete);
   let proofModelComplete = tuningModelComplete && exactPointModelComplete;
 
-  for (let replacementDepth = 0; replacementDepth <= unlocked.length; replacementDepth++) {
+  for (let replacementDepth = feasibilityOnly ? unlocked.length : 0;
+    replacementDepth <= Math.min(unlocked.length, maxReplacements); replacementDepth++) {
     let bestAtDepth = null;
     for (const replacementSlots of replacementSubsets(unlocked, replacementDepth)) {
       const replacementSet = new Set(replacementSlots);
@@ -1378,9 +1387,11 @@ function findExactUpgradePlanIterative(
             replacementProof: {
               method: "replacement-count-iterative-deepening",
               examinedThrough: replacementDepth,
-              complete: proofModelComplete,
-              ...(proofModelComplete ? { minimal: true } : {
-                limitation: !tuningModelComplete
+              complete: proofModelComplete && !feasibilityOnly,
+              ...(proofModelComplete && !feasibilityOnly ? { minimal: true } : {
+                limitation: feasibilityOnly
+                  ? 'feasible upper bound; smaller replacement counts are still being searched'
+                  : !tuningModelComplete
                   ? "one or more Tuning capabilities are unknown"
                   : "clamp preimage exceeded its exact enumeration budget",
               }),
@@ -1642,7 +1653,14 @@ export function analyzeUpgradeCandidates(
   let plan = null;
   try {
   if (!baseline.metrics.allReached) {
-    plan = findExactUpgradePlanIterative(
+    // Establish a feasible upper bound before spending the interactive budget
+    // proving how few replacements suffice. Fixed instances remain fixed.
+    if (search) plan = findExactUpgradePlanIterative(
+      pieces, targets, fragments, reassignModifiers, evaluatePieces,
+      onlyPlus5Tuning, userConstraints, search, { feasibilityOnly: true },
+    );
+    if (plan) search?.publish(partial(plan));
+    const minimalPlan = findExactUpgradePlanIterative(
       pieces,
       targets,
       fragments,
@@ -1651,7 +1669,9 @@ export function analyzeUpgradeCandidates(
       onlyPlus5Tuning,
       userConstraints,
       search,
+      { maxReplacements: plan ? plan.replacementCount - 1 : pieces.length },
     );
+    if (minimalPlan) plan = minimalPlan;
     if (!plan) {
     // Full-target feasibility is invariant under the UI's fallback-priority
     // checkboxes. Always run the same all-six-stats search first; only if it
