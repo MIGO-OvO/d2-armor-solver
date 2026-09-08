@@ -20,7 +20,7 @@ npm run desktop:build
 ```
 
 安装包输出：`src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`。
-`desktop-windows.yml` 可手动运行，main/develop 的相关代码变更也会构建，产物保留 14 天。新 Release 发布时会独立构建并附加 `d2-armor-solver-windows-x64-setup.exe`；不会更改 Pages 作业或覆盖原 HTML 离线 ZIP。已有 v3.0.1 Release 的桌面补包由维护者更新附件和说明，原标签保持不变，源码提交在 Release 页面注明。
+`desktop-windows.yml` 可手动运行，main/develop 的相关代码变更也会构建，产物保留 14 天。新 Release 发布时会独立构建并附加 `d2-armor-solver-windows-x64-setup.exe`；不会更改 Pages 作业。v3.0.1 的离线包已由维护者替换为该安装包（原 HTML 离线 ZIP 从该 Release 移除，免安装 ZIP 改从 Actions 工件获取），原标签保持不变，源码提交在 Release 页面注明。
 
 ## 架构与兼容边界
 

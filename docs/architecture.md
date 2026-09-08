@@ -175,7 +175,9 @@ the composed stable HTML relays only callbacks whose state begins with
 session-state comparison before exchanging the code, preserving the CSRF
 boundary while keeping stable callbacks on the stable channel.
 
-Every pushed branch also produces a solver-only offline artifact; published
-Releases receive the same offline archive as a downloadable asset. Cloudflare
+Every pushed branch also produces a solver-only offline artifact. Published
+Releases ship the Windows desktop installer as the offline package; the
+standalone browser ZIP stays available from Actions artifacts instead of being
+attached to Releases. Cloudflare
 Workers Static Assets can still consume a standalone `dist/` through Wrangler,
 with automatic canonical HTML paths and explicit 404 handling.

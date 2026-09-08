@@ -36,9 +36,11 @@
 
 ## 离线使用 / Offline Use
 
-完全离线的独立构建，无需 Node、npm 或服务器：
+Release 的离线包是 [Windows 10/11 x64 安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe)。下面的浏览器免安装 ZIP 不再随 Release 分发，可从任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件获取（保留 14 天）。
 
-1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v3.0.1.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+浏览器免安装 ZIP 是完全离线的独立构建，无需 Node、npm 或服务器：
+
+1. 从 Actions 工件下载 `d2-armor-solver-offline.zip`，或本地运行 `npm run build:offline` 生成。
 2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
 
 离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
@@ -211,7 +213,7 @@ DIM 会忽略账号未拥有的模组，应用模组前护甲也需要满足游�
 
 ### Windows 10/11 桌面安装包
 
-[下载桌面离线安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe)（x64，约 2.22 MB）。目前通过 DIM CSV 导入库存，桌面版尚未接入 Bungie 登录。原 HTML 离线 ZIP 和网页版继续保留。
+[下载桌面离线安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe)（x64，约 2.22 MB）。目前通过 DIM CSV 导入库存，桌面版尚未接入 Bungie 登录。该安装包是 Release 的唯一离线包；网页版与浏览器免安装 ZIP 的构建方式保留，ZIP 改从 Actions 工件获取。
 
 新增 Rust + Tauri 2 + React + TypeScript 离线桌面入口，采用横向参数/结果工作台，保留现有在线版及离线 ZIP。开发运行 `npm run desktop:dev`，构建 x64 安装包运行 `npm run desktop:build`。需要 Rust MSVC、C++ Build Tools 和 Windows SDK；轻量安装包不包含或自动下载 WebView2，目标电脑须已安装 WebView2 Runtime（建议 120 或更新版本）。
 
