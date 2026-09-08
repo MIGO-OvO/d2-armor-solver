@@ -1,0 +1,73 @@
+name: Build Windows offline desktop
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  push:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'app/**'
+      - 'package*.json'
+      - 'scripts/verify-desktop.mjs'
+      - '.github/workflows/desktop-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run desktop:test
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - run: npm run desktop:build
+      - name: Prepare offline desktop installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe'
+          if (@($installer).Count -ne 1) { throw 'Expected exactly one desktop installer' }
+          New-Item -ItemType Directory -Path desktop-release -Force | Out-Null
+          Copy-Item -LiteralPath $installer.FullName -Destination desktop-release/d2-armor-solver-windows-x64-setup.exe
+      - uses: actions/upload-artifact@v5
+        with:
+          name: d2-armor-solver-windows-x64
+          path: desktop-release/d2-armor-solver-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: d2-armor-solver-windows-x64
+          path: desktop-release
+      - name: Attach offline desktop installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" desktop-release/d2-armor-solver-windows-x64-setup.exe --clobber

@@ -6,6 +6,11 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build --target x86_64-pc-windows-msvc -- --locked",
+    "desktop:ui": "vite --config desktop/vite.config.mjs",
+    "desktop:frontend": "tsc -p desktop/tsconfig.json && vite build --config desktop/vite.config.mjs",
+    "desktop:test": "npm run desktop:frontend && node scripts/verify-desktop.mjs",
     "build": "node scripts/build.mjs",
     "build:offline": "node scripts/build-offline.mjs",
     "dev": "vite",
@@ -24,10 +29,20 @@
     "deploy:dry-run": "npm run build && wrangler deploy --dry-run"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
     "eslint": "^10.8.0",
     "globals": "^17.3.0",
     "playwright-core": "^1.62.1",
+    "typescript": "^7.0.2",
     "vite": "^8.2.0",
     "wrangler": "^4.114.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }
