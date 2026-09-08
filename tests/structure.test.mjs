@@ -36,8 +36,9 @@ test("the portal and app expose separate static entries", async () => {
   assert.match(portal, /href="\.\/app\/"/);
   assert.match(
     portal,
-    /releases\/latest\/download\/d2-armor-solver-offline\.zip/,
+    /releases\/latest\/download\/d2-armor-solver-windows-x64-setup\.exe/,
   );
+  assert.doesNotMatch(portal, /d2-armor-solver-offline[^"]*\.zip/);
   assert.doesNotMatch(portal, /src\/app\.mjs/);
   assert.doesNotMatch(portal, /<style(?:\s|>)/);
 

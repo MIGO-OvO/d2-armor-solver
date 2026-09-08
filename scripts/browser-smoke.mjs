@@ -333,8 +333,8 @@ async function checkPortal(browser) {
     );
     assert.equal(
       await page.locator(".route--offline .action").getAttribute("href"),
-      "https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline.zip",
-      "the primary offline route should download the latest Release archive",
+      "https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe",
+      "the primary offline route should download the Windows installer",
     );
 
     await page.locator("#portalLanguage").selectOption("zh-chs");
