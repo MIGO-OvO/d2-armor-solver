@@ -38,7 +38,7 @@
 
 完全离线的独立构建，无需 Node、npm 或服务器：
 
-1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v3.0.0.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
+1. 直接下载 [最新 Release 离线包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-offline-v3.0.1.zip)，或在任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件中获取抢先构建。
 2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
 
 离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
@@ -52,7 +52,17 @@
 
 ## Changelog / 更新日志
 
-### v3.0.0（最新版）
+### v3.0.1（最新版）
+
+- 修复 Upgrade Search 在可见属性 0/200 边界下的可行解漏检：被钳制为「至多 0」「至少 200」的精确可见规则现在按精确可见目标处理，与从零求解共用同一套钳制原像，不再退回有界启发式搜索而错过预算内可行的精确方案。
+- 修复搜索预算下的可行解漏检：先在交互预算内建立并发布一份经过验证的可行替换方案，再在剩余预算里最小化替换件数；预算耗尽时如实标注为「可行上界」，而不是把可行方案藏起来。
+- 修复库存交互状态：重排库存方案时保留已展开的折叠区与正在查看的方案，被动的 Bungie 库存刷新不再打断正在进行的下拉选择。
+- 修复 planned tuning 展示：已有护甲同时显示方案要求的调整方向与当前实际安装的调整模组，需要更换时明确提示，且不覆盖库存真实数据。
+- 修复未拥有异域预留：选择「任意异域（待获取）」后，该部位不再被已有传说或其他异域顶替，方案会列出待获取的属性要求，预留状态随草稿恢复。
+- 修复职业套装计数：套装选择器的「已拥有」件数只统计当前所选职业的护甲。
+- 发布验证：322 项 Node 测试、浏览器 smoke、upgrade 计划验证、离线构建验证与 1300 件 benchmark 矩阵全部通过。完整说明见 [v3.0.1 Release Notes](./docs/release-notes-v3.0.1.md)。
+
+### v3.0.0
 
 - Solver V3 正式稳定版：四条求解入口共享同一整数约束模型与结果证书，witness 校验与封印使证书成为数学结果的唯一真值，UI 只依据证书展示正确性结论，不再依赖 legacy heuristic 判断结果是否真实满足规则。
 - 分阶段搜索 Fast / Balanced / Deep：解决的是同一个数学问题，只改变搜索预算与证明深度，不改变任何游戏规则。Fast 未找到解时不会错误声称不可行；预算耗尽只会产生 `SEARCH_LIMIT_REACHED`，只有完整可信证明才会产生 `INFEASIBLE_PROVEN`。

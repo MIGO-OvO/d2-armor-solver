@@ -174,11 +174,15 @@ jobs:
         run: |
           cd dist-offline
           zip -r "../d2-armor-solver-offline-${{ github.event.release.tag_name }}.zip" .
+          # The portal links to the stable, unversioned download name, so publish it too.
+          cp "../d2-armor-solver-offline-${{ github.event.release.tag_name }}.zip" ../d2-armor-solver-offline.zip
 
       - name: Attach offline distribution to release
         uses: softprops/action-gh-release@v2
         with:
-          files: d2-armor-solver-offline-${{ github.event.release.tag_name }}.zip
+          files: |
+            d2-armor-solver-offline-${{ github.event.release.tag_name }}.zip
+            d2-armor-solver-offline.zip
           overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
