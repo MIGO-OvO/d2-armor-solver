@@ -12,6 +12,8 @@ const ADJUSTMENT_TABLE_SIZE = ADJUSTMENT_RADIX ** 5;
 const MAX_ADJUSTMENT_CACHE_ENTRIES = 2;
 
 const adjustmentCache = new Map();
+const diagnostics = {cacheHits: 0, cacheMisses: 0, buildMs: 0};
+export function getOracleDiagnostics() { return {...diagnostics}; }
 
 const BASE_VECTORS = BASE_CONFIGS.map(config =>
   STATS.map(stat => config.baseStats[stat]));
@@ -43,10 +45,12 @@ function packAdjustment(values) {
 }
 
 function stateKey(values) {
-  return values.join(",");
+  // The sixth coordinate is fixed by the conserved total at each DP layer.
+  // Number arithmetic (not 32-bit bitwise packing) preserves the full key.
+  return packAdjustment(values);
 }
 
-function buildShiftStates(count) {
+function buildShiftStates(count, checkpoint = null) {
   let states = new Map([["0,0,0,0,0", {
     values: [0, 0, 0, 0, 0],
     code: 0,
@@ -55,6 +59,7 @@ function buildShiftStates(count) {
   for (let pieceIndex = 0; pieceIndex < count; pieceIndex++) {
     const next = new Map();
     for (const state of states.values()) {
+      checkpoint?.(0);
       for (let actionIndex = 0; actionIndex < SHIFT_ACTIONS.length; actionIndex++) {
         const action = SHIFT_ACTIONS[actionIndex];
         const values = state.values.map((value, index) =>
@@ -71,7 +76,7 @@ function buildShiftStates(count) {
   return [...states.values()].sort((left, right) => left.code - right.code);
 }
 
-function buildRestrictedShiftStates(targets) {
+function buildRestrictedShiftStates(targets, checkpoint = null) {
   let states = new Map([["0,0,0,0,0,0", {
     values: [0, 0, 0, 0, 0, 0],
     code: 0,
@@ -84,6 +89,7 @@ function buildRestrictedShiftStates(targets) {
         : null;
     const next = new Map();
     for (const state of states.values()) {
+      checkpoint?.(0);
       for (let actionIndex = 0; actionIndex < SHIFT_ACTIONS.length; actionIndex++) {
         const action = SHIFT_ACTIONS[actionIndex];
         if (allowedTargets && !allowedTargets.has(STATS[action.to])) continue;
@@ -132,12 +138,13 @@ function buildModifierStates(numPlus5, numPlus10) {
   };
 }
 
-function buildAdjustmentIndexFromShiftStates(shiftStates, numPlus5, numPlus10) {
+function buildAdjustmentIndexFromShiftStates(shiftStates, numPlus5, numPlus10, checkpoint = null) {
   const modifier = buildModifierStates(numPlus5, numPlus10);
   // Zero means unreachable. Every stored witness is offset by one.
   const witnesses = new Int32Array(ADJUSTMENT_TABLE_SIZE);
 
   for (let shiftIndex = 0; shiftIndex < shiftStates.length; shiftIndex++) {
+    checkpoint?.(0);
     const shift = shiftStates[shiftIndex];
     for (let modifierIndex = 0;
       modifierIndex < modifier.states.length;
@@ -189,20 +196,22 @@ function buildAdjustmentIndexFromShiftStates(shiftStates, numPlus5, numPlus10) {
   };
 }
 
-function buildAdjustmentIndex(shiftCount, numPlus5, numPlus10) {
+function buildAdjustmentIndex(shiftCount, numPlus5, numPlus10, checkpoint = null) {
   const index = buildAdjustmentIndexFromShiftStates(
-    buildShiftStates(shiftCount),
+    buildShiftStates(shiftCount, checkpoint),
     numPlus5,
     numPlus10,
+    checkpoint,
   );
   index.shiftCount = shiftCount;
   return index;
 }
 
-function buildSparseAdjustmentIndex(shiftStates, numPlus5, numPlus10) {
+function buildSparseAdjustmentIndex(shiftStates, numPlus5, numPlus10, checkpoint = null) {
   const modifier = buildModifierStates(numPlus5, numPlus10);
   const witnesses = new Map();
   for (let shiftIndex = 0; shiftIndex < shiftStates.length; shiftIndex++) {
+    checkpoint?.(0);
     const shift = shiftStates[shiftIndex];
     for (let modifierIndex = 0;
       modifierIndex < modifier.states.length;
@@ -224,16 +233,20 @@ function buildSparseAdjustmentIndex(shiftStates, numPlus5, numPlus10) {
   };
 }
 
-function getAdjustmentIndex(shiftCount, numPlus5, numPlus10) {
+function getAdjustmentIndex(shiftCount, numPlus5, numPlus10, checkpoint = null) {
   const cacheKey = `${shiftCount}|${numPlus5}|${numPlus10}`;
   const cached = adjustmentCache.get(cacheKey);
   if (cached) {
+    diagnostics.cacheHits++;
     adjustmentCache.delete(cacheKey);
     adjustmentCache.set(cacheKey, cached);
     return cached;
   }
 
-  const index = buildAdjustmentIndex(shiftCount, numPlus5, numPlus10);
+  diagnostics.cacheMisses++;
+  const started = performance.now();
+  const index = buildAdjustmentIndex(shiftCount, numPlus5, numPlus10, checkpoint);
+  diagnostics.buildMs += performance.now() - started;
   adjustmentCache.set(cacheKey, index);
   while (adjustmentCache.size > MAX_ADJUSTMENT_CACHE_ENTRIES) {
     adjustmentCache.delete(adjustmentCache.keys().next().value);
@@ -244,21 +257,29 @@ function getAdjustmentIndex(shiftCount, numPlus5, numPlus10) {
 const restrictedAdjustmentCache = new Map();
 const MAX_RESTRICTED_ADJUSTMENT_CACHE_ENTRIES = 2;
 
-function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10) {
+function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10, checkpoint = null) {
+  if (targets.every(target => target === undefined || target === null)) {
+    return getAdjustmentIndex(targets.length, numPlus5, numPlus10, checkpoint);
+  }
   const cacheKey = `${targets.map(target => Array.isArray(target)
     ? `[${target.join(",")}]`
     : target || "*").join(";")}|${numPlus5}|${numPlus10}`;
   const cached = restrictedAdjustmentCache.get(cacheKey);
   if (cached) {
+    diagnostics.cacheHits++;
     restrictedAdjustmentCache.delete(cacheKey);
     restrictedAdjustmentCache.set(cacheKey, cached);
     return cached;
   }
+  diagnostics.cacheMisses++;
+  const started = performance.now();
   const index = buildSparseAdjustmentIndex(
-    buildRestrictedShiftStates(targets),
+    buildRestrictedShiftStates(targets, checkpoint),
     numPlus5,
     numPlus10,
+    checkpoint,
   );
+  diagnostics.buildMs += performance.now() - started;
   index.shiftCount = targets.length;
   restrictedAdjustmentCache.set(cacheKey, index);
   while (restrictedAdjustmentCache.size > MAX_RESTRICTED_ADJUSTMENT_CACHE_ENTRIES) {
@@ -271,6 +292,44 @@ function getPackedWitness(index, key) {
   return index.witnesses instanceof Map
     ? index.witnesses.get(key) || 0
     : index.witnesses[key];
+}
+
+function queryAdjustmentBox(index, base, minimums, maximums, totalUnits, checkpoint) {
+  const low = base.map((value, stat) => Math.max(-5, minimums[stat] === null ? -5 : Math.ceil((minimums[stat] - value) / 5)));
+  const high = base.map((value, stat) => Math.min(15, maximums[stat] === null ? 15 : Math.floor((maximums[stat] - value) / 5)));
+  if (low.some((value, stat) => value > high[stat])) return null;
+  const volume = low.slice(0, 5).reduce((product, value, stat) => product * (high[stat] - value + 1), 1);
+  if (volume <= index.reachableKeys.length) {
+    const suffixLow = Array(7).fill(0), suffixHigh = Array(7).fill(0);
+    for (let stat = 5; stat >= 0; stat--) {
+      suffixLow[stat] = suffixLow[stat + 1] + low[stat];
+      suffixHigh[stat] = suffixHigh[stat + 1] + high[stat];
+    }
+    const values = [];
+    const visit = (stat, remaining) => {
+      if (remaining < suffixLow[stat] || remaining > suffixHigh[stat]) return null;
+      if (stat === 5) {
+        checkpoint?.(0);
+        values[5] = remaining;
+        return getPackedWitness(index, packAdjustment(values)) ? [...values] : null;
+      }
+      for (let value = Math.max(low[stat], remaining - suffixHigh[stat + 1]);
+        value <= Math.min(high[stat], remaining - suffixLow[stat + 1]); value++) {
+        values[stat] = value;
+        const result = visit(stat + 1, remaining - value);
+        if (result) return result;
+      }
+      return null;
+    };
+    return visit(0, totalUnits);
+  }
+  for (let row = 0; row < index.reachableKeys.length; row++) {
+    if ((row & 1023) === 0) checkpoint?.(0);
+    const values = unpackAdjustment(index.reachableKeys[row]);
+    values[5] = totalUnits - values.slice(0, 5).reduce((sum, value) => sum + value, 0);
+    if (values.every((value, stat) => value >= low[stat] && value <= high[stat])) return values;
+  }
+  return null;
 }
 
 function unpackAdjustment(key) {
@@ -408,7 +467,7 @@ export function visibleArmorTargets(target, fragments, total, limit = 128) {
 
 // Target-directed join: do not materialize every shift × mod pair for each
 // owned capability pattern. The sixth coordinate follows from the total.
-export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tuningCapabilities}) {
+export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tuningCapabilities, checkpoint = null}) {
   if (configs?.length !== 5 || tuningCapabilities?.length !== 5
       || !STATS.every(stat => Number.isSafeInteger(target?.[stat]))) return null;
   const modKey = `${numPlus5}|${numPlus10}`;
@@ -420,6 +479,7 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tu
     - numPlus5 * 5 - numPlus10 * 10) / 3;
   if (!Number.isInteger(count) || count < 0 || count > 5) return null;
   for (const {mask} of getMasks(5, count)) {
+    checkpoint?.(0);
     const totals = [...base];
     const destinations = [];
     let allowed = true;
@@ -440,7 +500,7 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tu
     const key = JSON.stringify(destinations);
     let shift = pointShiftCache.get(key);
     if (!shift) {
-      const states = buildRestrictedShiftStates(destinations);
+      const states = buildRestrictedShiftStates(destinations, checkpoint);
       shift = {states, byVector: new Map(states.map((state, index) => [state.values.slice(0, 5).join(","), index]))};
       pointShiftCache.set(key, shift);
       if (pointShiftCache.size > 64) pointShiftCache.delete(pointShiftCache.keys().next().value);
@@ -459,7 +519,7 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tu
   return null;
 }
 
-export function findFixedRuleWitness({configs, numPlus5, numPlus10, tuningCapabilities, minimums, maximums}) {
+export function findFixedRuleWitness({configs, numPlus5, numPlus10, tuningCapabilities, minimums, maximums, checkpoint = null}) {
   const constrained = STATS.map((_, index) => index).filter(index => minimums[index] !== null || maximums[index] !== null);
   if (!constrained.length) return null;
   const modKey = `${numPlus5}|${numPlus10}`;
@@ -473,6 +533,7 @@ export function findFixedRuleWitness({configs, numPlus5, numPlus10, tuningCapabi
     if (!projectedMods.has(key)) projectedMods.set(key, index);
   });
   for (let mask = 0; mask < 32; mask++) {
+    checkpoint?.(0);
     const base = STATS.map(stat => configs.reduce((sum, config) => sum + config.baseStats[stat], 0));
     const destinations = [];
     let allowed = true;
@@ -494,12 +555,13 @@ export function findFixedRuleWitness({configs, numPlus5, numPlus10, tuningCapabi
     const key = JSON.stringify(destinations);
     let shift = pointShiftCache.get(key);
     if (!shift) {
-      const states = buildRestrictedShiftStates(destinations);
+      const states = buildRestrictedShiftStates(destinations, checkpoint);
       shift = {states, byVector: new Map(states.map((state, index) => [state.values.slice(0, 5).join(","), index]))};
       pointShiftCache.set(key, shift);
       if (pointShiftCache.size > 64) pointShiftCache.delete(pointShiftCache.keys().next().value);
     }
     for (let shiftIndex = 0; shiftIndex < shift.states.length; shiftIndex++) {
+      checkpoint?.(0);
       const values = shift.states[shiftIndex].values;
       for (const modIndex of projectedMods.values()) {
         const mod = modVectors[modIndex];
@@ -526,6 +588,8 @@ export function findBestFixedConfigWitness({
   tuningCapabilities = null,
   rankTotals,
   compareRanks,
+  checkpoint = null,
+  onWitness = null,
 }) {
   if (!Array.isArray(configs) || configs.length !== 5) return null;
   if (typeof rankTotals !== "function" || typeof compareRanks !== "function") return null;
@@ -553,6 +617,7 @@ export function findBestFixedConfigWitness({
   let best = null;
 
   for (const maskEntry of masks) {
+    checkpoint?.(0);
     const shiftPieceIndices = [];
     const shiftTargets = [];
     const baseTotals = STATS.map(() => 0);
@@ -573,11 +638,12 @@ export function findBestFixedConfigWitness({
       }
     }
     const adjustmentIndex = fixedTuningTargets || tuningCapabilities
-      ? getRestrictedAdjustmentIndex(shiftTargets, numPlus5, numPlus10)
-      : getAdjustmentIndex(shiftPieceIndices.length, numPlus5, numPlus10);
+      ? getRestrictedAdjustmentIndex(shiftTargets, numPlus5, numPlus10, checkpoint)
+      : getAdjustmentIndex(shiftPieceIndices.length, numPlus5, numPlus10, checkpoint);
     const modifierUnits = numPlus5 + numPlus10 * 2;
 
     for (const key of adjustmentIndex.reachableKeys) {
+      checkpoint?.(0);
       const units = unpackAdjustment(key);
       units[5] = modifierUnits - units.slice(0, 5)
         .reduce((sum, value) => sum + value, 0);
@@ -598,6 +664,7 @@ export function findBestFixedConfigWitness({
         rank,
         ...materialized,
       };
+      onWitness?.(best);
     }
   }
   return best;
@@ -622,7 +689,7 @@ function getAdjustmentValueSets(index) {
   return sets.map(set => [...set].sort((left, right) => left - right));
 }
 
-function visitModeSelections(count, vectors, visit) {
+function visitModeSelections(count, vectors, visit, canVisit = null) {
   if (count === 0) {
     visit({ indices: [], totals: STATS.map(() => 0) });
     return;
@@ -630,9 +697,9 @@ function visitModeSelections(count, vectors, visit) {
   const indices = Array(count).fill(0);
   const totals = STATS.map(() => 0);
   const enumerate = (start, depth) => {
+    if (canVisit && !canVisit(totals, count - depth)) return false;
     if (depth === count) {
-      visit({ indices: [...indices], totals: [...totals] });
-      return;
+      return visit({ indices: [...indices], totals: [...totals] }) === true;
     }
     for (let configIndex = start; configIndex < BASE_CONFIGS.length; configIndex++) {
       indices[depth] = configIndex;
@@ -640,7 +707,7 @@ function visitModeSelections(count, vectors, visit) {
       for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
         totals[statIndex] += vector[statIndex];
       }
-      enumerate(configIndex, depth + 1);
+      if (enumerate(configIndex, depth + 1)) return true;
       for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
         totals[statIndex] -= vector[statIndex];
       }
@@ -680,8 +747,22 @@ export function findBestGlobalWitness({
       shiftCount,
       numPlus5,
       numPlus10,
+      checkpoint,
     );
     const adjustmentValueSets = getAdjustmentValueSets(adjustmentIndex);
+    if (!adjustmentIndex.pairValueSets) {
+      const pairs = Array.from({length: 3}, () => new Map());
+      for (let row = 0; row < adjustmentIndex.reachableKeys.length; row++) {
+        if ((row & 1023) === 0) checkpoint?.(0);
+        for (let pair = 0; pair < 3; pair++) {
+          const a = adjustmentIndex.reachableUnits[row * 6 + pair * 2];
+          const b = adjustmentIndex.reachableUnits[row * 6 + pair * 2 + 1];
+          pairs[pair].set(`${a},${b}`, [a, b]);
+        }
+      }
+      adjustmentIndex.pairValueSets = pairs.map(pair => [...pair.values()]);
+    }
+    const boundCache = new Map();
     const fixedTotals = STATS.map((_, statIndex) => {
       if (!fixed) return 0;
       return fixed.base[statIndex]
@@ -695,6 +776,17 @@ export function findBestGlobalWitness({
         value + plus3.totals[statIndex] + shift.totals[statIndex]);
       const lowerRank = lowerBoundRank(baseTotals, adjustmentValueSets);
       if (incumbentRank && compareRanks(lowerRank, incumbentRank) > 0) return;
+      const baseKey = baseTotals.join(',');
+      let jointRank = boundCache.get(baseKey);
+      if (!jointRank) {
+        jointRank = lowerBoundRank(baseTotals, adjustmentValueSets, adjustmentIndex.pairValueSets);
+        if (boundCache.size >= 8192) boundCache.delete(boundCache.keys().next().value);
+        boundCache.set(baseKey, jointRank);
+      }
+      if (incumbentRank && compareRanks(jointRank, incumbentRank) > 0) {
+        searchStats.prunedJoint = (searchStats.prunedJoint || 0) + 1;
+        return;
+      }
 
       for (let row = 0; row < adjustmentIndex.reachableKeys.length; row++) {
         searchStats.statesExamined++;
@@ -835,6 +927,7 @@ export function findExactTargetWitnesses({
     5 - numPlus3,
     numPlus5,
     numPlus10,
+    checkpoint,
   );
   const modifierUnits = numPlus5 + numPlus10 * 2;
   const selected = Array(freePieceCount).fill(0);
@@ -861,6 +954,10 @@ export function findExactTargetWitnesses({
   // piece's base config may repeat independently in either Tuning mode.
   if (!fixed && numPlus3 > 0 && numPlus3 < 5) {
     const mask = (1 << numPlus3) - 1;
+    // Directional bases and every adjustment are multiples of five. Filter
+    // before the Cartesian product; preserve the surviving canonical order.
+    const matchesResidue = selection => selection.totals.every((value, index) =>
+      (normalizedTarget[index] - value) % 5 === 0);
     const inspectPair = (plus3, shift) => {
       searchStats.statesExamined++;
       if ((searchStats.statesExamined & 1023) === 0) checkpoint?.(1024);
@@ -882,13 +979,14 @@ export function findExactTargetWitnesses({
     };
     const shiftCount = 5 - numPlus3;
     if (numPlus3 <= shiftCount) {
-      const plus3Selections = buildModeSelections(numPlus3, PLUS3_VECTORS);
+      const plus3Selections = buildModeSelections(numPlus3, PLUS3_VECTORS).filter(matchesResidue);
       visitModeSelections(shiftCount, BASE_VECTORS, shift => {
         for (const plus3 of plus3Selections) inspectPair(plus3, shift);
       });
     } else {
       const shiftSelections = buildModeSelections(shiftCount, BASE_VECTORS);
       visitModeSelections(numPlus3, PLUS3_VECTORS, plus3 => {
+        if (!matchesResidue(plus3)) return;
         for (const shift of shiftSelections) inspectPair(plus3, shift);
       });
     }
@@ -950,6 +1048,8 @@ export function findExactPartialConfigWitnesses({
   fixedEntries = [],
   freePieceCount,
   target,
+  minimums = null,
+  maximums = null,
   numPlus5,
   numPlus10,
   allowedFreePlus3Counts,
@@ -957,8 +1057,11 @@ export function findExactPartialConfigWitnesses({
   checkpoint = null,
 }) {
   if (fixedEntries.length + freePieceCount !== 5) return [];
-  const normalizedTarget = STATS.map(stat => Number(target?.[stat]));
-  if (normalizedTarget.some(value => !Number.isInteger(value))) return [];
+  const interval = Array.isArray(minimums) && Array.isArray(maximums);
+  const normalizedTarget = interval ? null : STATS.map(stat => Number(target?.[stat]));
+  if (!interval && normalizedTarget.some(value => !Number.isInteger(value))) return [];
+  if (interval && (minimums.length !== 6 || maximums.length !== 6
+    || [...minimums, ...maximums].some(value => value !== null && !Number.isSafeInteger(value)))) return [];
   const modifierUnits = numPlus5 + numPlus10 * 2;
   const fixedBaseOnly = STATS.map(() => 0);
   for (const entry of fixedEntries) {
@@ -1021,24 +1124,53 @@ export function findExactPartialConfigWitnesses({
         + freePlus3Count * 3
         + numPlus5 * 5
         + numPlus10 * 10;
-      if (normalizedTarget.reduce((sum, value) => sum + value, 0) !== expectedTotal) {
+      if (!interval && normalizedTarget.reduce((sum, value) => sum + value, 0) !== expectedTotal) {
         continue;
+      }
+      if (interval && (minimums.every(value => value !== null) && minimums.reduce((a, b) => a + b, 0) > expectedTotal
+        || maximums.every(value => value !== null) && maximums.reduce((a, b) => a + b, 0) < expectedTotal)) continue;
+      let queryLow = minimums, queryHigh = maximums;
+      if (interval) {
+        // Intersect the box with physical extrema and the conserved total
+        // before building any residual table. Fixed pieces may have real,
+        // non-catalog (even negative) stats, so derive their envelope explicitly.
+        const shifts = fixedSelection.shiftTargets.length + freeShiftCount;
+        queryLow = STATS.map((_, i) => Math.max(minimums[i] ?? -Infinity,
+          fixedSelection.baseTotals[i] + freePieceCount * Math.min(...BASE_VECTORS.map(v => v[i])) - shifts * 5));
+        queryHigh = STATS.map((_, i) => Math.min(maximums[i] ?? Infinity,
+          fixedSelection.baseTotals[i] + freePieceCount * Math.max(...BASE_VECTORS.map(v => v[i]))
+          + freePlus3Count + shifts * 5 + modifierUnits * 5));
+        const minTotal = queryLow.reduce((a, b) => a + b, 0), maxTotal = queryHigh.reduce((a, b) => a + b, 0);
+        if (expectedTotal < minTotal || expectedTotal > maxTotal) continue;
+        const low = queryLow, high = queryHigh;
+        queryLow = low.map((value, i) => Math.max(value, expectedTotal - maxTotal + high[i]));
+        queryHigh = high.map((value, i) => Math.min(value, expectedTotal - minTotal + low[i]));
+        if (queryLow.some((value, i) => value > queryHigh[i])) continue;
       }
       const adjustmentIndex = getRestrictedAdjustmentIndex(
         [...fixedSelection.shiftTargets, ...Array(freeShiftCount).fill(undefined)],
         numPlus5,
         numPlus10,
+        checkpoint,
       );
 
       const inspect = (plus3, shift) => {
         checkpoint?.();
-        if (witnesses.length >= maxWitnesses) return;
+        if (witnesses.length >= maxWitnesses) return true;
         const baseTotals = fixedSelection.baseTotals.map((value, statIndex) =>
           value + plus3.totals[statIndex] + shift.totals[statIndex]);
-        const units = normalizedTarget.map((value, statIndex) => {
+        let units = normalizedTarget?.map((value, statIndex) => {
           const residual = value - baseTotals[statIndex];
           return residual % 5 === 0 ? residual / 5 : Number.NaN;
         });
+        if (interval) {
+          // Reject the box against a conservative residual envelope before
+          // probing its joint lattice; no enumeration of armor preimages.
+          if (baseTotals.some((value, index) => value + 75 < queryLow[index]
+            || value - 25 > queryHigh[index])) return;
+          units = queryAdjustmentBox(adjustmentIndex, baseTotals, queryLow, queryHigh, modifierUnits, checkpoint);
+          if (!units) return;
+        }
         if (units.some(value => !Number.isInteger(value))) return;
         if (units[5] !== modifierUnits - units.slice(0, 5)
           .reduce((sum, value) => sum + value, 0)) return;
@@ -1067,27 +1199,44 @@ export function findExactPartialConfigWitnesses({
         seen.add(groupKey);
         witnesses.push({
           config: configs,
-          totals: { ...target },
+          totals: interval ? Object.fromEntries(STATS.map((stat, index) => [stat, baseTotals[index] + units[index] * 5])) : { ...target },
           fixedCount: fixedEntries.length,
           fixedPlus3Count: fixedSelection.fixedPlus3Count,
           freePlus3Count,
           ...materializeWitness(configs, mask, adjustmentIndex, packedWitness),
         });
+        return witnesses.length >= maxWitnesses;
+      };
+
+      const stream = (count, vectors, otherSelections, visit) => {
+        const low = STATS.map((_, i) => Math.min(...vectors.map(vector => vector[i])));
+        const high = STATS.map((_, i) => Math.max(...vectors.map(vector => vector[i])));
+        const otherLow = STATS.map((_, i) => otherSelections ? Math.min(...otherSelections.map(selection => selection.totals[i])) : 0);
+        const otherHigh = STATS.map((_, i) => otherSelections ? Math.max(...otherSelections.map(selection => selection.totals[i])) : 0);
+        const shiftCount = fixedSelection.shiftTargets.length + freeShiftCount;
+        visitModeSelections(count, vectors, visit, interval ? (running, remaining) => {
+          checkpoint?.(0);
+          return STATS.every((_, i) => fixedSelection.baseTotals[i] + running[i] + otherLow[i]
+            + remaining * low[i] - shiftCount * 5 <= queryHigh[i]
+            && fixedSelection.baseTotals[i] + running[i] + otherHigh[i] + remaining * high[i]
+            + shiftCount * 5 + modifierUnits * 5 >= queryLow[i]);
+        } : null);
       };
 
       if (freePlus3Count > 0 && freeShiftCount > 0) {
-        const plus3Selections = buildModeSelections(freePlus3Count, PLUS3_VECTORS);
-        visitModeSelections(freeShiftCount, BASE_VECTORS, shift => {
+        const plus3Selections = buildModeSelections(freePlus3Count, PLUS3_VECTORS)
+          .filter(selection => interval || selection.totals.every((value, index) =>
+            (normalizedTarget[index] - fixedSelection.baseTotals[index] - value) % 5 === 0));
+        stream(freeShiftCount, BASE_VECTORS, plus3Selections, shift => {
           for (const plus3 of plus3Selections) {
-            inspect(plus3, shift);
-            if (witnesses.length >= maxWitnesses) return;
+            if (inspect(plus3, shift)) return true;
           }
         });
       } else if (freePlus3Count > 0) {
-        visitModeSelections(freePlus3Count, PLUS3_VECTORS, plus3 =>
+        stream(freePlus3Count, PLUS3_VECTORS, null, plus3 =>
           inspect(plus3, { indices: [], totals: STATS.map(() => 0) }));
       } else {
-        visitModeSelections(freeShiftCount, BASE_VECTORS, shift =>
+        stream(freeShiftCount, BASE_VECTORS, null, shift =>
           inspect({ indices: [], totals: STATS.map(() => 0) }, shift));
       }
     }
