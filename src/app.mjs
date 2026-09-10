@@ -2247,6 +2247,13 @@ function buildOwnedGearSection(_finalTotals, _targets) {
   const section = document.getElementById('ownedGearSection');
   const solution = allSolutions[currentSolutionIdx];
   if (!section || !solution) return;
+  // Inventory search has its own unified, rule-aware result list. Do not render
+  // a second partial "match this theoretical witness" list below it.
+  if (lastInventoryMode === calculatorMode && lastInventoryResult?.results?.length) {
+    section.innerHTML = '';
+    section.style.display = 'none';
+    return;
+  }
   const plan = getOwnedArmorPlan(solution);
   const matches = plan?.pieces?.filter(piece => piece.item) || [];
   const defaultPiece = getManualOwnedDefault(plan);
@@ -2281,9 +2288,9 @@ function buildOwnedGearSection(_finalTotals, _targets) {
     <div>
       <h3 class="owned-gear-title">${l('已有护甲', '已有防具', 'Owned armor')}</h3>
       <p class="owned-gear-copy">${l(
-        '这里只匹配当前理论方案，不代表库存无解。真实库存搭配见上方“已有护甲搭配方案”；更改清单或条件后请重新求解。',
+        '已有护甲方案已在上方统一结果列表中按规则排序；这里仅在没有库存搜索结果时显示理论方案的匹配情况。',
         '此處只符合目前理論方案，不代表庫存無解。實際庫存配裝見上方「已有防具搭配方案」；變更清單或條件後請重新求解。',
-        'Matches this theoretical solution only, not inventory feasibility. See Owned armor loadouts above; solve again after changing inventory or constraints.'
+        'Owned armor is shown in the unified rule-aware results above; this section is only a fallback when inventory search has no results.'
       )}</p>
     </div>
     <div class="owned-gear-header-actions">
