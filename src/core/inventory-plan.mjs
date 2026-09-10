@@ -1,6 +1,6 @@
 import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
 import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
-import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers } from "./solver-v3-contract.mjs";
+import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers, createCanonicalId } from "./solver-v3-contract.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -414,7 +414,8 @@ function comparePlans(left, right) {
     return left.fixedExoticDistance - right.fixedExoticDistance;
   }
   if (left.farmability !== right.farmability) return left.farmability - right.farmability;
-  return right.ownedCount - left.ownedCount;
+  return right.ownedCount - left.ownedCount
+    || createCanonicalId(left.solution).localeCompare(createCanonicalId(right.solution));
 }
 
 export function rankInventoryPlans({

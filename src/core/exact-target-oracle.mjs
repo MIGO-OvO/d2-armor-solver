@@ -408,7 +408,7 @@ export function visibleArmorTargets(target, fragments, total, limit = 128) {
 
 // Target-directed join: do not materialize every shift × mod pair for each
 // owned capability pattern. The sixth coordinate follows from the total.
-export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tuningCapabilities}) {
+export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, numPlus3 = null, tuningCapabilities}) {
   if (configs?.length !== 5 || tuningCapabilities?.length !== 5
       || !STATS.every(stat => Number.isSafeInteger(target?.[stat]))) return null;
   const modKey = `${numPlus5}|${numPlus10}`;
@@ -419,6 +419,7 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tu
   const count = (targetTotal - base.reduce((sum, value) => sum + value, 0)
     - numPlus5 * 5 - numPlus10 * 10) / 3;
   if (!Number.isInteger(count) || count < 0 || count > 5) return null;
+  if (numPlus3 !== null && count !== numPlus3) return null;
   for (const {mask} of getMasks(5, count)) {
     const totals = [...base];
     const destinations = [];
@@ -459,7 +460,7 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, tu
   return null;
 }
 
-export function findFixedRuleWitness({configs, numPlus5, numPlus10, tuningCapabilities, minimums, maximums}) {
+export function findFixedRuleWitness({configs, numPlus5, numPlus10, numPlus3 = null, tuningCapabilities, minimums, maximums}) {
   const constrained = STATS.map((_, index) => index).filter(index => minimums[index] !== null || maximums[index] !== null);
   if (!constrained.length) return null;
   const modKey = `${numPlus5}|${numPlus10}`;
@@ -473,6 +474,7 @@ export function findFixedRuleWitness({configs, numPlus5, numPlus10, tuningCapabi
     if (!projectedMods.has(key)) projectedMods.set(key, index);
   });
   for (let mask = 0; mask < 32; mask++) {
+    if (numPlus3 !== null && mask.toString(2).replaceAll('0', '').length !== numPlus3) continue;
     const base = STATS.map(stat => configs.reduce((sum, config) => sum + config.baseStats[stat], 0));
     const destinations = [];
     let allowed = true;

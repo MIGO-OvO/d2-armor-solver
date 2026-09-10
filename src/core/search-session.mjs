@@ -6,7 +6,9 @@ export const SEARCH_PROFILES = Object.freeze({
   // maxTimeMs = wall-clock safety limit. Profiles change effort only.
   fast: Object.freeze({maxTimeMs: 200, maxNodes: 100000, maxStates: 10000, maxEvaluations: 3000, fastMode: true, proveFuzzy: false, exhaustive: false}),
   balanced: Object.freeze({maxTimeMs: 3000, maxNodes: 2000000, maxStates: 50000, maxEvaluations: 50000, fastMode: false, proveFuzzy: false, exhaustive: false}),
-  deep: Object.freeze({maxTimeMs: 15000, maxNodes: 20000000, maxStates: 250000, maxEvaluations: 250000, fastMode: false, proveFuzzy: true, exhaustive: true}),
+  // Deep is the explicit full-inventory pass. The UI still retains Top-K
+  // witnesses, while the frontier continues until it is exhausted.
+  deep: Object.freeze({maxTimeMs: 120000, maxNodes: 500000000, maxStates: 2000000, maxEvaluations: 5000000, fastMode: false, proveFuzzy: true, exhaustive: true}),
 });
 export const SEARCH_STAGES_MS = Object.freeze([150, 500, 1500, 3000]);
 
@@ -19,7 +21,7 @@ export function withSearchProfile(operation, payload = {}) {
     runtimeOptions: {...payload.runtimeOptions, fastMode: options.fastMode, proveFuzzy: options.proveFuzzy},
     searchLimits: {...payload.searchLimits, maxTimeMs: options.maxTimeMs,
       maxNodes, maxStates: options.maxStates, maxEvaluations: options.maxEvaluations,
-      exhaustive: options.exhaustive},
+      exhaustive: options.exhaustive || payload.searchLimits?.exhaustive === true},
   };
 }
 

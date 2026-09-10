@@ -23,7 +23,7 @@ when a budget is reached; no limit can create an infeasibility proof.
 | --- | ---: | ---: | --- |
 | Fast | 200 ms | 100,000 / 10,000 | bounded verified incumbent |
 | Balanced | 3 s | 2,000,000 / 50,000 | default search, progressive candidates |
-| Deep | 15 s | 20,000,000 / 250,000 | exhaustive inventory preference, proveFuzzy for Scratch |
+| Deep | 120 s | 500,000,000 / 5,000,000 | full inventory frontier (when data is complete), proveFuzzy for Scratch |
 
 Theoretical searches count much smaller primitive probes, so their Balanced /
 Deep node ceilings are 50 million / 500 million. The 150/500/1500/3000 ms stages

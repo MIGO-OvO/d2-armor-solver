@@ -513,7 +513,8 @@ export function compareUpgradeMetrics(left, right) {
 }
 
 export function evaluateUpgradePieces(
-  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}
+  pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {},
+  {autoStatMods = false, modifierBudget = null} = {},
 ) {
   if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
@@ -549,28 +550,49 @@ export function evaluateUpgradePieces(
     score: scoreStats(manualArmorTotals, scoringTarget, constraints),
   };
   let evaluation = manualEvaluation;
+  // Installed mods describe the current loadout, not automatic stat-mod
+  // capability. Inventory may use any mix of up to five major/minor mods;
+  // callers with explicit counts (Scratch/Upgrade) keep their chosen budget.
+  const allBudgets = modifierBudget ? [modifierBudget] : autoStatMods
+    ? Array.from({length: 6}, (_, numPlus10) => Array.from({length: 6 - numPlus10}, (_, numPlus5) => ({numPlus5, numPlus10}))).flat()
+    : [getUpgradeModifierBudget(pieces, {reassignModifiers, onlyPlus5Tuning})];
+  const hasClampTarget = STATS.some(stat => targets[stat] === 0 || targets[stat] === 200);
+  const baseTotal = configs.reduce((sum, config) => sum + STATS.reduce((value, stat) => value + config.baseStats[stat], 0), 0);
+  const targetTotal = STATS.reduce((sum, stat) => sum + armorTarget[stat], 0);
+  const filteredBudgets = allBudgets.filter(budget => hasClampTarget || !autoStatMods
+    || Array.from({length: 6}, (_, numPlus3) => onlyPlus5Tuning ? 0 : numPlus3).some(numPlus3 =>
+      targetTotal - baseTotal - budget.numPlus5 * 5 - budget.numPlus10 * 10 - numPlus3 * 3 === 0));
+  // Filtering is only an exact-search optimization.  Keep a deterministic
+  // fallback budget when no total matches (rules may still be satisfiable via
+  // clamping, force0, or partial exact constraints).
+  const budgets = filteredBudgets.length > 0 ? filteredBudgets : allBudgets;
   if (reassignModifiers) {
-    const budget = getUpgradeModifierBudget(pieces, {
-      reassignModifiers: true,
-      onlyPlus5Tuning,
-    });
     const tuningCapabilities = pieces.map(piece =>
       getUpgradeTuningCapability(piece, onlyPlus5Tuning));
-    let exact = findFixedTargetWitness({configs, target: armorTarget,
-      numPlus5: budget.numPlus5, numPlus10: budget.numPlus10, tuningCapabilities});
+    let exact = null;
+    for (const budget of budgets) {
+      exact = findFixedTargetWitness({configs, target: armorTarget, ...budget, tuningCapabilities});
+      if (exact) break;
+    }
     if (!exact && STATS.some(stat => targets[stat] === 0 || targets[stat] === 200)) {
       const baseTotal = configs.reduce((sum, config) => sum + STATS.reduce((value, stat) => value + config.baseStats[stat], 0), 0);
-      for (const balanced of budget.allowedPlus3Counts) {
+      for (const budget of budgets) {
+        const counts = Number.isInteger(budget.numPlus3) ? [budget.numPlus3]
+          : onlyPlus5Tuning ? [0] : [0, 1, 2, 3, 4, 5];
+        for (const balanced of counts) {
         const total = baseTotal + balanced * 3 + budget.numPlus5 * 5 + budget.numPlus10 * 10;
         for (const point of visibleArmorTargets(targets, fragments, total, 8).targets) {
-          exact = findFixedTargetWitness({configs, target: point, numPlus5: budget.numPlus5, numPlus10: budget.numPlus10, tuningCapabilities});
+          exact = findFixedTargetWitness({configs, target: point, ...budget, tuningCapabilities});
           if (exact) break;
+        }
+        if (exact) break;
         }
         if (exact) break;
       }
     }
     if (exact && !getUpgradeMetrics(finalizeUpgradeTotals(exact.totals, fragments), targets,
       0, normalizedRequiredStats, null, userConstraints, fragments).hardRulesSatisfied) exact = null;
+    const budget = budgets.at(-1);
     const automaticEvaluation = exact ? {...exact,
       rank: scoreStatsRank(exact.totals, scoringTarget, constraints),
       score: scoreStats(exact.totals, scoringTarget, constraints),
@@ -581,7 +603,7 @@ export function evaluateUpgradePieces(
       // sets. It is migrated separately to replacement-count iterative
       // deepening; until then, do not multiply the exact fixed-five DP cost by
       // the old seed/hill-climb loop.
-      { skipExactJointSearch: true, tuningCapabilities },
+      { skipExactJointSearch: true, tuningCapabilities, numPlus3: budget.numPlus3 },
     );
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
     const manualMetrics = getUpgradeMetrics(
@@ -595,7 +617,11 @@ export function evaluateUpgradePieces(
         automaticEvaluation.rank, userConstraints, fragments
       );
       const manualKnown = manualEvaluation.tuningAssignments.every(tuning => tuning
-        && (tuning.mode === '+3' || tuning.mode === 'none' || tuning.from && tuning.to));
+        && (tuning.mode === '+3' || tuning.mode === 'none' || tuning.from && tuning.to))
+        && (!modifierBudget || budgets.some(value =>
+          value.numPlus5 === pieces.filter(piece => piece.armorModSize === 5).length
+          && value.numPlus10 === pieces.filter(piece => piece.armorModSize === 10).length
+          && (value.numPlus3 == null || value.numPlus3 === pieces.filter(piece => piece.tuningMode === 'plus3').length)));
       if (!manualKnown || compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
         evaluation = automaticEvaluation;
       }
@@ -605,7 +631,6 @@ export function evaluateUpgradePieces(
   const metrics = getUpgradeMetrics(finalTotals, targets, evaluation.score, normalizedRequiredStats,
     evaluation.rank, userConstraints, fragments);
   if (reassignModifiers && !metrics.hardRulesSatisfied) {
-    const budget = getUpgradeModifierBudget(pieces, {reassignModifiers: true, onlyPlus5Tuning});
     const lower = STATS.map(stat => {
       const fragment = fragments[stat] || 0;
       const visible = userConstraints.exact?.[stat] ? targets[stat]
@@ -620,7 +645,8 @@ export function evaluateUpgradePieces(
       if (userConstraints.le100?.[stat]) visible = Math.min(visible, 100);
       return visible >= 200 ? null : visible - fragment;
     });
-    const feasible = findFixedRuleWitness({configs, numPlus5: budget.numPlus5, numPlus10: budget.numPlus10,
+    for (const budget of budgets) {
+    const feasible = findFixedRuleWitness({configs, ...budget,
       tuningCapabilities: pieces.map(piece => getUpgradeTuningCapability(piece, onlyPlus5Tuning)), minimums: lower, maximums: upper});
     if (feasible) {
       const final = finalizeUpgradeTotals(feasible.totals, fragments);
@@ -628,6 +654,7 @@ export function evaluateUpgradePieces(
       const score = scoreStats(feasible.totals, scoringTarget, constraints);
       const feasibleMetrics = getUpgradeMetrics(final, targets, score, normalizedRequiredStats, rank, userConstraints, fragments);
       if (compareUpgradeMetrics(feasibleMetrics, metrics) < 0) return {...feasible, configs, finalTotals: final, rank, score, metrics: feasibleMetrics};
+    }
     }
   }
   return {

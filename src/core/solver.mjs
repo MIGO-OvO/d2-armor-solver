@@ -305,6 +305,8 @@ export function evaluateConfig(
   const masks = [];
   if (tuningCapabilities) {
     for (let mask = 0; mask < 32; mask++) {
+      if (Number.isInteger(runtimeOptions.numPlus3)
+          && mask.toString(2).replaceAll('0', '').length !== runtimeOptions.numPlus3) continue;
       const allowed = tuningCapabilities.every((capability, index) => {
         const balanced = Boolean((mask >> index) & 1);
         return balanced
