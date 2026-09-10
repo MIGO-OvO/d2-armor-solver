@@ -27,7 +27,7 @@ import {
 import {
   analyzeUpgradeAsync,
   calculateReachabilityAsync,
-  solveInventoryAsync,
+  solveInventoryParallelAsync,
   solveLoadoutAsync,
   cancelAllSearches,
 } from "./core/armor-engine-client.mjs";
@@ -5139,7 +5139,7 @@ async function solveInventoryRequirement({
   if (!fromScratch) saveUpgradeDraft();
 
   try {
-    const result = await solveInventoryAsync({
+    const inventoryRequest = {
       searchProfile,
       items: pool,
       targets,
@@ -5152,7 +5152,9 @@ async function solveInventoryRequirement({
       requiredStats,
       onlyPlus5Tuning,
       userConstraints: constraints,
-    }, {onProgress: (partial, search) => {
+    };
+    const result = await solveInventoryParallelAsync(inventoryRequest, {parallelism: Math.min(4,
+      Math.max(1, Number(globalThis.navigator?.hardwareConcurrency) || 2)), onProgress: (partial, search) => {
       if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision) return;
       renderSearchStatus(partial, search);
       if (partial?.results?.length) {
