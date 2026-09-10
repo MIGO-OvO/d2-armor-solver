@@ -8,8 +8,10 @@ import {createResidualBounds} from './residual-bounds.mjs';
 
 const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
 const keyOf = pieces => pieces.map(piece => `${piece.slot}:id:${piece.sourceId || piece.id || ""}`).sort().join("|");
-const compare = (a, b) => Number(b.feasible) - Number(a.feasible)
-  || compareUpgradeMetrics(a.evaluation.metrics, b.evaluation.metrics) || a.key.localeCompare(b.key);
+export const compareInventoryResults = (a, b) => Number(b.feasible) - Number(a.feasible)
+  || compareUpgradeMetrics((a.evaluation || a).metrics, (b.evaluation || b).metrics)
+  || keyOf(a.pieces).localeCompare(keyOf(b.pieces));
+const compare = compareInventoryResults;
 
 function project(piece) {
   return piece.optimizationBaseStats ? {...piece,
