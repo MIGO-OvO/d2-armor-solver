@@ -3,7 +3,7 @@ import {
   findReachabilityWitness,
 } from "./reachability.mjs";
 import { assignArmorMods } from "./armor-mod-assignment.mjs";
-import { solveInventoryLoadout } from "./inventory-solver.mjs";
+import { solveInventoryLoadout, compareInventoryResults } from "./inventory-solver.mjs";
 import { runSolver } from "./solver.mjs";
 import {
   EXECUTION_STATUS,
@@ -430,6 +430,44 @@ function certifyUpgradeResult(result, problemSpec, pieces, reassignModifiers, on
   }));
 }
 
+function inventoryProblem(payload) {
+  return createProblemSpec({operation: "solveInventory", targets: payload?.targets, fragments: payload?.fragments,
+    constraints: upgradeVisibleConstraints(payload?.userConstraints, payload?.fragments, payload?.targets, payload?.requiredStats),
+    targetDomain: STAT_DOMAIN.VISIBLE, pieces: payload?.items, runtimeOptions: {verifyInventoryCandidates: true},
+    inventoryContext: {setRequirement: payload?.setRequirement || null,
+      reassignModifiers: payload?.reassignModifiers !== false, onlyPlus5Tuning: Boolean(payload?.onlyPlus5Tuning),
+      requiredStats: payload?.requiredStats || [], currentPieces: payload?.currentPieces || null,
+      fixedExotic: payload?.fixedExotic || null,
+      autoStatMods: payload?.reassignModifiers !== false && payload?.autoStatMods !== false,
+      modifierBudget: payload?.modifierBudget || null}});
+}
+
+export function mergeInventoryShardResults(payload, parts, count) {
+  const spec = inventoryProblem(payload);
+  const unique = new Map();
+  for (const part of parts) for (const row of part?.results || []) {
+    const verified = sealWitness(spec, row);
+    if (!verified.valid) continue;
+    const entry = {...row, ...verified.witness,
+      feasible: satisfiesConstraintModel(verified.witness, spec.constraintModel)};
+    const key = entry.pieces.map(p => `${p.slot}:${p.sourceId || p.id}`).sort().join("|");
+    if (!unique.has(key) || compareInventoryResults(entry, unique.get(key)) < 0) unique.set(key, entry);
+  }
+  const limit = Number.isSafeInteger(payload.maxResults) && payload.maxResults > 0 ? payload.maxResults : 12;
+  const results = [...unique.values()].sort(compareInventoryResults).slice(0, limit);
+  // Serialized worker evidence is not an internal proof token. Re-verify
+  // positive witnesses here; never promote a local negative to a global one.
+  const stats = {shardCount: count, frontierComplete: parts.length === count && parts.every((p, i) =>
+    p?.searchStats?.shardIndex === i && p.searchStats.shardCount === count && p.searchStats.frontierComplete === true),
+    assignmentComplete: parts.every(p => p?.searchStats?.assignmentComplete === true),
+    statesExamined: parts.reduce((sum, p) => sum + (p?.searchStats?.statesExamined || 0), 0)};
+  const result = {results, requirement: payload.setRequirement, requiredStats: payload.requiredStats || [],
+    examined: parts.reduce((sum, p) => sum + (p?.examined || 0), 0), searchStats: stats,
+    proof: createProofEvidence(spec, {method: "parallel-verified-witnesses", truncated: true,
+      statesExamined: stats.statesExamined, limitation: "serialized shard coverage is not a global infeasibility proof"})};
+  return certifyInventoryResult(result, spec, payload);
+}
+
 export function solveInventory(payload, search = null) {
   const problemSpec = createProblemSpec({
     operation: "solveInventory",
@@ -445,6 +483,9 @@ export function solveInventory(payload, search = null) {
       onlyPlus5Tuning: Boolean(payload?.onlyPlus5Tuning),
       requiredStats: payload?.requiredStats || [],
       currentPieces: payload?.currentPieces || null,
+      fixedExotic: payload?.fixedExotic || null,
+      autoStatMods: payload?.reassignModifiers !== false && payload?.autoStatMods !== false,
+      modifierBudget: payload?.modifierBudget || null,
     },
   });
   if (!problemSpec.valid) {

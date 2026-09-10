@@ -29,8 +29,8 @@ test("profiles change effort but leave the original mathematical request immutab
   assert.ok(fast.searchLimits.maxEvaluations < balanced.searchLimits.maxEvaluations);
   assert.ok(balanced.searchLimits.maxEvaluations < deep.searchLimits.maxEvaluations);
   assert.equal(balanced.searchLimits.maxEvaluations, 50000);
-  assert.equal(deep.searchLimits.maxEvaluations, 250000);
-  assert.equal(deep.searchLimits.maxStates, 250000);
+  assert.equal(deep.searchLimits.maxEvaluations, 5000000);
+  assert.equal(deep.searchLimits.maxStates, 2000000);
 });
 
 const zeroStats = () => Object.fromEntries(STATS.map(stat => [stat, 0]));
@@ -179,14 +179,14 @@ test("UI cannot import alternative rule validators or promote metric flags", () 
   assert.doesNotMatch(app, /satisfiesTargetConstraints|satisfiesUpgradeStatRule|preferConstraintSatisfyingSolutions|metrics\.allReached/);
 });
 
-test("Worker generations isolate superseded progress and all operations support cancellation", async () => {
+test("Worker generations isolate concurrent progress and all operations support cancellation", {timeout: 5000}, async () => {
   class FakeWorker {
     static instances = [];
     constructor() { this.events = {}; FakeWorker.instances.push(this); }
     addEventListener(name, callback) { this.events[name] = callback; }
-    postMessage(message) { this.request = message; }
+    postMessage(message) { (this.requests ||= []).push(message); }
     terminate() { this.terminated = true; }
-    reply(data) { this.events.message({data: {...this.request, ...data}}); }
+    reply(index, data) { this.events.message({data: {...this.requests[index], ...data}}); }
   }
   const original = globalThis.Worker;
   globalThis.Worker = FakeWorker;
@@ -195,18 +195,39 @@ test("Worker generations isolate superseded progress and all operations support 
     for (const method of ["solveLoadoutAsync", "solveInventoryAsync", "analyzeUpgradeAsync", "calculateReachabilityAsync"]) {
       const progress = [];
       const first = client[method]({}, {onProgress: result => progress.push(result)});
-      const rejected = assert.rejects(first, {name: "AbortError"});
       const old = FakeWorker.instances.at(-1);
       const second = client[method]({}, {onProgress: result => progress.push(result)});
       const fresh = FakeWorker.instances.at(-1);
-      assert.equal(old.terminated, true);
-      old.reply({type: "progress", result: "stale"});
-      fresh.reply({type: "progress", result: "fresh"});
-      fresh.reply({type: "result", result: "finished"});
-      assert.equal(await second, "finished");
-      await rejected;
+      assert.equal(old.terminated, undefined);
+      old.reply(0, {type: "result", result: "first"});
+      old.reply(0, {type: "progress", result: "stale"});
+      fresh.reply(1, {type: "progress", result: "fresh"});
+      fresh.reply(1, {type: "result", result: "finished"});
+      assert.deepEqual(await Promise.all([first, second]), ["first", "finished"]);
       assert.deepEqual(progress, ["fresh"]);
     }
     client.cancelAllSearches();
+  } finally { globalThis.Worker = original; }
+});
+
+test("concurrent inventory requests resolve independently for parallel shards", {timeout: 5000}, async () => {
+  class ConcurrentWorker {
+    static instances = [];
+    constructor() { this.events = {}; ConcurrentWorker.instances.push(this); }
+    addEventListener(name, cb) { this.events[name] = cb; }
+    postMessage(message) { (this.requests ||= []).push(message); }
+    terminate() { this.terminated = true; }
+    reply(result) { for (const request of this.requests || []) this.events.message({data: {...request, type: "result", result}}); this.requests = []; }
+  }
+  const original = globalThis.Worker;
+  globalThis.Worker = ConcurrentWorker;
+  try {
+    const client = await import(`../src/core/armor-engine-client.mjs?concurrent=${Date.now()}`);
+    const a = client.solveInventoryAsync({shardIndex: 0, shardCount: 2});
+    const b = client.solveInventoryAsync({shardIndex: 1, shardCount: 2});
+    assert.equal(ConcurrentWorker.instances.length, 1, "requests share worker without cancelling");
+    for (const instance of ConcurrentWorker.instances) instance.reply({ok: true});
+    const results = await Promise.all([a, b]);
+    assert.deepEqual(results, [{ok: true}, {ok: true}]);
   } finally { globalThis.Worker = original; }
 });

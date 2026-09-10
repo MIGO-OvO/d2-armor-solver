@@ -211,6 +211,14 @@ DIM 会忽略账号未拥有的模组，应用模组前护甲也需要满足游�
 
 ## Getting Started / 本地运行
 
+### Windows 10/11 桌面安装包
+
+[下载桌面离线安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe)（x64，约 2.22 MB）。目前通过 DIM CSV 导入库存，桌面版尚未接入 Bungie 登录。该安装包是 Release 的唯一离线包；网页版与浏览器免安装 ZIP 的构建方式保留，ZIP 改从 Actions 工件获取。
+
+新增 Rust + Tauri 2 + React + TypeScript 离线桌面入口，采用横向参数/结果工作台，保留现有在线版及离线 ZIP。开发运行 `npm run desktop:dev`，构建 x64 安装包运行 `npm run desktop:build`。需要 Rust MSVC、C++ Build Tools 和 Windows SDK；轻量安装包不包含或自动下载 WebView2，目标电脑须已安装 WebView2 Runtime（建议 120 或更新版本）。
+
+详细架构、存储边界、输出位置与验证步骤见 [桌面版说明](docs/desktop.md)。
+
 ### 环境要求
 
 - Node.js `22.13.0` 或更高版本

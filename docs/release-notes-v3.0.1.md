@@ -1,6 +1,20 @@
 # v3.0.1
 
-这是一次热修复，只包含 v3.0.0 之后的两项修复，没有新增功能，也没有重构。
+本次更新保留 v3.0.1 算法与库存热修复，并补充 Windows 桌面离线安装包。网页版求解器布局、Bungie 登录配置和 Pages 部署流程保持不变。
+
+## Windows 桌面离线版（2026-09-08 补充）
+
+- [下载 Windows 10/11 x64 安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/download/v3.0.1/d2-armor-solver-windows-x64-setup.exe)，2,216,547 字节（约 2.22 MB），SHA-256 `0a15cb3c72e596b190c1c91862c7e7e6bf64910dd640962dcc43024d9a56bb62`。
+- Rust + Tauri 2 宿主、React + TypeScript 工作台；复用现有求解引擎和 Worker，不是算法的 Rust 重写。
+- 左侧导航与语言切换，右侧参数和结果采用单栏滚动；移除内容区重复标题和免费提示条。网页版布局不变。
+- 支持 DIM CSV、本地保存、三语、搜索取消、Ctrl+Enter 求解和窗口状态记忆。
+- 不捆绑、不自动下载 WebView2；目标电脑需要已安装 WebView2 Runtime（建议 120 或更新版本）。满足此前提后可离线使用。
+- **桌面版尚未接入 Bungie 登录、在线库存同步或装备到游戏**，这些仍属于网页版功能。桌面本地存储与网页版隔离，旧库存需重新导入 CSV。
+- 安装包未签名，Windows 可能提示未知发布者；已通过 Windows 11 原生 WebView2 运行检查，Windows 10 干净系统安装验收仍待完成。
+- 本次 Release 的离线包统一为该安装包：原 `d2-armor-solver-offline.zip` 与 `d2-armor-solver-offline-v3.0.1.zip` 附件已移除，门户页离线下载入口也改指本安装包；需要免安装 ZIP 时可在任意一次 push 的 Actions 工件中获取。
+- 原 `v3.0.1` 标签不移动，仍指向热修复提交 `e4909e8`；桌面安装包的源码提交是 `91a1f8e`（`91a1f8e88ec371432f9068888278862269fe8026`），避免把原标签源码误认为桌面版源码。
+
+## 原 v3.0.1 热修复
 
 - 修复 Upgrade Search 在可见属性 0/200 边界以及搜索预算下可能漏掉可行精确方案的问题。
 - 修复库存交互状态、planned tuning 展示、未拥有异域预留与职业套装计数。

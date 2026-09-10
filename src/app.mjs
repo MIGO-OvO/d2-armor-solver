@@ -27,7 +27,7 @@ import {
 import {
   analyzeUpgradeAsync,
   calculateReachabilityAsync,
-  solveInventoryAsync,
+  solveInventoryParallelAsync,
   solveLoadoutAsync,
   cancelAllSearches,
 } from "./core/armor-engine-client.mjs";
@@ -1315,6 +1315,7 @@ async function solve() {
   const results = document.getElementById('results');
   const loading = document.getElementById('loading');
   ownedArmorActionStatus = null;
+  clearInventoryResults();
   msgs.innerHTML = '';
   delete msgs.dataset.imperfectShown;
   showAllSolutions = false;
@@ -1375,6 +1376,19 @@ async function solve() {
 
   try {
     const solverConstraints = buildVisibleTargetConstraints();
+    // Inventory existence is a separate search, not a match against the
+    // representative theory witnesses returned below. Keep both proof scopes.
+    const inventoryMessage = importedInventory.length || manualOwnedItems.length
+      ? await solveInventoryRequirement({targets, fragments, requiredStats: [],
+        onlyPlus5Tuning: numPlus3 === 0,
+        constraints: visibleConstraintsToArmor(targets, fragments, solverConstraints),
+        modifierBudget: {numPlus5, numPlus10, numPlus3},
+      }) : '';
+    if (revision !== searchUiRevision) return;
+    msgs.innerHTML = inventoryMessage || '';
+    loading.classList.add('show');
+    loading.setAttribute('aria-busy', 'true');
+    document.getElementById('btnSolve').disabled = true;
     const solvedSolutions = await solveLoadoutAsync({
       searchProfile,
       target: adjTarget,
@@ -1397,10 +1411,10 @@ async function solve() {
     allSolutions = solvedSolutions;
     currentSolutionIdx = 0;
     renderSearchStatus(solvedSolutions);
-    msgs.innerHTML = `<div class="msg ${certifiedFeasible(solvedSolutions) ? 'info' : 'warn'}">${escapeHtml(searchProofLabel(solvedSolutions))}</div>`;
+    msgs.innerHTML = (inventoryMessage || '') + `<div class="msg ${certifiedFeasible(solvedSolutions) ? 'info' : 'warn'}">${l('理论方案', '理論方案', 'Theoretical solutions')}: ${escapeHtml(searchProofLabel(solvedSolutions))}</div>`;
     if (allSolutions[0]) {
       refreshInventoryPlansFromSolutions({rerender: false});
-      displayAllResults(allSolutions[0], targets, fragments, {forceOwnedPlan: true});
+      displayAllResults(allSolutions[0], targets, fragments, {forceOwnedPlan: true, scroll: !lastInventoryResult?.results?.length});
     }
   } catch (error) {
     if (error.name === 'AbortError') return;
@@ -1940,6 +1954,12 @@ function formatInventoryPlanSet(setHash) {
 
 function createOwnedArmorPlanRequest(solutions, maxResults, { allowEmpty = false } = {}) {
   if (calculatorMode !== 'solve' || solutions.length === 0) return null;
+  const inputs = getOwnedArmorInputs();
+  if (inputs.items.length === 0 && !allowEmpty) return null;
+  return {solutions, ...inputs, maxResults};
+}
+
+function getOwnedArmorInputs() {
   const classItemSettings = document.getElementById('useExoticMode')?.checked
     ? getExoticSettings()
     : null;
@@ -1952,14 +1972,11 @@ function createOwnedArmorPlanRequest(solutions, maxResults, { allowEmpty = false
     classId: item.classId || classId,
   }));
   const items = [...importedItems, ...manualItems];
-  if (items.length === 0 && !allowEmpty) return null;
   return {
-    solutions,
     items,
     classId,
     fixedExotic: classItemSettings ? null : getSelectedInventoryExotic(),
     setRequirement: snapshotSetRequirement(),
-    maxResults,
   };
 }
 
@@ -2236,7 +2253,7 @@ function buildOwnedGearSection(_finalTotals, _targets) {
   const tertiaryOptions = getManualTertiaryOptions(defaultPiece.archetypeId);
   if (!tertiaryOptions.includes(defaultPiece.tertiary)) defaultPiece.tertiary = tertiaryOptions[0];
   const summary = plan
-    ? l(`匹配 ${plan.ownedCount}/5 件 · 还需 ${plan.farmCount} 件`, `符合 ${plan.ownedCount}/5 件 · 尚需 ${plan.farmCount} 件`, `${plan.ownedCount}/5 matched · ${plan.farmCount} remaining`)
+    ? l(`本理论方案匹配 ${plan.ownedCount}/5 件 · 缺 ${plan.farmCount} 件`, `本理論方案符合 ${plan.ownedCount}/5 件 · 缺 ${plan.farmCount} 件`, `This theory: ${plan.ownedCount}/5 matched · ${plan.farmCount} missing`)
     : l('尚无可匹配的已有护甲', '尚無可符合的已有防具', 'No owned armor available to match');
   const matchContent = matches.length > 0
     ? `<div class="owned-armor-match-list">${matches.map(renderOwnedArmorMatch).join('')}</div>`
@@ -2264,9 +2281,9 @@ function buildOwnedGearSection(_finalTotals, _targets) {
     <div>
       <h3 class="owned-gear-title">${l('已有护甲', '已有防具', 'Owned armor')}</h3>
       <p class="owned-gear-copy">${l(
-        '这里只显示与当前方案精确匹配的已有件；导入清单或手动新增后，方案会自动更新。',
-        '此處只顯示與目前方案精確符合的現有件；匯入清單或手動新增後，方案會自動更新。',
-        'Only exact matches for this solution appear here. Importing or manually adding armor updates the solution automatically.'
+        '这里只匹配当前理论方案，不代表库存无解。真实库存搭配见上方“已有护甲搭配方案”；更改清单或条件后请重新求解。',
+        '此處只符合目前理論方案，不代表庫存無解。實際庫存配裝見上方「已有防具搭配方案」；變更清單或條件後請重新求解。',
+        'Matches this theoretical solution only, not inventory feasibility. See Owned armor loadouts above; solve again after changing inventory or constraints.'
       )}</p>
     </div>
     <div class="owned-gear-header-actions">
@@ -4669,7 +4686,7 @@ function setCalculatorMode(mode, persist = true) {
   document.getElementById('btnUpgradeAnalyze').hidden = !isUpgrade;
   document.getElementById('saveBuildButton').hidden = isUpgrade;
   document.getElementById('upgradeResults').hidden = !isUpgrade || !lastUpgradeAnalysis;
-  document.getElementById('inventoryResults').hidden = !isUpgrade || !lastInventoryResult?.results?.length;
+  document.getElementById('inventoryResults').hidden = lastInventoryMode !== calculatorMode || !lastInventoryResult?.results?.length;
   document.getElementById('floatJump').style.display = 'none';
   document.getElementById('messages').innerHTML = '';
   if (isUpgrade) {
@@ -5023,6 +5040,7 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
 }
 
 let lastInventoryResult = null;
+let lastInventoryMode = null;
 let lastInventoryTargets = null;
 let lastInventoryRequiredStats = [];
 let selectedInventoryResultIndex = 0;
@@ -5032,6 +5050,7 @@ function clearInventoryResults() {
   invalidateOwnedPlanCache();
   inventorySolveRevision++;
   lastInventoryResult = null;
+  lastInventoryMode = null;
   lastInventoryTargets = null;
   lastInventoryRequiredStats = [];
   selectedInventoryResultIndex = 0;
@@ -5082,15 +5101,21 @@ async function solveInventoryRequirement({
   requiredStats = getUpgradeRequiredStats(),
   onlyPlus5Tuning = document.getElementById('upgradeOnlyPlus5')?.checked === true,
   constraints = {},
+  modifierBudget = null,
 } = {}) {
-  const button = document.getElementById("btnUpgradeAnalyze");
+  const fromScratch = calculatorMode === 'solve';
+  const button = document.getElementById(fromScratch ? 'btnSolve' : 'btnUpgradeAnalyze');
   const loading = document.getElementById("loading");
   const requirementSnapshot = snapshotSetRequirement();
   const solveRevision = ++inventorySolveRevision;
   const revision = searchUiRevision;
   const setControls = [...document.querySelectorAll(".set-requirement-controls select")];
-  const reassignModifiers = document.getElementById("upgradeReassignModifiers")?.checked !== false;
-  const pool = filterArmorItems(importedInventory, {
+  const reassignModifiers = fromScratch || document.getElementById("upgradeReassignModifiers")?.checked !== false;
+  const inputs = fromScratch ? getOwnedArmorInputs() : null;
+  const classItem = fromScratch ? getExoticSettings() : null;
+  const fixedExotic = classItem ? {...classItem, slot: 'classItem', hash: EXOTIC_CLASSES[classItem.classId]?.itemHash}
+    : inputs?.fixedExotic || null;
+  const pool = inputs?.items || filterArmorItems(importedInventory, {
     classId: importClassFilter || null,
     tier5Only: importTier5Only,
   });
@@ -5111,21 +5136,25 @@ async function solveInventoryRequirement({
   );
   loading.classList.add("show");
   loading.setAttribute("aria-busy", "true");
-  saveUpgradeDraft();
+  if (!fromScratch) saveUpgradeDraft();
 
   try {
-    const result = await solveInventoryAsync({
+    const inventoryRequest = {
       searchProfile,
       items: pool,
       targets,
       fragments,
       setRequirement: requirementSnapshot,
       reassignModifiers,
-      currentPieces: upgradeBuildState,
+      currentPieces: fromScratch ? null : upgradeBuildState,
+      fixedExotic,
+      modifierBudget,
       requiredStats,
       onlyPlus5Tuning,
       userConstraints: constraints,
-    }, {onProgress: (partial, search) => {
+    };
+    const result = await solveInventoryParallelAsync(inventoryRequest, {parallelism: Math.min(4,
+      Math.max(1, Number(globalThis.navigator?.hardwareConcurrency) || 2)), onProgress: (partial, search) => {
       if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision) return;
       renderSearchStatus(partial, search);
       if (partial?.results?.length) {
@@ -5141,7 +5170,8 @@ async function solveInventoryRequirement({
     lastInventoryRequiredStats = requiredStats;
     renderInventoryResults(result);
     renderSearchStatus(result);
-    if (result?.results?.length) {
+    const qualifyingCount = result?.results?.filter(certifiedFeasible).length || 0;
+    if (qualifyingCount) {
       const proofLabel = searchProofLabel(result);
       const executionLabel = result.executionStatus === 'VERIFIED'
         ? l('执行预检已验证', '執行預檢已驗證', 'Execution preflight verified')
@@ -5150,14 +5180,14 @@ async function solveInventoryRequirement({
           : l('执行能力尚未完全验证', '執行能力尚未完全驗證', 'Execution capability unverified');
       return `<div class="msg info">${icon("check")}<strong>${proofLabel}</strong> · ${executionLabel}<br>${requirementSnapshot.type === "none"
         ? l(
-          `从已有护甲清单中找到 ${result.results.length} 个可行组合（无需刷取），可核对后导出 DIM 配装链接。`,
-          `從已有防具清單中找到 ${result.results.length} 個可行組合（無需刷取），可核對後匯出 DIM 配裝連結。`,
-          `Found ${result.results.length} loadouts from armor you already own (no farming). Review one and export a DIM loadout link.`
+          `已有护甲找到 ${qualifyingCount} 个达标组合，无需刷取新护甲；请核对大师杰作和执行预检后导出 DIM 配装链接。`,
+          `已有防具找到 ${qualifyingCount} 個達標組合，無需取得新防具；請核對大師之作與執行預檢後匯出 DIM 配裝連結。`,
+          `Found ${qualifyingCount} qualifying owned loadouts. No new armor needed; check masterwork and execution preflight before exporting to DIM.`
         )
         : l(
-          `找到 ${result.results.length} 个满足 ${formatSetRequirementLabel(requirementSnapshot)} 的组合，可点击“应用此方案”。`,
-          `找到 ${result.results.length} 個滿足 ${formatSetRequirementLabel(requirementSnapshot)} 的組合，可點擊「套用此方案」。`,
-          `Found ${result.results.length} loadouts meeting ${formatSetRequirementLabel(requirementSnapshot)}. Click “Apply” to use one.`
+          `已有护甲找到 ${qualifyingCount} 个同时满足属性与 ${formatSetRequirementLabel(requirementSnapshot)} 的组合，无需刷取新护甲。`,
+          `已有防具找到 ${qualifyingCount} 個同時滿足數值與 ${formatSetRequirementLabel(requirementSnapshot)} 的組合，無需取得新防具。`,
+          `Found ${qualifyingCount} owned loadouts meeting both stat rules and ${formatSetRequirementLabel(requirementSnapshot)}. No new armor needed.`
         )}</div>`;
     }
     return `<div class="msg warn">${escapeHtml(searchProofLabel(result))}</div>`;
@@ -5184,6 +5214,7 @@ function renderInventoryResults(result) {
   const el = document.getElementById("inventoryResults");
   if (!el) return;
   lastInventoryResult = result;
+  lastInventoryMode = calculatorMode;
   if (!result?.results?.length) {
     el.innerHTML = "";
     el.hidden = true;
@@ -5200,9 +5231,9 @@ function renderInventoryResults(result) {
       <div>
         <h2 class="inventory-results-title">${l("已有护甲搭配方案", "已有防具搭配方案", "Owned armor loadouts")}</h2>
         <p>${l(
-          "从已拥有的护甲清单中搭配，无需刷取；选择方案核对装备与六维后，可导出 DIM 配装链接。",
-          "從已擁有的防具清單中搭配，無需刷取；選擇方案核對裝備與六維後，可匯出 DIM 配裝連結。",
-          "Loadouts built from armor you already own — no farming. Pick one, review the pieces, then export a DIM loadout link."
+          "独立搜索真实库存，不受下方理论方案列表限制。只有标注达标的方案满足目标；请同时核对大师杰作、模组与执行预检。",
+          "獨立搜尋實際庫存，不受下方理論方案清單限制。只有標示達標的方案滿足目標；請同時核對大師之作、模組與執行預檢。",
+          "Searches real inventory independently of the theoretical list. Only qualifying entries meet the target; also check masterwork, mods and execution preflight."
         )}</p>
       </div>
       <span class="inventory-results-req">${result.requirement?.type === "none"

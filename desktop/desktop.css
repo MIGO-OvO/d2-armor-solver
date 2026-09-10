@@ -1,0 +1,77 @@
+:root { color-scheme: dark; --desktop-sidebar: 200px; }
+html, body, #root { height: 100%; }
+body { overflow: hidden; }
+.desktop-app { height: 100dvh; display: grid; grid-template-rows: 60px minmax(0, 1fr) 30px; }
+.desktop-topbar, .desktop-status { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 0 24px; background: var(--card); }
+.desktop-topbar { border-bottom: 1px solid var(--border); }
+.desktop-brand { display: flex; align-items: center; gap: 14px; }
+.desktop-brand strong { font-size: 1rem; }
+.desktop-mark { color: var(--accent); font-size: 1.375rem; font-weight: 850; letter-spacing: -.05em; }
+.desktop-offline { color: var(--accent); font-size: .75rem; border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
+.desktop-privacy, .desktop-status { color: var(--text-dim); font-size: .75rem; }
+.desktop-body { min-height: 0; display: grid; grid-template-columns: var(--desktop-sidebar) minmax(0, 1fr); }
+.desktop-nav { display: flex; flex-direction: column; gap: 6px; padding: 24px 12px 16px; border-right: 1px solid var(--border); background: var(--card); overflow: auto; }
+.desktop-nav-caption { font-size: .625rem; letter-spacing: .07em; color: var(--text-dim); margin: 0 8px 16px; }
+.desktop-nav button { text-align: left; padding: 10px 12px; min-height: 44px; font-size: .8125rem; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; }
+.desktop-nav button:hover:not(:disabled) { background: var(--bg); border-color: var(--border); }
+.desktop-nav button[aria-pressed="true"] { color: var(--accent); background: color-mix(in oklch, var(--accent) 10%, var(--bg)); border-color: color-mix(in oklch, var(--accent) 25%, var(--border)); }
+.desktop-nav button:disabled { opacity: .5; cursor: wait; }
+.desktop-nav-divider { height: 1px; flex-shrink: 0; background: var(--border); margin: 14px 8px; }
+.desktop-language { margin: auto 8px 0; padding-top: 32px; }
+.desktop-language .language-switcher { position: static; inset: auto; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 0; margin: 0; width: 100%; border: 0; background: transparent; }
+.desktop-language select { width: 100%; min-height: 44px; }
+.desktop-free { margin: 12px 8px 0; font-size: .6875rem; color: var(--text-dim); }
+.desktop-workspace { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-padding-block: 24px; }
+.desktop-solver > .container { max-width: 1440px; padding: 24px 32px; margin: 0 auto; }
+.desktop-content { display: block; }
+.desktop-inputs, .desktop-output { min-width: 0; overflow: visible; }
+/* Desktop-only: remove the duplicate heading and the notice marked in the screenshot.
+   Keep the title node for the shared renderer and accessible main landmark name. */
+.desktop-solver .header, .desktop-solver .notice--free,
+.desktop-solver .solver-mode-switch, .desktop-solver #floatJump { display: none !important; }
+.desktop-solver .card { padding: 24px; margin-bottom: 20px; }
+.desktop-solver .card h2 { font-size: 1.125rem; }
+.desktop-solver .workspace-grid { gap: 0; grid-template-columns: minmax(0, 1fr); }
+.desktop-solver .card--fragments .input-grid,
+.desktop-solver #targetGrid, .desktop-solver .comparison { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.desktop-solver .solver-actions { position: static; margin: 4px 0 24px; padding: 16px 0; border-block: 1px solid var(--border); }
+.desktop-solver .search-toolbar { flex-wrap: wrap; }
+/* Results are single-column too, including the solution list and inventory panels. */
+.desktop-solver #results.show { display: block; }
+.desktop-solver #results > #solutionNav { position: static; max-height: none; margin: 0; }
+.desktop-solver .inventory-results-layout { grid-template-columns: minmax(0, 1fr); }
+.desktop-solver .footer { margin-top: 24px; font-size: .75rem; }
+.desktop-startup, .desktop-error { padding: 16px; }
+.desktop-error { background: var(--card); color: var(--health); }
+.desktop-status { border-top: 1px solid var(--border); }
+@media (max-width: 1399px) {
+  .desktop-solver #targetGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 1099px) {
+  :root { --desktop-sidebar: 180px; }
+  .desktop-solver > .container { padding: 20px; }
+  .desktop-solver .card { padding: 18px; }
+  .desktop-solver .card--fragments .input-grid, .desktop-solver .comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .desktop-solver .upgrade-import-panel { padding: 16px; }
+  .desktop-solver .upgrade-import-heading { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .desktop-solver .upgrade-import-heading-actions { justify-content: flex-start; }
+  .desktop-solver .upgrade-import-toolbar, .desktop-solver .exotic-settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .desktop-solver .upgrade-import-actions { grid-column: 1; margin-left: 0; flex-wrap: wrap; }
+}
+@media (max-width: 859px) {
+  .desktop-solver #targetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .desktop-privacy { display: none; }
+}
+/* Below native minimum window width, preserve accessibility under large zoom. */
+@media (max-width: 679px) {
+  body { overflow: auto; }
+  .desktop-app { height: auto; min-height: 100dvh; grid-template-rows: auto 1fr auto; }
+  .desktop-topbar { min-height: 60px; padding: 10px 16px; }
+  .desktop-body { grid-template-columns: minmax(0, 1fr); }
+  .desktop-nav { flex-direction: row; flex-wrap: wrap; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .desktop-nav-caption, .desktop-nav-divider, .desktop-free { display: none; }
+  .desktop-language { margin: 0 8px; padding: 0; }
+  .desktop-language .language-switcher { flex-direction: row; align-items: center; }
+  .desktop-workspace { overflow: visible; }
+  .desktop-status { padding: 8px 16px; flex-wrap: wrap; }
+}

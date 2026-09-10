@@ -1,13 +1,15 @@
 import {STATS} from "./armor-model.mjs";
 import {STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEvidence,
-  satisfiesConstraintModel, hasCompletePieceMath, verifyWitness} from "./solver-v3-contract.mjs";
+  satisfiesConstraintModel, hasCompletePieceMath, verifyWitness, matchesFixedExotic} from "./solver-v3-contract.mjs";
 import {applyManualUpgradeModifiers, compareUpgradeMetrics, createUpgradePieceFromItem,
   evaluateUpgradePieces, getUpgradeConfig, getUpgradeTuningCapability} from "./upgrade-optimizer.mjs";
 
 const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
 const keyOf = pieces => pieces.map(piece => `${piece.slot}:id:${piece.sourceId || piece.id || ""}`).sort().join("|");
-const compare = (a, b) => Number(b.feasible) - Number(a.feasible)
-  || compareUpgradeMetrics(a.evaluation.metrics, b.evaluation.metrics) || a.key.localeCompare(b.key);
+export const compareInventoryResults = (a, b) => Number(b.feasible) - Number(a.feasible)
+  || compareUpgradeMetrics((a.evaluation || a).metrics, (b.evaluation || b).metrics)
+  || keyOf(a.pieces).localeCompare(keyOf(b.pieces));
+const compare = compareInventoryResults;
 
 function project(piece) {
   return piece.optimizationBaseStats ? {...piece,
@@ -54,16 +56,25 @@ export function solveInventoryLoadout({
   items = [], targets, fragments = {}, setRequirement, reassignModifiers = true,
   currentPieces = null, requiredStats = [], onlyPlus5Tuning = false,
   maxResults = 12, userConstraints = {}, searchLimits = {},
+  fixedExotic = null, autoStatMods = reassignModifiers, modifierBudget = null,
+  shardIndex = 0, shardCount = 1,
 }, problemSpec = createProblemSpec({operation: "solveInventory", targets, fragments, constraints: userConstraints,
   targetDomain: STAT_DOMAIN.VISIBLE, pieces: items,
-  inventoryContext: {setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces},
+  inventoryContext: {setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces,
+    fixedExotic, autoStatMods: reassignModifiers && autoStatMods, modifierBudget},
 }), search = null) {
   if (!setRequirement) return null;
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || !Number.isSafeInteger(shardIndex)
+      || shardIndex < 0 || shardIndex >= shardCount) throw new RangeError("invalid inventory shard");
+  // Pin ordinary Exotics before enumeration, including all owned rolls of the
+  // selected hash. A missing fixed item is never replaced by another Exotic.
+  const eligible = piece => !fixedExotic || (piece.slot === fixedExotic.slot
+    ? matchesFixedExotic(piece, fixedExotic) : !piece.exotic);
   const limit = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
   maxResults = limit(maxResults, 12);
   const started = performance.now();
   search?.checkpoint(0);
-  const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers,
+  const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers || searchLimits.exhaustive === true,
     statesExamined: 0, equivalentItems: 0, mergedStates: 0, peakStates: 0,
     prunedBounds: 0, prunedSets: 0, layers: [0, 0, 0, 0, 0], firstFeasibleMs: null, firstExactMs: null,
     maxStates: limit(searchLimits.maxStates, 50000), maxNodes: limit(searchLimits.maxNodes, 2000000),
@@ -82,7 +93,7 @@ export function solveInventoryLoadout({
     const candidates = locked.has(slot) ? [locked.get(slot)]
       : items.filter(item => item.slot === slot).map(item => ({...project(createUpgradePieceFromItem(item, index)), classId: item.classId}));
     const compressed = new Map();
-    for (const piece of candidates) {
+    for (const piece of candidates.filter(eligible)) {
       const key = createPieceCapability(piece, index).equivalenceKey;
       const previous = compressed.get(key);
       const candidate = {piece, ...bounds(piece, reassignModifiers, onlyPlus5Tuning), cover: coverage(piece, setRequirement)};
@@ -92,9 +103,17 @@ export function solveInventoryLoadout({
     rows.push({slotIndex: index, candidates: [...compressed.values()]});
   }
   rows.sort((a, b) => a.candidates.length - b.candidates.length || a.slotIndex - b.slotIndex);
+  const belongs = piece => {
+    let hash = 0;
+    for (const char of keyOf([piece])) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    return hash % shardCount === shardIndex;
+  };
+  searchStats.shardIndex = shardIndex;
+  searchStats.shardCount = shardCount;
   const combinations = rows.reduce((count, row) => count * row.candidates.length, 1);
-  const modMaximum = reassignModifiers ? rows.reduce((sum, row) => sum
-    + Math.max(0, ...row.candidates.map(candidate => candidate.piece.armorModSize || 0)), 0) : 0;
+  const modMaximum = !reassignModifiers ? 0 : modifierBudget
+    ? modifierBudget.numPlus5 * 5 + modifierBudget.numPlus10 * 10 : autoStatMods ? 50
+    : rows.reduce((sum, row) => sum + Math.max(0, ...row.candidates.map(candidate => candidate.piece.armorModSize || 0)), 0);
   const suffix = Array.from({length: 6}, () => ({min: Array(6).fill(0), max: Array(6).fill(0), cover: [0, 0]}));
   for (let depth = 4; depth >= 0; depth--) {
     const candidates = rows[depth].candidates;
@@ -116,10 +135,11 @@ export function solveInventoryLoadout({
   let stopped = false;
   const seen = new Set();
   const evaluate = pieces => {
-    if (!legal(pieces, setRequirement)) return;
+    if (!legal(pieces, setRequirement) || !pieces.every(eligible)) return;
     const key = keyOf(pieces);
     if (seen.has(key)) return;
-    const evaluation = evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers, required, onlyPlus5Tuning, userConstraints);
+    const evaluation = evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers, required, onlyPlus5Tuning, userConstraints,
+      {autoStatMods, modifierBudget});
     examined++;
     // A stale current assignment or unknown item must not occupy the identity
     // cache, Top-K list or exact quota and hide a verifiable inventory result.
@@ -145,7 +165,8 @@ export function solveInventoryLoadout({
         pieces: result.pieces, ...result.evaluation,
       }))});
   };
-  if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)) evaluate(currentPieces.map(project));
+  if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)
+      && belongs(currentPieces[rows[0].slotIndex])) evaluate(currentPieces.map(project));
   const chosen = Array(5);
   const partialMin = Array(6).fill(0);
   const partialMax = Array(6).fill(0);
@@ -164,6 +185,7 @@ export function solveInventoryLoadout({
     const table = new Map();
     let retained = 0;
     for (const a of rows[0].candidates) for (const b of rows[1].candidates) {
+      if (!belongs(a.piece)) continue;
       if (retained >= searchStats.maxStates) return false;
       const sum = a.min.map((value, index) => value + b.min[index]);
       const key = sum.join(",");
@@ -214,6 +236,7 @@ export function solveInventoryLoadout({
       || a.candidate.min.join(",").localeCompare(b.candidate.min.join(","))
       || keyOf([a.candidate.piece]).localeCompare(keyOf([b.candidate.piece])));
     for (const {candidate} of ordered) {
+      if (depth === 0 && !belongs(candidate.piece)) continue;
       search?.checkpoint(1, searchStats);
       // DFS/streamed primitive budget is maxNodes, not maxStates (maxStates
       // only bounds the retained meet-in-the-middle join table).
@@ -245,7 +268,7 @@ export function solveInventoryLoadout({
   // a nearest incumbent. This second pass cannot strengthen a negative proof.
   if (!stopped && !feasibleFound && combinations > 4096) visit(0, 0, [0, 0], null, false);
   const unknown = problemSpec.pieceCapabilities.some(capability => !hasCompletePieceMath(capability, reassignModifiers));
-  const complete = searchStats.frontierComplete && searchStats.assignmentComplete && !unknown;
+  const complete = shardCount === 1 && searchStats.frontierComplete && searchStats.assignmentComplete && !unknown;
   return {requirement: setRequirement, requiredStats: required, examined, searchStats, rejectedWitnesses,
     proof: createProofEvidence(problemSpec, {
       producer: "inventory-frontier", method: "complete-inventory-frontier", complete,
@@ -256,7 +279,7 @@ export function solveInventoryLoadout({
         : !searchStats.frontierComplete ? `inventory resource limit: ${searchStats.termination}`
         : reassignModifiers ? "nearest modifier assignment evaluator is bounded" : null,
     }),
-    results: results.map(entry => ({pieces: entry.pieces, isCurrent: entry.key === currentKey,
+    results: results.map(entry => ({pieces: entry.pieces, feasible: entry.feasible, isCurrent: entry.key === currentKey,
       score: entry.evaluation.score, metrics: entry.evaluation.metrics, finalTotals: entry.evaluation.finalTotals,
       tuningAssignments: entry.evaluation.tuningAssignments, modAssignments: entry.evaluation.modAssignments})),
   };

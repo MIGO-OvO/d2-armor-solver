@@ -425,6 +425,19 @@ export function hasCompletePieceMath(capability, reassignModifiers = false) {
     && capability.allowedTuningStats?.includes(to) === true;
 }
 
+export function matchesFixedExotic(piece, fixed) {
+  if (!piece?.exotic || !fixed || fixed.reserved || piece.slot !== fixed.slot
+      || fixed.classId && piece.classId !== fixed.classId) return false;
+  const identity = fixed.sourceId || fixed.id;
+  if (identity && String(piece.sourceId || piece.id || piece.identity) !== String(identity)) return false;
+  if (Number(fixed.hash) > 0 && Number(piece.hash) !== Number(fixed.hash)) return false;
+  for (const key of ['primaryPerkId', 'secondaryPerkId']) {
+    if (fixed[key] && piece[key] && fixed[key] !== piece[key]) return false;
+  }
+  return !fixed.config || STATS.every(stat =>
+    (piece.optimizationBaseStats || piece.projectedBaseStats || piece.baseStats)?.[stat] === fixed.config.baseStats[stat]);
+}
+
 export function createProblemSpec({
   operation = "solve",
   target = {},
@@ -455,6 +468,14 @@ export function createProblemSpec({
   };
   if (budget.numPlus5 + budget.numPlus10 > 5) {
     errors.push("numPlus5 + numPlus10 must be <= 5");
+  }
+  if (inventoryContext?.modifierBudget) {
+    const value = inventoryContext.modifierBudget;
+    for (const key of ['numPlus5', 'numPlus10', 'numPlus3']) {
+      if (key === 'numPlus3' && value[key] == null) continue;
+      if (!Number.isInteger(value[key]) || value[key] < 0 || value[key] > 5) errors.push(`invalid inventory ${key}`);
+    }
+    if (value.numPlus5 + value.numPlus10 > 5) errors.push('inventory armor mods exceed five slots');
   }
   const pieceCapabilities = (pieces || []).map(createPieceCapability);
   for (const capability of pieceCapabilities) errors.push(...capability.errors);
@@ -923,13 +944,20 @@ export function verifyWitness(problemSpec, witness) {
       if (locked.locked && locked.sourceId && !identities.has(String(locked.sourceId))) errors.push("locked inventory piece was replaced");
     }
     const requirement = inventoryContext?.setRequirement;
+    if (inventoryContext?.fixedExotic && !selectedSources.some(piece => matchesFixedExotic(piece, inventoryContext.fixedExotic))) {
+      errors.push('fixed Exotic requirement violated');
+    }
     const count = hash => (pieces || []).filter(p => Number(p?.setHash) === Number(hash)).length;
     if (requirement?.type === "set" && count(requirement.setHash) < requirement.count
         || requirement?.type === "split" && (requirement.a === requirement.b || count(requirement.a) < 2 || count(requirement.b) < 2)) {
       errors.push("set requirement violated");
     }
     const budgetSources = problemSpec.operation === "solveInventory" ? selectedSources : capabilities;
-    if (budgetSources.length === 5 && budgetSources.every(Boolean)) {
+    const explicitBudget = inventoryContext?.modifierBudget;
+    if (explicitBudget) {
+      if (plus5ModCount !== explicitBudget.numPlus5 || plus10ModCount !== explicitBudget.numPlus10
+          || explicitBudget.numPlus3 != null && plus3Count !== explicitBudget.numPlus3) errors.push('inventory modifier budget violated');
+    } else if (!inventoryContext?.autoStatMods && budgetSources.length === 5 && budgetSources.every(Boolean)) {
       if (plus5ModCount !== budgetSources.filter(p => p.armorModSize === 5).length
           || plus10ModCount !== budgetSources.filter(p => p.armorModSize === 10).length) errors.push("owned armor mod budget changed");
     }

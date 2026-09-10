@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "D2 Armor Solver",
+  "version": "../package.json",
+  "identifier": "io.github.migo-ovo.d2-armor-solver",
+  "build": {
+    "beforeDevCommand": "npm run desktop:ui",
+    "devUrl": "http://127.0.0.1:5178",
+    "beforeBuildCommand": "npm run desktop:frontend",
+    "frontendDist": "../dist-desktop"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "create": false,
+      "title": "命运2 T5配装求解器 · 离线桌面版",
+      "width": 1440,
+      "height": 900,
+      "minWidth": 800,
+      "minHeight": 600,
+      "center": true,
+      "resizable": true,
+      "dragDropEnabled": false,
+      "backgroundColor": "#0f1117"
+    }],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src 'none'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:5178; worker-src 'self' blob:; object-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "shortDescription": "Free offline Destiny 2 armor solver",
+    "copyright": "MIT · MIGO-OvO and contributors",
+    "windows": {
+      "webviewInstallMode": { "type": "skip" },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "TradChinese", "English"],
+        "displayLanguageSelector": true,
+        "startMenuFolder": "D2 Armor Solver"
+      }
+    }
+  }
+}

@@ -36,7 +36,15 @@ Development build: [https://migo-ovo.github.io/d2-armor-solver/dev/app/](https:/
 
 ## Offline Use
 
-The Release offline package is the [Windows x64 installer](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe). The standalone browser ZIP below is no longer attached to Releases; grab `d2-armor-solver-offline.zip` from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts of any push (kept 14 days), or run `npm run build:offline` locally.
+### Windows desktop installer
+
+[Download the Windows 10/11 x64 offline installer](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe) (about 2.22 MB). The Rust/Tauri 2 + React/TypeScript desktop workbench uses sidebar navigation and language selection, with a single scrolling column for parameters and results. The web UI and deployment remain unchanged, and this installer is the only offline package attached to Releases.
+
+WebView2 Runtime must already be installed (120 or newer recommended); it is neither bundled nor downloaded automatically. DIM CSV import, solving and saved loadouts work offline. Bungie login/sync is not yet available in the desktop app. The installer is unsigned. Develop with `npm run desktop:dev`, build with `npm run desktop:build`; see [desktop documentation](docs/desktop.md).
+
+### Browser ZIP (Actions artifacts)
+
+The Release offline package is the Windows installer above. The standalone browser ZIP is no longer attached to Releases; grab `d2-armor-solver-offline.zip` from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts of any push (kept 14 days), or run `npm run build:offline` locally.
 
 A standalone build that runs fully offline, no Node, npm, or server required:
 
