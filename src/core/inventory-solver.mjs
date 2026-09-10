@@ -285,7 +285,7 @@ export function solveInventoryLoadout({
     }
   }
   const unknown = problemSpec.pieceCapabilities.some(capability => !hasCompletePieceMath(capability, reassignModifiers));
-  const complete = searchStats.frontierComplete && searchStats.assignmentComplete && !unknown;
+  const complete = shardCount === 1 && searchStats.frontierComplete && searchStats.assignmentComplete && !unknown;
   return {requirement: setRequirement, requiredStats: required, examined, searchStats, rejectedWitnesses,
     proof: createProofEvidence(problemSpec, {
       producer: "inventory-frontier", method: "complete-inventory-frontier", complete,
