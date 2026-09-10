@@ -1,15 +1,15 @@
 import {STATS} from "./armor-model.mjs";
 import {STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEvidence,
-  satisfiesConstraintModel, hasCompletePieceMath, verifyWitness, matchesFixedExotic} from "./solver-v3-contract.mjs";
+  satisfiesConstraintModel, hasCompletePieceMath, verifyWitness} from "./solver-v3-contract.mjs";
 import {applyManualUpgradeModifiers, compareUpgradeMetrics, createUpgradePieceFromItem,
   evaluateUpgradePieces, getUpgradeConfig, getUpgradeTuningCapability} from "./upgrade-optimizer.mjs";
+import {getUpgradeMathKey, refineUpgradeAssignment} from './upgrade-optimizer.mjs';
+import {createResidualBounds} from './residual-bounds.mjs';
 
 const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
 const keyOf = pieces => pieces.map(piece => `${piece.slot}:id:${piece.sourceId || piece.id || ""}`).sort().join("|");
-export const compareInventoryResults = (a, b) => Number(b.feasible) - Number(a.feasible)
-  || compareUpgradeMetrics((a.evaluation || a).metrics, (b.evaluation || b).metrics)
-  || keyOf(a.pieces).localeCompare(keyOf(b.pieces));
-const compare = compareInventoryResults;
+const compare = (a, b) => Number(b.feasible) - Number(a.feasible)
+  || compareUpgradeMetrics(a.evaluation.metrics, b.evaluation.metrics) || a.key.localeCompare(b.key);
 
 function project(piece) {
   return piece.optimizationBaseStats ? {...piece,
@@ -40,11 +40,12 @@ function bounds(piece, reassign, onlyPlus5) {
   if (!reassign) return {min: STATS.map(stat => manual[stat]), max: STATS.map(stat => manual[stat])};
   const capability = getUpgradeTuningCapability(piece, onlyPlus5);
   const destinations = capability.allowedDirectionalStats || [];
+  const tuningOnly = stat => manual[stat] - (piece.armorModStat === stat ? piece.armorModSize || 0 : 0);
   return {
-    min: STATS.map(stat => Math.min(manual[stat], config.baseStats[stat]
+    min: STATS.map(stat => Math.min(tuningOnly(stat), config.baseStats[stat]
       - Number(destinations.some(to => to !== stat)) * 5)),
     // Mod sizes may move between pieces; add the global budget only once.
-    max: STATS.map(stat => Math.max(manual[stat], config.baseStats[stat]
+    max: STATS.map(stat => Math.max(tuningOnly(stat), config.baseStats[stat]
       + Math.max(Number(destinations.includes(stat)) * 5,
         Number(capability.allowBalanced && config.masterworkStats.includes(stat))))),
   };
@@ -56,25 +57,17 @@ export function solveInventoryLoadout({
   items = [], targets, fragments = {}, setRequirement, reassignModifiers = true,
   currentPieces = null, requiredStats = [], onlyPlus5Tuning = false,
   maxResults = 12, userConstraints = {}, searchLimits = {},
-  fixedExotic = null, autoStatMods = reassignModifiers, modifierBudget = null,
-  shardIndex = 0, shardCount = 1,
 }, problemSpec = createProblemSpec({operation: "solveInventory", targets, fragments, constraints: userConstraints,
   targetDomain: STAT_DOMAIN.VISIBLE, pieces: items,
-  inventoryContext: {setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces,
-    fixedExotic, autoStatMods: reassignModifiers && autoStatMods, modifierBudget},
+  inventoryContext: {setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces},
 }), search = null) {
   if (!setRequirement) return null;
-  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || !Number.isSafeInteger(shardIndex)
-      || shardIndex < 0 || shardIndex >= shardCount) throw new RangeError("invalid inventory shard");
-  // Pin ordinary Exotics before enumeration, including all owned rolls of the
-  // selected hash. A missing fixed item is never replaced by another Exotic.
-  const eligible = piece => !fixedExotic || (piece.slot === fixedExotic.slot
-    ? matchesFixedExotic(piece, fixedExotic) : !piece.exotic);
   const limit = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
   maxResults = limit(maxResults, 12);
   const started = performance.now();
   search?.checkpoint(0);
-  const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers || searchLimits.exhaustive === true,
+  const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers,
+    mathCacheHits: 0, mathEvaluations: 0, evaluationMs: 0, prunedJoint: 0, refinedAssignments: 0,
     statesExamined: 0, equivalentItems: 0, mergedStates: 0, peakStates: 0,
     prunedBounds: 0, prunedSets: 0, layers: [0, 0, 0, 0, 0], firstFeasibleMs: null, firstExactMs: null,
     maxStates: limit(searchLimits.maxStates, 50000), maxNodes: limit(searchLimits.maxNodes, 2000000),
@@ -93,7 +86,7 @@ export function solveInventoryLoadout({
     const candidates = locked.has(slot) ? [locked.get(slot)]
       : items.filter(item => item.slot === slot).map(item => ({...project(createUpgradePieceFromItem(item, index)), classId: item.classId}));
     const compressed = new Map();
-    for (const piece of candidates.filter(eligible)) {
+    for (const piece of candidates) {
       const key = createPieceCapability(piece, index).equivalenceKey;
       const previous = compressed.get(key);
       const candidate = {piece, ...bounds(piece, reassignModifiers, onlyPlus5Tuning), cover: coverage(piece, setRequirement)};
@@ -103,17 +96,9 @@ export function solveInventoryLoadout({
     rows.push({slotIndex: index, candidates: [...compressed.values()]});
   }
   rows.sort((a, b) => a.candidates.length - b.candidates.length || a.slotIndex - b.slotIndex);
-  const belongs = piece => {
-    let hash = 0;
-    for (const char of keyOf([piece])) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-    return hash % shardCount === shardIndex;
-  };
-  searchStats.shardIndex = shardIndex;
-  searchStats.shardCount = shardCount;
   const combinations = rows.reduce((count, row) => count * row.candidates.length, 1);
-  const modMaximum = !reassignModifiers ? 0 : modifierBudget
-    ? modifierBudget.numPlus5 * 5 + modifierBudget.numPlus10 * 10 : autoStatMods ? 50
-    : rows.reduce((sum, row) => sum + Math.max(0, ...row.candidates.map(candidate => candidate.piece.armorModSize || 0)), 0);
+  const modMaximum = reassignModifiers ? rows.reduce((sum, row) => sum
+    + Math.max(0, ...row.candidates.map(candidate => candidate.piece.armorModSize || 0)), 0) : 0;
   const suffix = Array.from({length: 6}, () => ({min: Array(6).fill(0), max: Array(6).fill(0), cover: [0, 0]}));
   for (let depth = 4; depth >= 0; depth--) {
     const candidates = rows[depth].candidates;
@@ -127,6 +112,8 @@ export function solveInventoryLoadout({
   const minimumCoverage = setRequirement.type === "set" ? [Number(setRequirement.count), 0]
     : setRequirement.type === "split" ? [2, 2] : [0, 0];
   const rules = problemSpec.constraintModel.rules;
+  const joint = reassignModifiers ? createResidualBounds(rows, rules, true, onlyPlus5Tuning) : null;
+  searchStats.jointProjections = joint?.projections || 0;
   const results = [];
   let examined = 0;
   let feasibleFound = false;
@@ -134,18 +121,35 @@ export function solveInventoryLoadout({
   let rejectedWitnesses = 0;
   let stopped = false;
   const seen = new Set();
-  const evaluate = pieces => {
-    if (!legal(pieces, setRequirement) || !pieces.every(eligible)) return;
+  const mathCache = new Map();
+  const evaluate = (pieces, refined = null) => {
+    if (!legal(pieces, setRequirement)) return;
     const key = keyOf(pieces);
-    if (seen.has(key)) return;
-    const evaluation = evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers, required, onlyPlus5Tuning, userConstraints,
-      {autoStatMods, modifierBudget});
+    if (!refined && seen.has(key)) return;
+    const mathKey = reassignModifiers ? getUpgradeMathKey(pieces, onlyPlus5Tuning) : null;
+    let evaluation = refined || (mathKey && mathCache.get(mathKey));
+    if (!evaluation) {
+      const before = performance.now();
+      evaluation = evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers, required, onlyPlus5Tuning, userConstraints,
+        {checkpoint: search?.checkpoint});
+      searchStats.evaluationMs += performance.now() - before;
+      searchStats.mathEvaluations++;
+      // Cache only math/assignments. Physical identities are always taken from
+      // this path and verified again before entering the result list.
+      if (mathKey) {
+        if (mathCache.size >= 512) mathCache.delete(mathCache.keys().next().value);
+        mathCache.set(mathKey, evaluation);
+      }
+    } else if (!refined) searchStats.mathCacheHits++;
+    evaluation = {...evaluation, configs: pieces.map(getUpgradeConfig)};
     examined++;
     // A stale current assignment or unknown item must not occupy the identity
     // cache, Top-K list or exact quota and hide a verifiable inventory result.
     const feasible = satisfiesConstraintModel({visibleTotals: evaluation.finalTotals}, problemSpec.constraintModel, STAT_DOMAIN.VISIBLE);
     const exact = feasible && STATS.every(stat => evaluation.finalTotals[stat] === Number(targets[stat]));
     const entry = {pieces: [...pieces], evaluation, key, feasible};
+    const old = results.findIndex(result => result.key === key);
+    if (old >= 0 && compare(entry, results[old]) >= 0) return;
     if (results.length >= maxResults && compare(entry, results.at(-1)) >= 0) {
       return;
     }
@@ -155,6 +159,7 @@ export function solveInventoryLoadout({
       return;
     }
     seen.add(key);
+    if (old >= 0) results.splice(old, 1);
     if (feasible) { feasibleFound = true; searchStats.firstFeasibleMs ??= performance.now() - started; }
     if (exact) { exactCount++; searchStats.firstExactMs ??= performance.now() - started; }
     results.push(entry);
@@ -165,8 +170,7 @@ export function solveInventoryLoadout({
         pieces: result.pieces, ...result.evaluation,
       }))});
   };
-  if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)
-      && belongs(currentPieces[rows[0].slotIndex])) evaluate(currentPieces.map(project));
+  if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)) evaluate(currentPieces.map(project));
   const chosen = Array(5);
   const partialMin = Array(6).fill(0);
   const partialMax = Array(6).fill(0);
@@ -185,7 +189,6 @@ export function solveInventoryLoadout({
     const table = new Map();
     let retained = 0;
     for (const a of rows[0].candidates) for (const b of rows[1].candidates) {
-      if (!belongs(a.piece)) continue;
       if (retained >= searchStats.maxStates) return false;
       const sum = a.min.map((value, index) => value + b.min[index]);
       const key = sum.join(",");
@@ -215,6 +218,7 @@ export function solveInventoryLoadout({
   };
   const visit = (depth, exotics, cover, classId, strict) => {
     if (stopped) return;
+    if (strict && joint && !joint.canReach(depth)) { searchStats.prunedJoint++; return; }
     if (depth === 5) { evaluate(chosen); return; }
     if (strict && !canReachRules(depth)) { searchStats.prunedBounds++; return; }
     if (minimumCoverage.some((value, index) => cover[index] + suffix[depth].cover[index] < value)) {
@@ -236,7 +240,6 @@ export function solveInventoryLoadout({
       || a.candidate.min.join(",").localeCompare(b.candidate.min.join(","))
       || keyOf([a.candidate.piece]).localeCompare(keyOf([b.candidate.piece])));
     for (const {candidate} of ordered) {
-      if (depth === 0 && !belongs(candidate.piece)) continue;
       search?.checkpoint(1, searchStats);
       // DFS/streamed primitive budget is maxNodes, not maxStates (maxStates
       // only bounds the retained meet-in-the-middle join table).
@@ -249,12 +252,14 @@ export function solveInventoryLoadout({
       const exoticCount = exotics + Number(candidate.piece.exotic);
       if (exoticCount > 1 || classId && candidate.piece.classId && classId !== candidate.piece.classId) continue;
       chosen[row.slotIndex] = candidate.piece;
+      joint?.add(candidate, 1);
       for (let index = 0; index < 6; index++) {
         partialMin[index] += candidate.min[index]; partialMax[index] += candidate.max[index];
       }
       searchStats.peakStates = Math.max(searchStats.peakStates, depth + 1);
       visit(depth + 1, exoticCount, cover.map((value, index) => value + candidate.cover[index]),
         classId || candidate.piece.classId, strict);
+      joint?.add(candidate, -1);
       for (let index = 0; index < 6; index++) {
         partialMin[index] -= candidate.min[index]; partialMax[index] -= candidate.max[index];
       }
@@ -267,8 +272,18 @@ export function solveInventoryLoadout({
   // After proving no rule-feasible combination, spend remaining resources on
   // a nearest incumbent. This second pass cannot strengthen a negative proof.
   if (!stopped && !feasibleFound && combinations > 4096) visit(0, 0, [0, 0], null, false);
+  // Refinement never narrows the frontier or authorizes a global proof.
+  // Small/finished frontiers can spend their remaining time on local quality.
+  if (reassignModifiers && search && performance.now() - started < searchStats.maxTimeMs) {
+    for (const entry of results.slice(0, 3)) {
+      const refined = refineUpgradeAssignment(entry.pieces, targets, fragments, required, onlyPlus5Tuning, userConstraints,
+        entry.evaluation, {checkpoint: search.checkpoint, onImprovement: value => evaluate(entry.pieces, value)});
+      searchStats.refinedAssignments++;
+      evaluate(entry.pieces, refined);
+    }
+  }
   const unknown = problemSpec.pieceCapabilities.some(capability => !hasCompletePieceMath(capability, reassignModifiers));
-  const complete = shardCount === 1 && searchStats.frontierComplete && searchStats.assignmentComplete && !unknown;
+  const complete = searchStats.frontierComplete && searchStats.assignmentComplete && !unknown;
   return {requirement: setRequirement, requiredStats: required, examined, searchStats, rejectedWitnesses,
     proof: createProofEvidence(problemSpec, {
       producer: "inventory-frontier", method: "complete-inventory-frontier", complete,
@@ -279,7 +294,7 @@ export function solveInventoryLoadout({
         : !searchStats.frontierComplete ? `inventory resource limit: ${searchStats.termination}`
         : reassignModifiers ? "nearest modifier assignment evaluator is bounded" : null,
     }),
-    results: results.map(entry => ({pieces: entry.pieces, feasible: entry.feasible, isCurrent: entry.key === currentKey,
+    results: results.map(entry => ({pieces: entry.pieces, isCurrent: entry.key === currentKey,
       score: entry.evaluation.score, metrics: entry.evaluation.metrics, finalTotals: entry.evaluation.finalTotals,
       tuningAssignments: entry.evaluation.tuningAssignments, modAssignments: entry.evaluation.modAssignments})),
   };

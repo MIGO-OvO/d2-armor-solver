@@ -36,6 +36,8 @@ armor/visible totals. UI display and execution projections are not alternate
 sources of Solver totals. Upgrade steps carry full verified snapshots.
 The subsequent algorithm optimizations and acceptance results are recorded in
 [algorithm-optimization.md](algorithm-optimization.md).
+The V3.1 search extensions and paired simulations are recorded in
+[solver-v31-optimization.md](solver-v31-optimization.md).
 
 `solver-v3-contract.mjs` owns `ProblemSpec`, the armor-domain `ConstraintModel`,
 `PieceCapability`, integer lexicographic comparison, canonical witness ids, and
@@ -54,11 +56,14 @@ have explicit limits. Exhaustion or an exact-witness quota marks coverage
 incomplete; a witness still proves existence. Unknown or stale physical data
 cannot consume a verified result slot or authorize negative evidence.
 
-Visible 0/200 targets are budget-constrained armor preimages, with an interval
-DP for ranges; incomplete DP work cannot certify infeasibility. Upgrade exact
-completion iterates replacement counts from zero upward. Its minimum proof
-requires six exact visible rules, reassignment, known Tuning capabilities and
-complete enumeration of all budget-consistent preimages at smaller depths.
+Visible 0/200 targets are budget-constrained armor intervals. Upgrade queries
+these intervals directly, using total-budget tightening and residual-box queries,
+instead of a limited list of preimage points. Reachability retains interval DP;
+incomplete work cannot certify infeasibility. Upgrade completion iterates replacement
+counts from zero upward for point/range goals. Its minimum proof requires
+reassignment, known Tuning capabilities and complete coverage of all smaller
+replacement depths. A range-search time slice or global budget stop cannot
+authorize a minimum claim; partial fuzzy ranking retains the existing comparator.
 
 Owned/farm matching searches legal slot permutations of each supplied theory
 witness, keeping the original immutable and resealing the mapped display.

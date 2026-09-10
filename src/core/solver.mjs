@@ -262,6 +262,7 @@ export function evaluateConfig(
       tuningCapabilities,
       rankTotals: totals => scoreStatsRank(totals, target, constraints),
       compareRanks: compareScoreRanks,
+      checkpoint: runtimeOptions.checkpoint,
     });
     if (exactEvaluation) {
       return {
@@ -568,8 +569,25 @@ export function scoreStatsRank(actual, target, constraints) {
   return total;
 }
 
-function scoreStatsLowerBound(baseTotals, adjustmentValueSets, target, constraints) {
+export function scoreStatsLowerBound(baseTotals, adjustmentValueSets, target, constraints, pairValueSets = null) {
   const total = [0, 0, 0, 0, 0, 0];
+  if (pairValueSets) {
+    // Each disjoint pair retains its joint adjustment domain. Dropping only
+    // cross-pair coupling remains a relaxation of the six-dimensional score.
+    pairValueSets.forEach((values, pair) => {
+      let best = null;
+      for (const units of values) {
+        const ranks = units.map((unit, offset) => {
+          const index = pair * 2 + offset;
+          return singleStatScoreRank(STATS[index], baseTotals[index] + unit * 5, target[STATS[index]], constraints);
+        });
+        const rank = ranks[0].map((value, index) => value + ranks[1][index]);
+        if (!best || compareScoreRanks(rank, best) < 0) best = rank;
+      }
+      best.forEach((value, index) => { total[index] += value; });
+    });
+    return total;
+  }
   for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
     const stat = STATS[statIndex];
     let best = null;
@@ -1082,11 +1100,12 @@ export function runSolver(problemSpec, search = null) {
     numPlus3,
     fixedConfig: exoticSettings?.config || null,
     rankTotals: totals => scoreStatsRank(totals, target, constraints),
-    lowerBoundRank: (baseTotals, adjustmentValueSets) => scoreStatsLowerBound(
+    lowerBoundRank: (baseTotals, adjustmentValueSets, pairValueSets) => scoreStatsLowerBound(
       baseTotals,
       adjustmentValueSets,
       target,
       constraints,
+      pairValueSets,
     ),
     compareRanks: compareScoreRanks,
     initialBest: incumbent,
