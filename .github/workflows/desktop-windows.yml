@@ -1,6 +1,7 @@
 name: Build Windows offline desktop
 
 on:
+  pull_request:
   workflow_dispatch:
   release:
     types: [published]

@@ -3,6 +3,7 @@ const workers = new Map();
 const generations = new Map();
 const pendingRequests = new Map();
 let nextRequestId = 1;
+let inventoryBatch = null;
 const OFFLINE_MODE = typeof __OFFLINE_MODE__ !== "undefined" && __OFFLINE_MODE__ === "true";
 
 function createWorker(operation, workerKey = operation) {
@@ -39,6 +40,11 @@ function createWorker(operation, workerKey = operation) {
 }
 
 export function cancelOperation(operation) {
+  if (operation === 'solveInventory' && inventoryBatch) {
+    const batch = inventoryBatch;
+    inventoryBatch = null;
+    batch.abort();
+  }
   for (const [key, worker] of workers) if (key === operation || key.startsWith(`${operation}:`)) {
     worker.terminate(); workers.delete(key);
   }
@@ -55,9 +61,10 @@ export function cancelAllSearches() {
 }
 
 function run(operation, input, {onProgress = null, signal = null} = {}, workerKey = operation) {
-  // Requests of the same operation may run concurrently (parallel inventory
-  // shards).  Do not cancel an existing request; each request gets its own
-  // monotonically increasing generation token and is matched by id below.
+  // Only batch-owned workers run concurrently. Ordinary operations supersede
+  // pending work instead of queueing behind a synchronous solver invocation.
+  if (workerKey === operation && ([...pendingRequests.values()].some(pending => pending.operation === operation)
+      || operation === 'solveInventory' && inventoryBatch)) cancelOperation(operation);
   const generation = (generations.get(operation) || 0) + 1;
   generations.set(operation, generation);
   const id = nextRequestId++;
@@ -67,6 +74,7 @@ function run(operation, input, {onProgress = null, signal = null} = {}, workerKe
     const abort = () => {
       const current = pendingRequests.get(id);
       if (!current) return;
+      if (workerKey === operation) { cancelOperation(operation); return; }
       pendingRequests.delete(id); current.cleanup?.();
       const error = new Error(`Cancelled ${operation} request`); error.name = "AbortError";
       current.reject(error);
@@ -119,8 +127,47 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
   const request = structuredClone({...payload, shardIndex: 0, shardCount: 1,
     searchLimits: {...payload.searchLimits, exhaustive: true}});
   if (parallelism === 1 || OFFLINE_MODE || typeof Worker === "undefined") return solveInventoryAsync(request, options);
+  cancelOperation('solveInventory');
   const batch = nextRequestId++;
   const controller = new AbortController();
+  inventoryBatch = controller;
+  const started = performance.now();
+  const partials = Array(parallelism).fill(null);
+  const searches = Array(parallelism).fill(null);
+  let firstExactMs = null;
+  let firstFeasibleMs = null;
+  let mergeModule = null;
+  let progressRevision = 0;
+  const engine = () => mergeModule ||= import('./armor-engine.mjs');
+  const active = () => !controller.signal.aborted && inventoryBatch === controller;
+  const metadata = (running, result = null) => ({schemaVersion: 1, operation: 'solveInventory',
+    generation: batch, profile: payload.searchProfile || 'balanced', running,
+    elapsedMs: performance.now() - started,
+    nodes: searches.reduce((sum, search) => sum + (search?.nodes || 0), 0),
+    firstExactMs, firstFeasibleMs,
+    termination: running ? null : searches.some(search => search?.termination === 'budget') ? 'budget' : 'completed',
+    coverage: {...result?.searchStats, complete: false},
+  });
+  const progress = (result, search, shardIndex) => {
+    if (!active()) return;
+    searches[shardIndex] = {...search, nodes: Math.max(search?.nodes || 0, searches[shardIndex]?.nodes || 0)};
+    if (!result?.results?.length) { options.onProgress?.(null, metadata(true)); return; }
+    partials[shardIndex] = result;
+    if (!options.onProgress) return;
+    const revision = ++progressRevision;
+    // Reconstruct positive witnesses against the full inventory. Local
+    // coverage/negative certificates never become a global proof.
+    void engine().then(({mergeInventoryShardResults}) => {
+      if (!active() || revision !== progressRevision) return;
+      const merged = mergeInventoryShardResults(request, partials, parallelism);
+      if (!merged.results.length) return;
+      const status = merged.certificate.status;
+      if (status === 'EXACT_TARGET_PROVEN') firstExactMs ??= performance.now() - started;
+      if (status === 'EXACT_TARGET_PROVEN' || status === 'RULE_FEASIBLE_PROVEN') firstFeasibleMs ??= performance.now() - started;
+      merged.search = metadata(true, merged);
+      options.onProgress(merged, merged.search);
+    }).catch(() => { if (active()) controller.abort(); });
+  };
   const abort = () => controller.abort();
   options.signal?.addEventListener("abort", abort, {once: true});
   if (options.signal?.aborted) abort();
@@ -128,14 +175,19 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
     const parts = await Promise.all(Array.from({length: parallelism}, (_, shardIndex) =>
       run("solveInventory", {...request, shardIndex, shardCount: parallelism}, {
         signal: controller.signal,
-        // Local negative results are not global progress certificates.
-        onProgress: (_result, search) => options.onProgress?.(null, {...search, shardIndex, shardCount: parallelism}),
-      }, `solveInventory:${batch}:${shardIndex}`)));
+        onProgress: (result, search) => progress(result, search, shardIndex),
+      }, `solveInventory:${batch}:${shardIndex}`).then(result => {
+        progress(result, result?.search, shardIndex);
+        return result;
+      })));
     if (controller.signal.aborted) { const error = new Error("Cancelled inventory batch"); error.name = "AbortError"; throw error; }
-    const {mergeInventoryShardResults} = await import("./armor-engine.mjs");
+    const {mergeInventoryShardResults} = await engine();
     if (controller.signal.aborted) { const error = new Error("Cancelled inventory batch"); error.name = "AbortError"; throw error; }
-    return mergeInventoryShardResults(request, parts, parallelism);
+    const result = mergeInventoryShardResults(request, parts, parallelism);
+    result.search = metadata(false, result);
+    return result;
   } finally {
+    if (inventoryBatch === controller) inventoryBatch = null;
     controller.abort();
     options.signal?.removeEventListener("abort", abort);
   }

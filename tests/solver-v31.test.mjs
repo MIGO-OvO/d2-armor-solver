@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {BASE_CONFIGS, STATS} from '../src/core/armor-model.mjs';
 import {createResidualBounds} from '../src/core/residual-bounds.mjs';
-import {findExactTargetWitnesses, findExactPartialConfigWitnesses, findFixedRuleWitness, findBestFixedConfigWitness, visibleArmorTargets} from '../src/core/exact-target-oracle.mjs';
+import {findExactTargetWitnesses, findExactPartialConfigWitnesses, findFixedTargetWitness, findFixedRuleWitness, findBestFixedConfigWitness, visibleArmorTargets} from '../src/core/exact-target-oracle.mjs';
 import {createDefaultUpgradePiece, getUpgradeConfig, getUpgradeMathKey, refineUpgradeAssignment,
   getUpgradeMetrics, compareUpgradeMetrics, evaluateUpgradePieces} from '../src/core/upgrade-optimizer.mjs';
 import {scoreStatsRank, scoreStatsLowerBound, compareScoreRanks} from '../src/core/solver.mjs';
@@ -70,8 +70,8 @@ test('Inventory shares math while preserving physical execution alternatives', (
     archetypeId: BASE_CONFIGS[index].archetype, tuningMode: 'plus3', tunedStat: 'health', tuningTo: 'health', tuningFrom: 'melee',
     armorModSize: 0, masterworkTier: 5, allowedTuningStats: ['health'], owner: 'a',
     dataConfidence: {stats: 'exact', tuning: 'exact', sockets: 'unknown'}}));
-  const target = rebuildReference(pieces, pieces.map(() => ({mode: '+3'})), {}).visible;
-  const items = pieces.flatMap(piece => [piece, {...piece, id: piece.id.replace('-a', '-b'), owner: 'b'}]);
+const target = rebuildReference(pieces, pieces.map(() => ({mode: '+3'})), {}).visible;
+  const items = pieces.flatMap(piece => [piece, {...piece, id: piece.id.replace('-a', '-b')}]);
   const result = solveInventory({items, targets: target, fragments: ZERO, reassignModifiers: true,
     setRequirement: {type: 'none'}, maxResults: 32, userConstraints: {exact: Object.fromEntries(STATS.map(stat => [stat, true]))}});
   assert.ok(result.searchStats.mathCacheHits > 0);
@@ -126,6 +126,23 @@ test('fixed-five refinement matches exhaustive assignments under the production 
   assert.equal(compareUpgradeMetrics(refined.metrics, expected), 0);
   assert.equal(refined.assignmentOptimal, true);
   assert.deepEqual(rebuildReference(configs, refined.tuningAssignments, refined.modAssignments).visible, refined.finalTotals);
+});
+
+test('point, interval and refinement Oracles respect an explicit Balanced count', () => {
+  const configs = BASE_CONFIGS.slice(0, 5);
+  const tuningCapabilities = configs.map(() => ({allowBalanced: true, allowedDirectionalStats: ['health']}));
+  const target = rebuildReference(configs, configs.map(() => ({mode: '+3'})), {}).armor;
+  const common = {configs, numPlus5: 0, numPlus10: 0, tuningCapabilities};
+  assert.ok(findFixedTargetWitness({...common, target, numPlus3: 5}));
+  assert.equal(findFixedTargetWitness({...common, target, numPlus3: 0}), null);
+  const minimums = STATS.map(stat => target[stat]);
+  const maximums = [...minimums];
+  assert.ok(findFixedRuleWitness({...common, minimums, maximums, numPlus3: 5}));
+  assert.equal(findFixedRuleWitness({...common, minimums, maximums, numPlus3: 0}), null);
+  const best = findBestFixedConfigWitness({...common, requiredNumPlus3: 0,
+    rankTotals: totals => STATS.reduce((sum, stat) => sum + Math.abs(totals[stat] - target[stat]), 0),
+    compareRanks: (a, b) => a - b});
+  assert.ok(best.tuningAssignments.every(tuning => tuning.mode !== '+3'));
 });
 
 test('joint pair score bound is admissible for every vector including caps and priorities', () => {

@@ -110,7 +110,7 @@ function renderSearchControls() {
   select.value = searchProfile;
   document.getElementById('cancelSearch').textContent = l('停止搜索','停止搜尋','Stop search');
   document.getElementById('searchProfileHelp').textContent = searchProfile === 'deep'
-    ? l('最多 15 秒，扩大搜索并尝试全局证明。可随时停止。','最多 15 秒，擴大搜尋並嘗試全域證明。可隨時停止。','Up to 15 seconds; wider search and global proof attempts. Stop at any time.')
+    ? l('每项搜索预算 120 秒，扩大搜索并尝试证明。可随时停止；搜索未完成不代表无解。','每項搜尋預算 120 秒，擴大搜尋並嘗試證明。可隨時停止；搜尋未完成不代表無解。','120-second budget per search; wider search and proof attempts. Stop at any time; an incomplete search does not mean impossible.')
     : searchProfile === 'fast' ? l('约 200 ms 搜索预算，优先返回已验证候选。','約 200 ms 搜尋預算，優先回傳已驗證候選。','About 200 ms search budget; verified candidates first.')
       : l('先显示已验证结果，再继续搜索至 3 秒。','先顯示已驗證結果，再繼續搜尋至 3 秒。','Show verified results first, then continue searching for up to 3 seconds.');
 }

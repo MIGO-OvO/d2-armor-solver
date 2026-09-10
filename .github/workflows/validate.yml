@@ -1,0 +1,31 @@
+name: Validate proposed changes
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop, 'codex/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run benchmark:v3
+      - run: npm run test:browser
+      - run: npm run verify:offline
+      - run: npm run desktop:test

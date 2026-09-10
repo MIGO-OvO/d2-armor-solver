@@ -115,7 +115,8 @@ separate from mathematical truth. Search callbacks never enter ProblemSpec.
 - Base configurations precompute the three masterwork stats used by hot
   evaluation loops.
 - Vite emits minified, content-hashed JavaScript/CSS and a separate Worker
-  asset. The engine fallback is loaded only when Worker support is unavailable.
+  asset. The engine is loaded on the main thread for inline fallback or to
+  reconstruct and certify parallel inventory witnesses; search stays in Workers.
 - Realtime reachability uses a revision number so stale asynchronous results
   cannot overwrite newer input.
 

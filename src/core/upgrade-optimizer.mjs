@@ -512,6 +512,13 @@ export function compareUpgradeMetrics(left, right) {
   return 0;
 }
 
+function assignmentBudgets(pieces, onlyPlus5Tuning, {autoStatMods = false, modifierBudget = null} = {}) {
+  if (modifierBudget) return [modifierBudget];
+  if (!autoStatMods) return [getUpgradeModifierBudget(pieces, {reassignModifiers: true, onlyPlus5Tuning})];
+  return Array.from({length: 6}, (_, numPlus10) => Array.from({length: 6 - numPlus10}, (_, numPlus5) =>
+    ({numPlus5, numPlus10, numPlus3: onlyPlus5Tuning ? 0 : null}))).flat();
+}
+
 export function evaluateUpgradePieces(
   pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}, runtime = {}
 ) {
@@ -549,23 +556,30 @@ export function evaluateUpgradePieces(
     score: scoreStats(manualArmorTotals, scoringTarget, constraints),
   };
   let evaluation = manualEvaluation;
+  const budgets = assignmentBudgets(pieces, onlyPlus5Tuning, runtime);
   if (reassignModifiers) {
-    const budget = getUpgradeModifierBudget(pieces, {
-      reassignModifiers: true,
-      onlyPlus5Tuning,
-    });
     const tuningCapabilities = pieces.map(piece =>
       getUpgradeTuningCapability(piece, onlyPlus5Tuning));
-    let exact = findFixedTargetWitness({configs, target: armorTarget,
-      numPlus5: budget.numPlus5, numPlus10: budget.numPlus10, tuningCapabilities, checkpoint: runtime.checkpoint});
+    let exact = null;
+    for (const budget of budgets) {
+      runtime.checkpoint?.(0);
+      exact = findFixedTargetWitness({configs, target: armorTarget, ...budget, tuningCapabilities, checkpoint: runtime.checkpoint});
+      if (exact) break;
+    }
     if (!exact && STATS.some(stat => targets[stat] === 0 || targets[stat] === 200)) {
-      exact = findFixedRuleWitness({configs, numPlus5: budget.numPlus5, numPlus10: budget.numPlus10,
-        tuningCapabilities, checkpoint: runtime.checkpoint,
-        minimums: STATS.map(stat => targets[stat] === 0 ? null : targets[stat] - (fragments[stat] || 0)),
-        maximums: STATS.map(stat => targets[stat] === 200 ? null : targets[stat] - (fragments[stat] || 0))});
+      for (const budget of budgets) {
+        exact = findFixedRuleWitness({configs, ...budget,
+          tuningCapabilities, checkpoint: runtime.checkpoint,
+          minimums: STATS.map(stat => targets[stat] === 0 ? null : targets[stat] - (fragments[stat] || 0)),
+          maximums: STATS.map(stat => targets[stat] === 200 ? null : targets[stat] - (fragments[stat] || 0))});
+        if (exact) break;
+      }
     }
     if (exact && !getUpgradeMetrics(finalizeUpgradeTotals(exact.totals, fragments), targets,
       0, normalizedRequiredStats, null, userConstraints, fragments).hardRulesSatisfied) exact = null;
+    // ponytail: fuzzy ranking is bounded to one heuristic budget; exact/rule
+    // feasibility checks cover every budget, and local refinement can improve it.
+    const budget = budgets.at(-1);
     const automaticEvaluation = exact ? {...exact,
       rank: scoreStatsRank(exact.totals, scoringTarget, constraints),
       score: scoreStats(exact.totals, scoringTarget, constraints),
@@ -576,7 +590,7 @@ export function evaluateUpgradePieces(
       // sets. It is migrated separately to replacement-count iterative
       // deepening; until then, do not multiply the exact fixed-five DP cost by
       // the old seed/hill-climb loop.
-      { skipExactJointSearch: true, tuningCapabilities, checkpoint: runtime.checkpoint },
+      { skipExactJointSearch: true, tuningCapabilities, numPlus3: budget.numPlus3, checkpoint: runtime.checkpoint },
     );
     const manualFinal = finalizeUpgradeTotals(manualEvaluation.totals, fragments);
     const manualMetrics = getUpgradeMetrics(
@@ -590,7 +604,11 @@ export function evaluateUpgradePieces(
         automaticEvaluation.rank, userConstraints, fragments
       );
       const manualKnown = manualEvaluation.tuningAssignments.every(tuning => tuning
-        && (tuning.mode === '+3' || tuning.mode === 'none' || tuning.from && tuning.to));
+        && (tuning.mode === '+3' || tuning.mode === 'none' || tuning.from && tuning.to))
+        && (!runtime.modifierBudget || budgets.some(value =>
+          value.numPlus5 === pieces.filter(piece => piece.armorModSize === 5).length
+          && value.numPlus10 === pieces.filter(piece => piece.armorModSize === 10).length
+          && (value.numPlus3 == null || value.numPlus3 === pieces.filter(piece => piece.tuningMode === 'plus3').length)));
       if (!manualKnown || compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
         evaluation = automaticEvaluation;
       }
@@ -600,7 +618,6 @@ export function evaluateUpgradePieces(
   const metrics = getUpgradeMetrics(finalTotals, targets, evaluation.score, normalizedRequiredStats,
     evaluation.rank, userConstraints, fragments);
   if (reassignModifiers && !metrics.hardRulesSatisfied) {
-    const budget = getUpgradeModifierBudget(pieces, {reassignModifiers: true, onlyPlus5Tuning});
     const lower = STATS.map(stat => {
       const fragment = fragments[stat] || 0;
       const visible = userConstraints.exact?.[stat] ? targets[stat]
@@ -615,15 +632,17 @@ export function evaluateUpgradePieces(
       if (userConstraints.le100?.[stat]) visible = Math.min(visible, 100);
       return visible >= 200 ? null : visible - fragment;
     });
-    const feasible = findFixedRuleWitness({configs, numPlus5: budget.numPlus5, numPlus10: budget.numPlus10,
-      tuningCapabilities: pieces.map(piece => getUpgradeTuningCapability(piece, onlyPlus5Tuning)), minimums: lower, maximums: upper,
-      checkpoint: runtime.checkpoint});
-    if (feasible) {
-      const final = finalizeUpgradeTotals(feasible.totals, fragments);
-      const rank = scoreStatsRank(feasible.totals, scoringTarget, constraints);
-      const score = scoreStats(feasible.totals, scoringTarget, constraints);
-      const feasibleMetrics = getUpgradeMetrics(final, targets, score, normalizedRequiredStats, rank, userConstraints, fragments);
-      if (compareUpgradeMetrics(feasibleMetrics, metrics) < 0) return {...feasible, configs, finalTotals: final, rank, score, metrics: feasibleMetrics};
+    for (const budget of budgets) {
+      const feasible = findFixedRuleWitness({configs, ...budget,
+        tuningCapabilities: pieces.map(piece => getUpgradeTuningCapability(piece, onlyPlus5Tuning)), minimums: lower, maximums: upper,
+        checkpoint: runtime.checkpoint});
+      if (feasible) {
+        const final = finalizeUpgradeTotals(feasible.totals, fragments);
+        const rank = scoreStatsRank(feasible.totals, scoringTarget, constraints);
+        const score = scoreStats(feasible.totals, scoringTarget, constraints);
+        const feasibleMetrics = getUpgradeMetrics(final, targets, score, normalizedRequiredStats, rank, userConstraints, fragments);
+        if (compareUpgradeMetrics(feasibleMetrics, metrics) < 0) return {...feasible, configs, finalTotals: final, rank, score, metrics: feasibleMetrics};
+      }
     }
   }
   return {
@@ -641,14 +660,15 @@ export function refineUpgradeAssignment(pieces, targets, fragments, requiredStat
   if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
   let best = initial || evaluateUpgradePieces(pieces, targets, fragments, true, requiredStats, onlyPlus5Tuning, userConstraints, runtime);
   const configs = pieces.map(getUpgradeConfig);
-  const budget = getUpgradeModifierBudget(pieces, {reassignModifiers: true, onlyPlus5Tuning});
+  const budgets = assignmentBudgets(pieces, onlyPlus5Tuning, runtime);
   const armorTarget = Object.fromEntries(STATS.map(stat => [stat, Math.max(0, targets[stat] - (fragments[stat] || 0))]));
   const scoringTarget = Object.fromEntries(STATS.map(stat => [stat,
     userConstraints.maximums?.[stat] === undefined ? armorTarget[stat] : userConstraints.minimums?.[stat] || 0]));
   const constraints = getUpgradeEvaluationConstraints(armorTarget, normalizeRequiredStats(requiredStats), userConstraints);
   const metricsFor = totals => getUpgradeMetrics(finalizeUpgradeTotals(totals, fragments), targets,
     scoreStats(totals, scoringTarget, constraints), requiredStats, scoreStatsRank(totals, scoringTarget, constraints), userConstraints, fragments);
-  findBestFixedConfigWitness({configs, numPlus5: budget.numPlus5, numPlus10: budget.numPlus10,
+  for (const budget of budgets) findBestFixedConfigWitness({configs, ...budget,
+    requiredNumPlus3: budget.numPlus3,
     tuningCapabilities: pieces.map(piece => getUpgradeTuningCapability(piece, onlyPlus5Tuning)),
     rankTotals: metricsFor, compareRanks: compareUpgradeMetrics, checkpoint: runtime.checkpoint,
     onWitness: witness => {

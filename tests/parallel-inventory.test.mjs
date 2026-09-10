@@ -175,3 +175,66 @@ test("a valid witness survives an incomplete sibling without claiming complete c
   assert.equal(result.certificate.proof.complete, false);
   assert.equal(result.certificate.canonicalId, result.results[0].canonicalId);
 });
+
+test('DFS shards partition physical candidates, including the current build', () => {
+  const payload = {...request(), maxResults: 32, searchLimits: {exhaustive: true}};
+  const serial = solveInventory(payload);
+  payload.currentPieces = serial.results[0].pieces;
+  const seen = new Set();
+  let examined = 0;
+  for (let shardIndex = 0; shardIndex < 4; shardIndex++) {
+    const part = solveInventory({...payload, shardIndex, shardCount: 4});
+    assert.equal(part.searchStats.shardIndex, shardIndex);
+    assert.equal(part.searchStats.shardCount, 4);
+    examined += part.examined;
+    for (const row of part.results) {
+      assert.equal(seen.has(row.canonicalId), false);
+      seen.add(row.canonicalId);
+    }
+  }
+  assert.equal(examined, serial.examined);
+  assert.deepEqual([...seen].sort(), serial.results.map(row => row.canonicalId).sort());
+});
+
+test('parallel progress retains verified witnesses before siblings finish and across abort', async t => {
+  const client = await clientFor(t);
+  const controller = new AbortController();
+  const events = [];
+  const payload = request();
+  const pending = client.solveInventoryParallelAsync(payload, {parallelism: 2, signal: controller.signal,
+    onProgress: (result, search) => events.push({result, search})});
+  const rejected = assert.rejects(pending, {name: 'AbortError'});
+  const worker = ControlledWorker.instances[0];
+  const message = worker.requests[0];
+  const partial = solveInventory(message.payload);
+  worker.events.message({data: {...message, type: 'progress', result: partial,
+    search: {elapsedMs: 10, nodes: 4, running: true}}});
+  await new Promise(resolve => setImmediate(resolve));
+  const published = events.find(event => event.result?.results?.length);
+  assert.ok(published, 'a positive witness must not wait for all workers');
+  assert.equal(published.result.certificate.witnessVerification.valid, true);
+  assert.equal(published.result.certificate.proof.complete, false);
+  assert.equal(published.search.running, true);
+  controller.abort();
+  await rejected;
+  assert.ok(published.result.results.length, 'already delivered results remain usable after stopping');
+  assert.ok(ControlledWorker.instances.every(worker => worker.terminated));
+});
+
+test('new batches supersede old batches and ordinary requests supersede batches', async t => {
+  const client = await clientFor(t);
+  const first = client.solveInventoryParallelAsync(request(), {parallelism: 2});
+  const firstRejected = assert.rejects(first, {name: 'AbortError'});
+  const old = [...ControlledWorker.instances];
+  const second = client.solveInventoryParallelAsync(request(), {parallelism: 2});
+  const secondRejected = assert.rejects(second, {name: 'AbortError'});
+  await firstRejected;
+  assert.ok(old.every(worker => worker.terminated));
+  const batchWorkers = ControlledWorker.instances.slice(2);
+  const third = client.solveInventoryAsync(request());
+  await secondRejected;
+  assert.ok(batchWorkers.every(worker => worker.terminated));
+  const worker = ControlledWorker.instances.at(-1);
+  worker.reply(worker.requests[0], solveInventory(worker.requests[0].payload));
+  assert.ok((await third).results.length);
+});

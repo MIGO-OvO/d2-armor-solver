@@ -11,3 +11,13 @@ test("desktop installer uses system WebView2 without bundling or downloading a r
   assert.equal(config.build.frontendDist, "../dist-desktop");
   assert.deepEqual(config.bundle.targets, ["nsis"]);
 });
+
+test('Release publishes only the desktop installer; browser ZIP remains an Actions artifact', () => {
+  const pages = readFileSync(new URL('../.github/workflows/deploy-pages.yml', import.meta.url), 'utf8');
+  const desktop = readFileSync(new URL('../.github/workflows/desktop-windows.yml', import.meta.url), 'utf8');
+  assert.match(pages, /offline-preview:/);
+  assert.match(pages, /actions\/upload-artifact/);
+  assert.doesNotMatch(pages, /offline-release:|action-gh-release|gh release upload/);
+  assert.match(desktop, /gh release upload/);
+  assert.match(desktop, /d2-armor-solver-windows-x64-setup\.exe/);
+});

@@ -2,8 +2,9 @@
 
 Base: `develop@f2fcf55793de1cc5ffe43378be833a45dc94e62d`.
 This is an incremental algorithm upgrade; the package/release version remains
-3.0.1. No schema migration, account mutation, deployment to main, or change to
-installed +5/+10 modifier budgets is included.
+3.0.1. No schema migration, account mutation or deployment to main is included.
+Upgrade retains installed +5/+10 budgets. Inventory supports automatic stat
+mods independently of installed counts; explicit budgets always take precedence.
 
 ## Implemented
 
@@ -119,4 +120,4 @@ witness/Inventory/Upgrade tests remain enabled. Browser account routes are mocke
 
 Deployment uses the existing GitHub Pages workflow triggered by develop, serving
 the development channel at `/d2-armor-solver/dev/`. The stable branch is not merged
-or pushed. The develop branch does not contain main's desktop build scripts.
+or pushed. The later develop integration also includes the shared Windows desktop build.

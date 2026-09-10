@@ -179,7 +179,7 @@ test("UI cannot import alternative rule validators or promote metric flags", () 
   assert.doesNotMatch(app, /satisfiesTargetConstraints|satisfiesUpgradeStatRule|preferConstraintSatisfyingSolutions|metrics\.allReached/);
 });
 
-test("Worker generations isolate concurrent progress and all operations support cancellation", {timeout: 5000}, async () => {
+test("Worker generations isolate superseded progress and all operations support cancellation", {timeout: 5000}, async () => {
   class FakeWorker {
     static instances = [];
     constructor() { this.events = {}; FakeWorker.instances.push(this); }
@@ -195,22 +195,23 @@ test("Worker generations isolate concurrent progress and all operations support 
     for (const method of ["solveLoadoutAsync", "solveInventoryAsync", "analyzeUpgradeAsync", "calculateReachabilityAsync"]) {
       const progress = [];
       const first = client[method]({}, {onProgress: result => progress.push(result)});
+      const rejected = assert.rejects(first, {name: 'AbortError'});
       const old = FakeWorker.instances.at(-1);
       const second = client[method]({}, {onProgress: result => progress.push(result)});
       const fresh = FakeWorker.instances.at(-1);
-      assert.equal(old.terminated, undefined);
-      old.reply(0, {type: "result", result: "first"});
+      assert.equal(old.terminated, true);
       old.reply(0, {type: "progress", result: "stale"});
-      fresh.reply(1, {type: "progress", result: "fresh"});
-      fresh.reply(1, {type: "result", result: "finished"});
-      assert.deepEqual(await Promise.all([first, second]), ["first", "finished"]);
+      fresh.reply(0, {type: "progress", result: "fresh"});
+      fresh.reply(0, {type: "result", result: "finished"});
+      assert.equal(await second, 'finished');
+      await rejected;
       assert.deepEqual(progress, ["fresh"]);
     }
     client.cancelAllSearches();
   } finally { globalThis.Worker = original; }
 });
 
-test("concurrent inventory requests resolve independently for parallel shards", {timeout: 5000}, async () => {
+test("AbortSignal terminates ordinary workers and the next request gets a fresh worker", {timeout: 5000}, async () => {
   class ConcurrentWorker {
     static instances = [];
     constructor() { this.events = {}; ConcurrentWorker.instances.push(this); }
@@ -223,11 +224,20 @@ test("concurrent inventory requests resolve independently for parallel shards", 
   globalThis.Worker = ConcurrentWorker;
   try {
     const client = await import(`../src/core/armor-engine-client.mjs?concurrent=${Date.now()}`);
-    const a = client.solveInventoryAsync({shardIndex: 0, shardCount: 2});
-    const b = client.solveInventoryAsync({shardIndex: 1, shardCount: 2});
-    assert.equal(ConcurrentWorker.instances.length, 1, "requests share worker without cancelling");
-    for (const instance of ConcurrentWorker.instances) instance.reply({ok: true});
-    const results = await Promise.all([a, b]);
-    assert.deepEqual(results, [{ok: true}, {ok: true}]);
+    for (const method of ['solveLoadoutAsync', 'solveInventoryAsync', 'analyzeUpgradeAsync', 'calculateReachabilityAsync']) {
+      const controller = new AbortController();
+      const first = client[method]({}, {signal: controller.signal});
+      const rejected = assert.rejects(first, {name: 'AbortError'});
+      const old = ConcurrentWorker.instances.at(-1);
+      controller.abort();
+      await rejected;
+      assert.equal(old.terminated, true);
+      const second = client[method]({});
+      const fresh = ConcurrentWorker.instances.at(-1);
+      assert.notEqual(fresh, old);
+      fresh.reply({ok: true});
+      assert.deepEqual(await second, {ok: true});
+    }
+    client.cancelAllSearches();
   } finally { globalThis.Worker = original; }
 });
