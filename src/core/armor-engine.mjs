@@ -66,6 +66,22 @@ export function createSearchLimitResult(operation, payload) {
     proof: createProofEvidence(problemSpec, {method: "effort-budget", truncated: true})}));
 }
 
+// 达标优先: rule-satisfying witnesses always precede near-miss incumbents, but
+// both groups survive so a fuzzy rule set still lists its best approximations
+// when nothing fully qualifies. The solver's own intra-group order is preserved.
+function orderByRuleSatisfaction(solutions, problemSpec) {
+  const model = problemSpec?.constraintModel;
+  if (!model || !Array.isArray(solutions) || solutions.length < 2) return solutions;
+  const satisfying = [];
+  const rest = [];
+  for (const witness of solutions) {
+    (satisfiesConstraintModel(witness, model) ? satisfying : rest).push(witness);
+  }
+  if (satisfying.length === 0 || rest.length === 0) return solutions;
+  solutions.splice(0, solutions.length, ...satisfying, ...rest);
+  return solutions;
+}
+
 function annotateWitnesses(witnesses, problemSpec) {
   const verified = [];
   for (const candidate of witnesses || []) {
@@ -146,6 +162,7 @@ export function solveLoadout({
       proof: createProofEvidence(problemSpec, {method: "effort-budget", truncated: true})}));
   }
   const solutions = annotateWitnesses(raw, problemSpec);
+  orderByRuleSatisfaction(solutions, problemSpec);
   for (const witness of solutions) attachResultCertificate(witness, certificateForWitness({
     problemSpec, witness, witnessDomain: targetDomain,
     executionStatus: EXECUTION_STATUS.NOT_APPLICABLE, proof: solutions.proof,

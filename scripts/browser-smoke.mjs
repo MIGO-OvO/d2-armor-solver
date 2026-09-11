@@ -33,6 +33,37 @@ async function checkWitnessDomRoundTrip(page) {
   }
 }
 
+// Owned armor and theoretical skeletons now share one list ("配装方案"). A piece
+// row counts as owned when it names a concrete item instead of the farm
+// placeholder. Two markups exist: `renderUnifiedPieceRow` emits
+// `.inventory-result-piece` for farm gaps and inventory entries, while a
+// theoretical skeleton with a matched item reuses `renderOwnedArmorMatch`
+// (`.owned-armor-match`). Both always carry the slot label.
+const FARM_PLACEHOLDERS = ["Farm", "需刷取", "需取得"];
+
+async function countUnifiedOwnedRows(page, slotLabel = null) {
+  return page.evaluate(({ slot, placeholders }) => {
+    const farm = new Set(placeholders);
+    const rows = [...document.querySelectorAll(
+      "#inventoryResults .inventory-result-piece, #inventoryResults .owned-armor-match",
+    )];
+    return rows.filter(row => {
+      const slotText = (
+        row.querySelector(".inventory-result-piece-slot")?.textContent
+        || row.querySelector("strong")?.textContent
+        || ""
+      ).trim();
+      if (slot && slotText !== slot) return false;
+      const nameText = (
+        row.querySelector(".inventory-result-piece-name")?.textContent
+        || row.querySelector(".owned-armor-match-body b")?.textContent
+        || ""
+      ).trim();
+      return nameText !== "" && !farm.has(nameText);
+    }).length;
+  }, { slot: slotLabel, placeholders: FARM_PLACEHOLDERS });
+}
+
 async function findChrome() {
   const candidates = [
     process.env.CHROME_PATH,
@@ -534,12 +565,20 @@ async function checkInventoryPlanning(browser) {
     assert.equal(await page.locator('#inventoryFixedExoticName').inputValue(), 'any-exotic',
       'an unowned reservation must survive draft restore');
     await page.evaluate(() => window.solve());
-    await page.locator('#ownedGearSection').waitFor({ state: 'visible' });
-    assert.doesNotMatch(await page.locator('#ownedGearSection').innerText(), /Owned chest/);
+    await page.locator('#inventoryResults').waitFor({ state: 'visible' });
+    // Reserving the chest slot for an unowned Exotic must keep owned Legendary
+    // chests out of every plan, so no entry may list an owned chest piece.
+    assert.equal(
+      await countUnifiedOwnedRows(page, 'Chest'),
+      0,
+      'an unowned Exotic reservation must exclude owned chests from the plan list',
+    );
     assert.match(await page.locator('.farm-requirement-row', { hasText: 'Any Exotic' }).innerText(), /Chest/);
     await page.locator('#inventoryFixedExoticName').selectOption('');
-    assert.match(await page.locator('#ownedGearSection').innerText(), /Owned chest/,
-      'clearing the reservation permits Legendary chest matches again');
+    assert.ok(
+      await countUnifiedOwnedRows(page, 'Chest') > 0,
+      'clearing the reservation permits Legendary chest matches again',
+    );
     await page.locator("#inventoryExoticSlotFilter").selectOption("helmet");
     const fixedExoticValue = await page.locator("#inventoryFixedExoticName option", { hasText: "Regression Exotic" }).getAttribute("value");
     assert.ok(fixedExoticValue, "imported Exotic should be available by name");
@@ -581,10 +620,9 @@ async function checkInventoryPlanning(browser) {
       0,
       "scratch mode should not render a second inventory-plan list",
     );
-    assert.match(
-      await page.locator("#ownedGearSection").innerText(),
-      /Owned (arms|chest|legs|classItem)/,
-      "the active solution should list matching armor from the imported inventory",
+    assert.ok(
+      (await countUnifiedOwnedRows(page)) > 0,
+      "the unified plan list should show armor matched from the imported inventory",
     );
     await page.locator("#ownedGearSection .manual-owned-editor summary").click();
     await page.locator("#addManualOwnedButton").click();
@@ -1450,7 +1488,19 @@ async function checkBungieAuthFlow(browser) {
     );
     assert.equal(await page.locator("#bungieLoginButton").count(), 1);
     assert.match(await page.locator(".upgrade-import-state").innerText(), /未导入/);
-    assert.equal(await page.locator("#inventoryResults").isHidden(), true);
+    // The merged plan list stays visible: theoretical skeletons do not depend on
+    // an import. What must disappear is every Bungie-sourced owned piece and its
+    // equip action.
+    assert.equal(
+      await page.locator("#inventoryResults .bungie-equip-panel").count(),
+      0,
+      "signing out must remove every Bungie-sourced equip action",
+    );
+    assert.equal(
+      await countUnifiedOwnedRows(page),
+      0,
+      "signing out must drop the imported Bungie inventory from the plan list",
+    );
 
     // --- escape accounting: every bungie.net request must have been routed ---
     assert.equal(
@@ -1810,11 +1860,29 @@ try {
   await page.locator("#onlyPlus5Tuning").check();
   await page.evaluate(() => window.solve());
   await page.locator("#results.show").waitFor();
-  const mobileSolutionList = page.locator("#solutionNav [role=\"list\"]");
+  // The two-column theoretical picker is gone: owned-armor and theoretical plans
+  // share one list, which must stay a compact horizontal strip on phones.
+  const mobileResultList = page.locator("#inventoryResults .inventory-result-list");
+  await mobileResultList.waitFor({ state: "visible" });
+  const mobileResultLayout = await mobileResultList.evaluate(element => ({
+    flow: getComputedStyle(element).gridAutoFlow,
+    overflowX: getComputedStyle(element).overflowX,
+    right: element.getBoundingClientRect().right,
+  }));
   assert.equal(
-    await mobileSolutionList.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length),
-    2,
-    "390px solution picker should remain a compact two-column list",
+    mobileResultLayout.flow,
+    "column",
+    "390px should collapse the unified loadout picker into a single horizontal row",
+  );
+  assert.equal(
+    mobileResultLayout.overflowX,
+    "auto",
+    "the narrow-viewport loadout picker should scroll horizontally",
+  );
+  assert.ok(
+    mobileResultLayout.right <= 390 + 1,
+    "the loadout picker should stay inside the 390px viewport: " +
+      JSON.stringify(mobileResultLayout),
   );
   await page.locator(".constraint-scroll-hint").waitFor({ state: "visible" });
   assert.equal(

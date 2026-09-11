@@ -1,6 +1,7 @@
 import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
 import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
-import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers, createCanonicalId } from "./solver-v3-contract.mjs";
+import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers, createCanonicalId,
+  satisfiesConstraintModel, STAT_DOMAIN } from "./solver-v3-contract.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -367,6 +368,16 @@ export function assignmentCanReachExact(solution, chosen) {
   return STATS.every(stat => rebuilt[stat] === solution.totals?.[stat]);
 }
 
+// A source witness must satisfy the active rules before any of its owned
+// substitutions can be presented as a qualifying plan. Without a bound
+// constraint model the historical reproduction check is the only evidence and
+// behaviour is preserved for callers that pass raw solver candidates.
+export function sourceSatisfiesRules(solution) {
+  const model = solution?.problemSpec?.constraintModel;
+  if (!model) return true;
+  return satisfiesConstraintModel(solution, model, STAT_DOMAIN.ARMOR);
+}
+
 function combinations(items, count) {
   const out = [];
   const pick = (start, chosen) => {
@@ -405,6 +416,9 @@ function repairChosenForExactness(solution, chosen, setRequirement) {
 }
 
 function comparePlans(left, right) {
+  // 达标优先: rule-satisfying plans always outrank near-miss incumbents, even
+  // when the near-miss owns more pieces and would otherwise win on savings.
+  if (left.rulesFeasible !== right.rulesFeasible) return left.rulesFeasible ? -1 : 1;
   // Plans whose owned pieces can actually reach the exact totals rank first.
   if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
   const targetOrder = compareScoreRanks(left.solution?.rank, right.solution?.rank);
@@ -515,6 +529,7 @@ export function rankInventoryPlans({
     const fixedExoticPiece = fixedExotic
       ? pieces.find(piece => piece.slot === fixedExotic.slot)
       : null;
+    const rulesFeasible = sourceSatisfiesRules(solution);
     const plan = {
       solution,
       slotByConfig: requirements.map(requirement => requirement.slot),
@@ -524,7 +539,8 @@ export function rankInventoryPlans({
       ownedCount: assignment.ownedCount,
       farmCount: assignment.farmCount,
       setCoverage: assignment.setCoverage,
-      feasible: assignment.setFeasible && assignmentCanReachExact(solution, assignment.chosen),
+      rulesFeasible,
+      feasible: rulesFeasible && assignment.setFeasible && assignmentCanReachExact(solution, assignment.chosen),
       fixedExoticDistance: !fixedExotic || fixedExoticPiece?.item
         ? 0
         : fixedExoticPiece?.closestMismatch?.score ?? Number.MAX_SAFE_INTEGER,

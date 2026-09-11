@@ -257,6 +257,33 @@ test("Exotic Class Item solutions map the fixed config to the class item slot", 
   assert.deepEqual(plan.pieces.slice(1).map(piece => piece.slot), ["helmet", "arms", "chest", "legs"]);
 });
 
+test("a bound constraint model decides whether an owned plan qualifies", () => {
+  const satisfying = makeSolution();
+  const problemSpec = createProblemSpec({
+    operation: "solve",
+    target: satisfying.totals,
+    constraints: {exact: Object.fromEntries(STAT_IDS.map(stat => [stat, true]))},
+    numPlus5: 0, numPlus10: 0, numPlus3: 0,
+    pieces: [],
+  });
+  satisfying.problemSpec = problemSpec;
+  const items = [0, 1, 2, 3, 4].map(index => makeItem(satisfying, index));
+  const [qualifying] = rankInventoryPlans({solutions: [satisfying], items, classId: "hunter"});
+  assert.equal(qualifying.rulesFeasible, true);
+  assert.equal(qualifying.feasible, true);
+
+  // A near-miss incumbent reproduces its own totals exactly but violates the
+  // bound rules; reproducing the arithmetic must not present it as a
+  // qualifying owned plan under the same rule set.
+  const nearMiss = makeSolution(BASE_CONFIGS.slice(5, 10));
+  nearMiss.problemSpec = problemSpec;
+  const nearItems = [0, 1, 2, 3, 4].map(index => makeItem(nearMiss, index));
+  const [rejected] = rankInventoryPlans({solutions: [nearMiss], items: nearItems, classId: "hunter"});
+  assert.equal(rejected.rulesFeasible, false);
+  assert.equal(rejected.feasible, false,
+    "a rule-violating witness must never be labelled as a qualifying owned plan");
+});
+
 // ============================================================
 // REAL SOLUTIONS: fixed +5 roll matching is decided by feasibility
 // ============================================================

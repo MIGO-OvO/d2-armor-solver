@@ -1404,7 +1404,7 @@ async function solve() {
       renderSearchStatus(partial, search);
       if (partial?.[0]) {
         allSolutions = partial; currentSolutionIdx = 0;
-        displayAllResults(partial[0], targets, fragments, {scroll: false});
+        displayAllResults(partial[0], targets, fragments, {scroll: false, refreshList: false});
       }
     }});
     if (revision !== searchUiRevision) return;
@@ -1568,7 +1568,7 @@ async function refineWithPriorities() {
     }, {onProgress: (partial, search) => {
       if (revision !== searchUiRevision) return;
       renderSearchStatus(partial, search);
-      if (partial?.[0]) { allSolutions = partial; currentSolutionIdx = 0; displayAllResults(partial[0], lastTargets, lastFragments, {scroll: false}); }
+      if (partial?.[0]) { allSolutions = partial; currentSolutionIdx = 0; displayAllResults(partial[0], lastTargets, lastFragments, {scroll: false, refreshList: false}); }
     }});
     const newResult = newSolutions[0];
     if (revision !== searchUiRevision) return;
@@ -1857,9 +1857,11 @@ function renderWitnessBreakdown(witness) {
   </details>`;
 }
 
-function displayAllResults(result, targets, fragments, { scroll = true, forceOwnedPlan = false } = {}) {
+function displayAllResults(result, targets, fragments, { scroll = true, forceOwnedPlan = false, skipOwnedPlan = false, refreshList = true } = {}) {
   const restoreDetails = preserveDisclosureState(document.getElementById('results'));
-  result = getOwnedArmorPlan(result, { force: forceOwnedPlan })?.matchedSolution || result;
+  if (!skipOwnedPlan) {
+    result = getOwnedArmorPlan(result, { force: forceOwnedPlan })?.matchedSolution || result;
+  }
   const results = document.getElementById('results');
   results.classList.add('show');
   document.getElementById('floatJump').style.display = 'flex';
@@ -1934,6 +1936,11 @@ function displayAllResults(result, targets, fragments, { scroll = true, forceOwn
 
   // Pieces output
   displayPieceResults(result, fragments);
+  // Keep the unified "配装方案" list in sync with the currently displayed plan
+  // so both surfaces always describe the same ranking. Progressive partials skip
+  // the rebuild: ranking every solution on each tick is wasted work, and the
+  // settled result renders the list once.
+  if (refreshList && calculatorMode === 'solve') renderUnifiedResults();
   restoreDetails();
   if (scroll) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -2089,91 +2096,16 @@ function toggleAllSolutions() {
 
 function renderSolutionNav() {
   const navBar = document.getElementById('solutionNav');
-
-  // Filter: if any solutions satisfy every target rule, only show those.
-  const perfectSolutions = allSolutions.filter(solutionSatisfiesCurrentTargetRules);
-  const rankedSolutions = perfectSolutions.length > 0 ? perfectSolutions : allSolutions;
-  const hasPerfect = perfectSolutions.length > 0;
-
-  if (allSolutions.length <= 1 && !hasPerfect) {
+  // The ranked plan list now lives in the unified "配装方案" panel, which shows
+  // owned loadouts and theoretical skeletons together. This surface keeps only
+  // the no-qualifying-loadout warning so a second, inconsistent list cannot
+  // reappear below it.
+  if (navBar) {
+    navBar.innerHTML = '';
     navBar.style.display = 'none';
-    if (allSolutions.length > 0 && !lastExoticSettings) {
-      appendImperfectWarning();
-    }
-    return;
   }
-
-  const total = rankedSolutions.length;
-  const truncated = !showAllSolutions && total > SOLUTION_PREVIEW_COUNT;
-  const showSolutions = truncated ? rankedSolutions.slice(0, SOLUTION_PREVIEW_COUNT) : rankedSolutions;
-
-  navBar.style.display = 'block';
-  const hasFuzzyRules = hasNonExactTargetRules();
-  const title = !hasPerfect && allSolutions.certificate?.status === 'SEARCH_LIMIT_REACHED'
-    ? l(
-        `\u641c\u7d22\u53d7\u9650\uff1b\u663e\u793a ${total} \u4e2a\u5f53\u524d\u6700\u4f73配装`,
-        `\u641c\u5c0b\u53d7\u9650\uff1b\u986f\u793a ${total} \u500b\u76ee\u524d\u6700\u4f73配裝`,
-        `Search limited; showing ${total} current-best loadouts`,
-      )
-    : hasPerfect
-    ? hasFuzzyRules
-      ? l(
-          `共 ${total} 种满足全部规则的方案，按易刷程度排序`,
-          `共 ${total} 種滿足全部規則的方案，按取得難度排序`,
-          `${total} solutions satisfy every rule, sorted by farmability`,
-        )
-      : l(
-          `共 ${total} 种精确达成方案，按易刷程度排序`,
-          `共 ${total} 種精確達成方案，按取得難度排序`,
-          `${total} exact solutions, sorted by farmability`,
-        )
-    : hasFuzzyRules
-      ? l(
-          `已证明没有完全满足方案；显示 ${total} 个未达标搭配`,
-          `已證明沒有完全滿足方案；顯示 ${total} 個未達標搭配`,
-          `No fully satisfying solution was proven; ${total} non-qualifying loadouts shown`,
-        )
-      : l(
-          `已证明精确目标不可达；显示 ${total} 个最接近目标的搭配`,
-          `已證明精確目標不可達；顯示 ${total} 個最接近目標的搭配`,
-          `Exact target proven infeasible; ${total} closest available loadouts shown`,
-        );
-  const shownNote = truncated
-    ? l(
-        `　显示最优 ${showSolutions.length} 种`,
-        `　顯示最佳 ${showSolutions.length} 種`,
-        `　showing the top ${showSolutions.length}`
-      )
-    : '';
-
-  let navHTML = `<div class="icon-text" style="font-size:14px;color:var(--text-dim);margin-bottom:6px;">`
-    + `${icon(hasPerfect ? 'check' : 'warn')}<span>${title}${shownNote}</span></div>`;
-  navHTML += `<div style="margin-bottom:8px;"><button class="btn" onclick="document.getElementById('compCard').scrollIntoView({behavior:'smooth'})" style="font-size:11px;padding:4px 10px;">${icon('down')}${l('跳过方案列表','跳過方案列表','Skip solution list')}</button></div>`;
-  navHTML += `<div role="list" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">`;
-  for (let si = 0; si < showSolutions.length; si++) {
-    const sol = showSolutions[si];
-    const key = displayArchetypeKey(sol.config, sol.exoticIndex);
-    const active = sol === allSolutions[currentSolutionIdx];
-    const badge = solutionSatisfiesCurrentTargetRules(sol)
-      ? icon('check', { size: 'sm' })
-      : '';
-    navHTML += `<button role="listitem" aria-pressed="${active}" onclick="switchSolution(${allSolutions.indexOf(sol)})"
-      style="padding:8px 14px;border-radius:8px;border:2px solid ${active?'var(--accent)':'var(--border)'};background:${active?'rgba(244,181,61,0.12)':'var(--bg)'};color:${active?'#fff':'var(--text)'};cursor:pointer;font-size:13px;font-family:inherit;font-weight:${active?'700':'400'};transition:all 0.15s;text-align:left;">
-      <span style="color:${active?'var(--accent)':'var(--text-dim)'};">#${si+1}</span> ${badge} <span style="color:var(--archetype);">${key}</span>
-    </button>`;
-  }
-  navHTML += '</div>';
-
-  if (total > SOLUTION_PREVIEW_COUNT) {
-    navHTML += `<button class="btn" onclick="toggleAllSolutions()" style="margin-top:10px;width:100%;">`
-      + (showAllSolutions
-        ? l(`仅显示最优 ${SOLUTION_PREVIEW_COUNT} 种`, `僅顯示最佳 ${SOLUTION_PREVIEW_COUNT} 種`, `Show only the top ${SOLUTION_PREVIEW_COUNT}`)
-        : l(`显示其余 ${total - SOLUTION_PREVIEW_COUNT} 种方案`, `顯示其餘 ${total - SOLUTION_PREVIEW_COUNT} 種方案`, `Show remaining ${total - SOLUTION_PREVIEW_COUNT} solutions`))
-      + '</button>';
-  }
-  navBar.innerHTML = navHTML;
-
-  if (!hasPerfect && !lastExoticSettings) appendImperfectWarning();
+  const hasPerfect = allSolutions.some(solutionSatisfiesCurrentTargetRules);
+  if (allSolutions.length > 0 && !hasPerfect && !lastExoticSettings) appendImperfectWarning();
 }
 
 function switchSolution(realIdx) {
@@ -2245,36 +2177,14 @@ function renderManualOwnedItem(item, index) {
 
 function buildOwnedGearSection(_finalTotals, _targets) {
   const section = document.getElementById('ownedGearSection');
-  const solution = allSolutions[currentSolutionIdx];
-  if (!section || !solution) return;
-  // Inventory search has its own unified, rule-aware result list. Do not render
-  // a second partial "match this theoretical witness" list below it.
-  if (lastInventoryMode === calculatorMode && lastInventoryResult?.results?.length) {
-    section.innerHTML = '';
-    section.style.display = 'none';
-    return;
-  }
-  const plan = getOwnedArmorPlan(solution);
-  const matches = plan?.pieces?.filter(piece => piece.item) || [];
+  if (!section) return;
+  // Owned-armor matching and its ranked list moved into the unified
+  // "配装方案" panel above. Only the manual add-armor editor stays here, so a
+  // second partial match list can never disagree with the unified one.
+  const plan = getOwnedArmorPlan(allSolutions[currentSolutionIdx]);
   const defaultPiece = getManualOwnedDefault(plan);
   const tertiaryOptions = getManualTertiaryOptions(defaultPiece.archetypeId);
   if (!tertiaryOptions.includes(defaultPiece.tertiary)) defaultPiece.tertiary = tertiaryOptions[0];
-  const summary = plan
-    ? l(`本理论方案匹配 ${plan.ownedCount}/5 件 · 缺 ${plan.farmCount} 件`, `本理論方案符合 ${plan.ownedCount}/5 件 · 缺 ${plan.farmCount} 件`, `This theory: ${plan.ownedCount}/5 matched · ${plan.farmCount} missing`)
-    : l('尚无可匹配的已有护甲', '尚無可符合的已有防具', 'No owned armor available to match');
-  const matchContent = matches.length > 0
-    ? `<div class="owned-armor-match-list">${matches.map(renderOwnedArmorMatch).join('')}</div>`
-    : `<p class="owned-armor-empty">${l(
-      importedInventory.length > 0 && !importClassFilter
-        ? '请先在上方选择职业，再匹配清单中的已有护甲。'
-        : '当前方案没有精确匹配的已有护甲，可在下方手动新增。',
-      importedInventory.length > 0 && !importClassFilter
-        ? '請先在上方選擇職業，再符合清單中的已有防具。'
-        : '目前方案沒有精確符合的已有防具，可在下方手動新增。',
-      importedInventory.length > 0 && !importClassFilter
-        ? 'Choose a class above before matching imported armor.'
-        : 'No owned armor exactly matches this solution. You can add a piece manually below.'
-    )}</p>`;
   const manualList = manualOwnedItems.length > 0
     ? `<ul class="manual-owned-list">${manualOwnedItems.map(renderManualOwnedItem).join('')}</ul>`
     : '';
@@ -2286,19 +2196,18 @@ function buildOwnedGearSection(_finalTotals, _targets) {
   document.body.classList.toggle('is-editing-owned-armor', manualOwnedEditorOpen);
   section.innerHTML = `<div class="owned-gear-header">
     <div>
-      <h3 class="owned-gear-title">${l('已有护甲', '已有防具', 'Owned armor')}</h3>
+      <h3 class="owned-gear-title">${l('手动补充已有护甲', '手動補充已有防具', 'Add owned armor manually')}</h3>
       <p class="owned-gear-copy">${l(
-        '已有护甲方案已在上方统一结果列表中按规则排序；这里仅在没有库存搜索结果时显示理论方案的匹配情况。',
-        '此處只符合目前理論方案，不代表庫存無解。實際庫存配裝見上方「已有防具搭配方案」；變更清單或條件後請重新求解。',
-        'Owned armor is shown in the unified rule-aware results above; this section is only a fallback when inventory search has no results.'
+        '没有导入清单时，可在此手动登记已拥有的护甲，它们会参与上方统一方案列表的匹配。',
+        '沒有匯入清單時，可在此手動登記已擁有的防具，它們會參與上方統一方案清單的符合。',
+        'Without an imported list, register the armor you own here; it participates in the unified plan list above.'
       )}</p>
     </div>
     <div class="owned-gear-header-actions">
       ${bungieTargetControl}
-      <div class="owned-gear-summary">${summary}</div>
+      <div class="owned-gear-summary">${l(`已登记 ${manualOwnedItems.length} 件`, `已登記 ${manualOwnedItems.length} 件`, `${manualOwnedItems.length} registered`)}</div>
     </div>
   </div>
-  ${matchContent}
   ${actionStatus}
   <details class="manual-owned-editor" ${manualOwnedEditorOpen ? 'open' : ''} ontoggle="setManualOwnedEditorOpen(this.open)">
     <summary>${icon('plus')}${l('手动新增已有护甲', '手動新增已有防具', 'Add owned armor manually')}<span>${manualOwnedItems.length}</span></summary>
@@ -3503,7 +3412,10 @@ function handleBungieEquipError(error, surface = "result") {
 }
 
 async function equipInventorySolution(index) {
-  const entry = lastInventoryResult?.results?.[index];
+  // Only a fully owned inventory entry can be written back to the game; a
+  // theoretical skeleton with farm gaps has no live instances to equip.
+  const unified = lastUnifiedLoadouts[index];
+  const entry = unified?.kind === "inventory" ? unified.witness : null;
   if (!entry || isBungieApplying) return;
   const equipState = getInventorySolutionEquipState(entry);
   if (!equipState.available || !equipState.plan) {
@@ -4693,7 +4605,9 @@ function setCalculatorMode(mode, persist = true) {
   document.getElementById('btnUpgradeAnalyze').hidden = !isUpgrade;
   document.getElementById('saveBuildButton').hidden = isUpgrade;
   document.getElementById('upgradeResults').hidden = !isUpgrade || !lastUpgradeAnalysis;
-  document.getElementById('inventoryResults').hidden = lastInventoryMode !== calculatorMode || !lastInventoryResult?.results?.length;
+  // The unified plan panel is rebuilt by the next solve/selection render, which
+  // now also covers theoretical skeletons that need farming.
+  document.getElementById('inventoryResults').hidden = true;
   document.getElementById('floatJump').style.display = 'none';
   document.getElementById('messages').innerHTML = '';
   if (isUpgrade) {
@@ -5047,20 +4961,16 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
 }
 
 let lastInventoryResult = null;
-let lastInventoryMode = null;
 let lastInventoryTargets = null;
 let lastInventoryRequiredStats = [];
-let selectedInventoryResultIndex = 0;
 let inventorySolveRevision = 0;
 
 function clearInventoryResults() {
   invalidateOwnedPlanCache();
   inventorySolveRevision++;
   lastInventoryResult = null;
-  lastInventoryMode = null;
   lastInventoryTargets = null;
   lastInventoryRequiredStats = [];
-  selectedInventoryResultIndex = 0;
   const el = document.getElementById("inventoryResults");
   if (el) {
     el.innerHTML = "";
@@ -5217,46 +5127,184 @@ async function solveInventoryRequirement({
   }
 }
 
+// ============================================================
+// UNIFIED LOADOUT LIST (owned armor + theoretical skeletons)
+// ============================================================
+// Two surfaces used to render independently: the inventory frontier's owned
+// loadouts and the theoretical plan list. They disagreed because each ranked
+// and deduplicated alone, so a fully owned plan appeared on top and was missing
+// from the list below. Both are now projected into one entry shape and ordered
+// by 达标优先, then by how complete the owned armor is.
+let lastUnifiedLoadouts = [];
+let selectedUnifiedIndex = 0;
+let unifiedCache = { key: null, solutions: null, entries: [] };
+let renderingUnifiedList = false;
+
+function compareRankTuples(left, right) {
+  const a = Array.isArray(left) ? left : [];
+  const b = Array.isArray(right) ? right : [];
+  for (let index = 0; index < Math.max(a.length, b.length); index++) {
+    const difference = Number(a[index] || 0) - Number(b[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function unifiedPieceIdentity(piece) {
+  const identity = piece?.sourceId || piece?.id || piece?.item?.sourceId || piece?.item?.id;
+  if (identity) return `${piece.slot}:${identity}`;
+  return `${piece?.slot}:farm:${piece?.farmSetHash || 0}:${piece?.archetype || piece?.archetypeId || ''}:${piece?.tertiary || ''}`;
+}
+
+function unifiedEntryKey(entry) {
+  return entry.pieces.map(unifiedPieceIdentity).sort().join('|');
+}
+
+// 达标优先 → 精确达成 → 已有护甲更完整 → 刷取更少 → 理论排名 → 易刷程度.
+function compareUnifiedEntries(left, right) {
+  if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
+  if (left.exact !== right.exact) return left.exact ? -1 : 1;
+  if (left.ownedCount !== right.ownedCount) return right.ownedCount - left.ownedCount;
+  if (left.farmCount !== right.farmCount) return left.farmCount - right.farmCount;
+  const rankOrder = compareRankTuples(left.rank, right.rank);
+  if (rankOrder !== 0) return rankOrder;
+  if (left.farmability !== right.farmability) return left.farmability - right.farmability;
+  return 0;
+}
+
+function normalizeInventoryEntry(entry) {
+  return {
+    kind: "inventory",
+    witness: entry,
+    pieces: entry.pieces,
+    ownedCount: entry.pieces.length,
+    farmCount: 0,
+    feasible: certifiedFeasible(entry),
+    exact: entry.certificate?.status === "EXACT_TARGET_PROVEN",
+    rank: entry.rank || [],
+    farmability: 0,
+    current: entry.isCurrent === true,
+    tuningAssignments: entry.tuningAssignments,
+    modAssignments: entry.modAssignments,
+    certificate: entry.certificate,
+  };
+}
+
+function normalizeTheoryPlan(plan) {
+  const witness = plan.matchedSolution || plan.solution;
+  if (!witness) return null;
+  return {
+    kind: "theory",
+    witness,
+    plan,
+    pieces: plan.pieces,
+    ownedCount: plan.ownedCount,
+    farmCount: plan.farmCount,
+    feasible: certifiedFeasible(witness),
+    exact: witness.certificate?.status === "EXACT_TARGET_PROVEN",
+    rank: witness.rank || [],
+    farmability: Number(plan.farmability) || 0,
+    current: false,
+    tuningAssignments: witness.tuningAssignments,
+    modAssignments: witness.modAssignments,
+    certificate: witness.certificate,
+  };
+}
+
+function buildUnifiedLoadouts() {
+  const cacheKey = `${ownedPlanRevision}|${inventorySolveRevision}|${lastInventoryResult?.results?.length ?? 0}`;
+  if (unifiedCache.key === cacheKey && unifiedCache.solutions === allSolutions) {
+    return unifiedCache.entries;
+  }
+  const entries = (lastInventoryResult?.results || []).map(normalizeInventoryEntry);
+  const request = createOwnedArmorPlanRequest(
+    allSolutions, Math.max(SOLUTION_PREVIEW_COUNT, allSolutions.length), { allowEmpty: true },
+  );
+  if (request) {
+    for (const plan of rankInventoryPlans(request)) {
+      const entry = normalizeTheoryPlan(plan);
+      if (entry) entries.push(entry);
+    }
+  }
+  // A fully owned theoretical skeleton and an inventory witness describe the
+  // same five pieces. The inventory entry wins because it carries execution
+  // preflight; dropping the duplicate is what removes the "shown twice" plan.
+  const seen = new Set();
+  const merged = [];
+  for (const entry of entries) {
+    const key = unifiedEntryKey(entry);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(entry);
+  }
+  merged.sort(compareUnifiedEntries);
+  unifiedCache = { key: cacheKey, solutions: allSolutions, entries: merged };
+  return merged;
+}
+
 function renderInventoryResults(result) {
+  if (result) lastInventoryResult = result;
+  renderUnifiedResults();
+}
+
+function renderUnifiedResults() {
+  if (renderingUnifiedList) return;
   const el = document.getElementById("inventoryResults");
   if (!el) return;
-  lastInventoryResult = result;
-  lastInventoryMode = calculatorMode;
-  if (!result?.results?.length) {
-    el.innerHTML = "";
-    el.hidden = true;
-    return;
-  }
-  selectedInventoryResultIndex = Math.min(
-    Math.max(0, selectedInventoryResultIndex),
-    result.results.length - 1,
-  );
-  const selected = result.results[selectedInventoryResultIndex];
-  el.hidden = false;
-  el.innerHTML = `
+  renderingUnifiedList = true;
+  try {
+    const entries = buildUnifiedLoadouts();
+    lastUnifiedLoadouts = entries;
+    if (entries.length === 0) {
+      el.innerHTML = "";
+      el.hidden = true;
+      return;
+    }
+    selectedUnifiedIndex = Math.min(Math.max(0, selectedUnifiedIndex), entries.length - 1);
+    const selected = entries[selectedUnifiedIndex];
+    const qualifying = entries.filter(entry => entry.feasible).length;
+    const ownedComplete = entries.filter(entry => entry.farmCount === 0).length;
+    const fromScratch = calculatorMode === "solve";
+    // The header still has to name the set requirement the list was solved
+    // against; without it a constrained list looks like an unconstrained one.
+    const activeRequirement = lastInventoryResult?.requirement || snapshotSetRequirement();
+    const requirementLabel = !activeRequirement || activeRequirement.type === "none"
+      ? l("全部已有护甲", "全部已有防具", "All owned armor")
+      : formatSetRequirementLabel(activeRequirement);
+    el.hidden = false;
+    el.innerHTML = `
     <div class="inventory-results-head">
       <div>
-        <h2 class="inventory-results-title">${l("已有护甲搭配方案", "已有防具搭配方案", "Owned armor loadouts")}</h2>
-        <p>${l(
-          "独立搜索真实库存，不受下方理论方案列表限制。只有标注达标的方案满足目标；请同时核对大师杰作、模组与执行预检。",
-          "獨立搜尋實際庫存，不受下方理論方案清單限制。只有標示達標的方案滿足目標；請同時核對大師之作、模組與執行預檢。",
-          "Searches real inventory independently of the theoretical list. Only qualifying entries meet the target; also check masterwork, mods and execution preflight."
-        )}</p>
+        <h2 class="inventory-results-title">${fromScratch
+          ? l("配装方案", "配裝方案", "Loadouts")
+          : l("已有护甲搭配方案", "已有防具搭配方案", "Owned armor loadouts")}</h2>
+        <p>${fromScratch
+          ? l(
+            "已有护甲方案与理论方案已合并为同一列表：达标优先，其次按已有护甲完整度与刷取缺口排序。未标注达标的方案不满足目标；请同时核对大师杰作、模组与执行预检。",
+            "已有防具方案與理論方案已合併為同一清單：達標優先，其次依已有防具完整度與取得缺口排序。未標示達標的方案不滿足目標；請同時核對大師之作、模組與執行預檢。",
+            "Owned-armor and theoretical plans are one list: rule-satisfying first, then by how complete the owned armor is. Entries without a qualifying label do not meet the target; also check masterwork, mods and execution preflight."
+          )
+          : l(
+            "从已有清单中搭配出的方案，不受替换计划影响。只有标注达标的方案满足目标；请同时核对大师杰作、模组与执行预检。",
+            "從已有清單中搭配出的方案，不受替換計畫影響。只有標示達標的方案滿足目標；請同時核對大師之作、模組與執行預檢。",
+            "Loadouts built from your inventory, independent of the replacement plan. Only qualifying entries meet the target; also check masterwork, mods and execution preflight."
+          )}</p>
       </div>
-      <span class="inventory-results-req">${result.requirement?.type === "none"
-        ? l("全部已有护甲", "全部已有防具", "All owned armor")
-        : formatSetRequirementLabel(result.requirement)} · ${l(
-        `共检查 ${result.examined} 种组合`,
-        `共檢查 ${result.examined} 種組合`,
-        `${result.examined} combinations examined`
+      <span class="inventory-results-req">${requirementLabel} · ${l(
+        `共 ${entries.length} 个方案 · ${qualifying} 个达标 · ${ownedComplete} 个已有齐全`,
+        `共 ${entries.length} 個方案 · ${qualifying} 個達標 · ${ownedComplete} 個已有齊全`,
+        `${entries.length} plans · ${qualifying} qualifying · ${ownedComplete} fully owned`
       )}</span>
     </div>
     <div class="inventory-results-layout">
       <div class="inventory-result-list" role="listbox" aria-label="${l("方案清单", "方案清單", "Loadout list")}">
-        ${result.results.map((entry, index) => renderInventoryResultOption(entry, index)).join("")}
+        ${entries.map((entry, index) => renderUnifiedEntryOption(entry, index)).join("")}
       </div>
-      <div class="inventory-result-detail">${renderInventoryResultDetail(selected, selectedInventoryResultIndex)}</div>
+      <div class="inventory-result-detail">${renderUnifiedEntryDetail(selected, selectedUnifiedIndex)}</div>
     </div>`;
+  } finally {
+    renderingUnifiedList = false;
+  }
 }
 
 // The six-stat totals the result list should present (handoff 3.7 / Phase D):
@@ -5271,33 +5319,54 @@ function getDisplayedFinalTotals(entry) {
   return createSolutionDisplayModel(entry).visibleTotals;
 }
 
-function getInventoryResultSummary(entry) {
+function getUnifiedEntrySummary(entry) {
   const stats = entry.certificate?.statResults || {};
   const metCount = STATS.filter(stat => stats[stat]?.met).length;
   const requiredCount = lastInventoryRequiredStats.length;
   const requiredReachedCount = lastInventoryRequiredStats.filter(stat => stats[stat]?.met).length;
-  return {metCount, requiredCount, requiredReachedCount, status: searchProofLabel(entry),
-    statusMet: certifiedFeasible(entry)};
+  return {metCount, requiredCount, requiredReachedCount, status: searchProofLabel(entry.witness),
+    feasible: entry.feasible};
 }
 
-function renderInventoryResultOption(entry, index) {
-  const { metCount, requiredCount, requiredReachedCount, status, statusMet } = getInventoryResultSummary(entry);
-  const fixedCount = entry.pieces.filter(piece => piece.locked).length;
+function getUnifiedTotals(entry) {
+  try {
+    return getDisplayedFinalTotals(entry.witness);
+  } catch (error) {
+    console.error("Unified totals rebuild failed", error);
+    const witness = entry.witness || {};
+    return witness.visibleTotals || witness.finalTotals || witness.totals || {};
+  }
+}
+
+function safeWitnessBreakdown(witness) {
+  try {
+    return renderWitnessBreakdown(witness);
+  } catch (error) {
+    console.error("Witness breakdown failed", error);
+    return "";
+  }
+}
+
+function renderUnifiedEntryOption(entry, index) {
+  const { metCount, status, feasible } = getUnifiedEntrySummary(entry);
+  const ownedLabel = entry.farmCount === 0
+    ? l("已有护甲齐全", "已有防具齊全", "All owned")
+    : l(`需刷 ${entry.farmCount} 件`, `需刷 ${entry.farmCount} 件`, `Farm ${entry.farmCount}`);
+  // A theoretical skeleton keeps its archetype composition visible so the merged
+  // list still answers "which frames do I need", not just "how many".
+  const archetypeKey = entry.kind === "theory" && entry.plan?.solution
+    ? displayArchetypeKey(entry.plan.solution.config, entry.plan.solution.exoticIndex)
+    : "";
   return `
-    <button type="button" class="inventory-result-option ${entry.isCurrent ? "is-current" : ""}"
-      role="option" aria-selected="${index === selectedInventoryResultIndex}" onclick="selectInventorySolution(${index})">
+    <button type="button" class="inventory-result-option ${entry.current ? "is-current" : ""}"
+      role="option" aria-selected="${index === selectedUnifiedIndex}" onclick="selectInventorySolution(${index})">
       <span class="inventory-result-rank">${index + 1}</span>
       <span class="inventory-result-option-copy">
-        <strong class="inventory-result-status ${statusMet ? "is-met" : ""}">${status}</strong>
-        <small>${requiredCount > 0 ? l(
-          `必达 ${requiredReachedCount}/${requiredCount} · `,
-          `必達 ${requiredReachedCount}/${requiredCount} · `,
-          `Must meet ${requiredReachedCount}/${requiredCount} · `
-        ) : ''}${l(`达标 ${metCount}/6`, `達標 ${metCount}/6`, `${metCount}/6 met`)}${fixedCount
-          ? l(` · 保留 ${fixedCount} 件固定装备`, ` · 保留 ${fixedCount} 件固定裝備`, ` · ${fixedCount} fixed kept`)
-          : ""}</small>
+        <strong class="inventory-result-status ${feasible ? "is-met" : ""}">${status}</strong>
+        <small>${archetypeKey ? `${escapeHtml(archetypeKey)} · ` : ""}${l(`达标 ${metCount}/6`, `達標 ${metCount}/6`, `${metCount}/6 met`)} · ${ownedLabel}${entry.exact
+          ? ` · ${l("精确", "精確", "Exact")}` : ""}</small>
       </span>
-      ${entry.isCurrent ? `<span class="inventory-result-current">${l("当前", "目前", "Current")}</span>` : ""}
+      ${entry.current ? `<span class="inventory-result-current">${l("当前", "目前", "Current")}</span>` : ""}
     </button>`;
 }
 
@@ -5329,76 +5398,118 @@ function renderInventoryBungieEquip(entry, index) {
   </section>`;
 }
 
-function renderInventoryResultDetail(entry, index) {
-  const targets = lastInventoryTargets || {};
-  const { metCount, requiredCount, requiredReachedCount, status, statusMet } = getInventoryResultSummary(entry);
-  const finalTotals = getDisplayedFinalTotals(entry);
+// One piece row for both entry kinds: owned instances show their name and set,
+// farm gaps show the required archetype/tertiary so the list stays actionable.
+function renderUnifiedPieceRow(entry, piece, pieceIndex) {
+  // An owned piece of a theoretical skeleton already has a richer row (source,
+  // required vs installed Tuning, direct Bungie action); reuse it verbatim.
+  if (entry.kind === "theory" && piece.item) return renderOwnedArmorMatch(piece);
+  const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
+  const ownedItem = entry.kind === "inventory" ? piece : piece.item;
+  const isOwned = entry.kind === "inventory" || Boolean(ownedItem);
+  const setHash = entry.kind === "inventory"
+    ? piece.setHash
+    : (ownedItem?.setHash ?? piece.farmSetHash ?? null);
+  const set = setHash ? getArmorSetByHash(setHash) : null;
+  const name = isOwned
+    ? (ownedItem?.itemName || ownedItem?.name || l("已有护甲", "已有防具", "Owned armor"))
+    : l("需刷取", "需取得", "Farm");
+  const farmDetails = isOwned ? "" : [
+    getArchetypeLabel(piece.archetypeId || piece.archetype),
+    `${t("tertiaryStat")} ${STAT_LABELS[piece.tertiary] || "—"}`,
+  ].filter(Boolean).join(" · ");
+  const tuning = isOwned
+    ? formatUpgradeTuning(entry.tuningAssignments?.[pieceIndex])
+    : (piece.tuningMode === "plus3"
+      ? l("+3调整", "+3調校", "+3 Tuning")
+      : `+5 ${STAT_LABELS[piece.tuningTo] || "—"}`);
+  const trailing = isOwned
+    ? `${escapeHtml(tuning)} · ${formatUpgradeArmorMod(entry.modAssignments?.[pieceIndex])}`
+    : `${escapeHtml(tuning)}${farmDetails ? ` · ${escapeHtml(farmDetails)}` : ""}`;
+  const badge = piece.locked
+    ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${piece.exotic
+      ? l("异域固定", "異域固定", "Fixed Exotic")
+      : l("固定保留", "固定保留", "Fixed")}</span>`
+    : (!isOwned && piece.exotic
+      ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${l("需异域护甲", "需異域防具", "Exotic needed")}</span>`
+      : "");
+  return `<div class="inventory-result-piece" role="listitem">
+    <span class="inventory-result-piece-slot">${getUpgradeSlotLabel(slotIndex)}</span>
+    <span class="inventory-result-piece-name">${escapeHtml(name)}</span>
+    <span>${trailing}</span>
+    ${set ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(set))}</span>` : `<span></span>`}
+    ${badge}
+  </div>`;
+}
+
+function renderUnifiedEntryDetail(entry, index) {
+  const targets = lastInventoryTargets || lastTargets || {};
+  const { metCount, status, feasible } = getUnifiedEntrySummary(entry);
+  const finalTotals = getUnifiedTotals(entry);
   // A plan whose requested mods cannot all be installed shows lower actual
   // totals than the solver's projection; say so instead of claiming the
   // projection is reachable right now.
-  const differsFromProjection = importSource === "bungie"
-    && STATS.some(stat => (finalTotals[stat] || 0) !== (entry.finalTotals[stat] || 0));
+  const projected = entry.witness?.finalTotals;
+  const differsFromProjection = importSource === "bungie" && projected
+    && STATS.some(stat => (finalTotals[stat] || 0) !== (projected[stat] || 0));
   const projectionNote = differsFromProjection
     ? `<p class="inventory-projection-note">${l(
       "部分方案模组因能量或插槽限制无法立即安装，已按实际可装值显示；未安装模组不计入六维。",
       "部分方案模組因能量或插槽限制無法立即安裝，已按實際可裝值顯示；未安裝模組不計入六維。",
       "Some planned mods cannot be installed right now (energy/socket limits); the stats shown use only installable mods.",
     )}</p>` : "";
+  const ownership = entry.farmCount > 0
+    ? l(`已有护甲 ${entry.ownedCount}/5 · 需刷 ${entry.farmCount} 件`, `已有防具 ${entry.ownedCount}/5 · 需取得 ${entry.farmCount} 件`, `${entry.ownedCount}/5 owned · ${entry.farmCount} to farm`)
+    : l("已有护甲齐全", "已有防具齊全", "Fully owned");
+  const canExport = entry.farmCount === 0;
   return `
     <div class="inventory-result-detail-head">
       <div>
         <span class="inventory-result-detail-label">${l(`方案 ${index + 1}`, `方案 ${index + 1}`, `Loadout ${index + 1}`)}</span>
-        <h3 class="${statusMet ? "is-met" : ""}">${status}</h3>
-        <p>${requiredCount > 0 ? l(
-          `必达 ${requiredReachedCount}/${requiredCount} · `,
-          `必達 ${requiredReachedCount}/${requiredCount} · `,
-          `Must meet ${requiredReachedCount}/${requiredCount} · `
-        ) : ''}${l(`目标达成 ${metCount}/6`, `目標達成 ${metCount}/6`, `${metCount} of 6 targets met`)}</p>
+        <h3 class="${feasible ? "is-met" : ""}">${status}</h3>
+        <p>${l(`目标达标 ${metCount}/6`, `目標達標 ${metCount}/6`, `${metCount} of 6 targets met`)} · ${ownership}</p>
         ${projectionNote}
       </div>
       <div class="inventory-result-actions">
-        <button type="button" class="btn inventory-export-button" onclick="exportInventorySolution(${index})">${icon("share")}${l("导出 DIM 配装链接", "匯出 DIM 配裝連結", "Export DIM loadout link")}</button>
+        <button type="button" class="btn inventory-export-button" onclick="exportInventorySolution(${index})" ${canExport ? "" : "disabled"}>${icon("share")}${l("导出 DIM 配装链接", "匯出 DIM 配裝連結", "Export DIM loadout link")}</button>
       </div>
     </div>
-    ${renderInventoryBungieEquip(entry, index)}
-    ${renderWitnessBreakdown(entry)}
+    ${entry.kind === "inventory" ? renderInventoryBungieEquip(entry.witness, index) : ""}
+    ${safeWitnessBreakdown(entry.witness)}
     <div class="inventory-result-stats" role="list">
       ${STATS.map(stat => {
         const actual = finalTotals[stat] || 0;
         const target = targets[stat] || 0;
         const met = entry.certificate?.statResults?.[stat]?.met === true;
-        const shortText = met ? '' : upgradeStatShortText(stat, entry);
+        const shortText = met ? "" : upgradeStatShortText(stat, entry.witness);
         const isRequired = lastInventoryRequiredStats.includes(stat);
-        return `<div class="inventory-result-stat ${met ? "is-met" : "is-short"} ${isRequired ? 'is-required' : ''}" role="listitem">
+        return `<div class="inventory-result-stat ${met ? "is-met" : "is-short"} ${isRequired ? "is-required" : ""}" role="listitem">
           <span style="color:${STAT_COLORS[stat]}">${icon(stat)}${STAT_LABELS[stat]}</span>
           <strong>${actual}</strong>
-          <small>${isRequired ? `${l('必须达标','必須達標','Must meet')} · ` : ''}${l("目标", "目標", "Target")} ${target}${met
+          <small>${isRequired ? `${l("必须达标", "必須達標", "Must meet")} · ` : ""}${l("目标", "目標", "Target")} ${target}${met
             ? ` · ${l("达标", "達標", "met")}`
             : ` · ${shortText}`}</small>
         </div>`;
       }).join("")}
     </div>
     <div class="inventory-result-pieces" role="list">
-      ${entry.pieces.map((piece, pieceIndex) => {
-        const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
-        const set = piece.setHash ? getArmorSetByHash(piece.setHash) : null;
-        return `<div class="inventory-result-piece" role="listitem">
-          <span class="inventory-result-piece-slot">${getUpgradeSlotLabel(slotIndex)}</span>
-          <span class="inventory-result-piece-name">${escapeHtml(piece.itemName || "—")}</span>
-          <span>${formatUpgradeTuning(entry.tuningAssignments[pieceIndex])} · ${formatUpgradeArmorMod(entry.modAssignments[pieceIndex])}</span>
-          ${set ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(set))}</span>` : `<span></span>`}
-          ${piece.locked ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${piece.exotic
-            ? l("异域固定", "異域固定", "Fixed Exotic")
-            : l("固定保留", "固定保留", "Fixed")}</span>` : ""}
-        </div>`;
-      }).join("")}
+      ${entry.pieces.map((piece, pieceIndex) => renderUnifiedPieceRow(entry, piece, pieceIndex)).join("")}
     </div>`;
 }
 
 function selectInventorySolution(index) {
-  if (!lastInventoryResult?.results?.[index]) return;
-  selectedInventoryResultIndex = index;
-  renderInventoryResults(lastInventoryResult);
+  const entry = lastUnifiedLoadouts[index];
+  if (!entry) return;
+  selectedUnifiedIndex = index;
+  if (entry.kind === "theory") {
+    const solutionIndex = allSolutions.indexOf(entry.plan?.solution);
+    if (solutionIndex >= 0) currentSolutionIdx = solutionIndex;
+  }
+  if (lastTargets && lastFragments && calculatorMode === "solve") {
+    displayAllResults(entry.witness, lastTargets, lastFragments, { scroll: false, skipOwnedPlan: true });
+  } else {
+    renderUnifiedResults();
+  }
 }
 
 // A DIM import link: https://app.destinyitemmanager.com/loadouts?loadout=<JSON>
@@ -5516,19 +5627,33 @@ async function copyDimExportLink() {
 }
 
 async function exportInventorySolution(index) {
-  const entry = lastInventoryResult?.results?.[index];
-  if (!entry) return;
-  assertSolutionConsistency(entry.problemSpec, entry, entry.finalTotals);
+  const unified = lastUnifiedLoadouts[index];
+  if (!unified) return;
+  const witness = unified.witness;
+  const messages = document.getElementById('messages');
+  // A plan that still needs farmed armor has no complete instance set, so a DIM
+  // link would be misleading. Say what is missing instead of exporting it.
+  const exportPieces = unified.pieces.map(piece => unified.kind === "inventory"
+    ? piece
+    : (piece.item ? {...piece.item, slot: piece.slot} : null));
+  if (exportPieces.some(piece => !piece?.sourceId || !piece?.hash)) {
+    messages.innerHTML += `<div class="msg warn">${icon('warn')}${l(
+      `该方案还需刷取 ${unified.farmCount} 件护甲，补齐后才能导出可用的 DIM 配装链接。`,
+      `該方案還需取得 ${unified.farmCount} 件防具，補齊後才能匯出可用的 DIM 配裝連結。`,
+      `This plan still needs ${unified.farmCount} farmed armor piece(s); complete it before exporting a usable DIM link.`
+    )}</div>`;
+    return;
+  }
+  assertSolutionConsistency(witness.problemSpec, witness, witness.visibleTotals);
   const { url, count, modCount } = getDimLoadoutExport(
-    entry.pieces, entry.tuningAssignments, entry.modAssignments
+    exportPieces, unified.tuningAssignments, unified.modAssignments
   );
   lastDimExportUrl = url;
-  const messages = document.getElementById('messages');
   // With a Bungie inventory the same plan drives the direct-equip preflight; a
   // plan with unassignable mods must not be exported as if it were exact.
   let exportWarning = '';
-  if (importSource === "bungie" && bungieProfileState) {
-    const equipState = getInventorySolutionEquipState(entry);
+  if (importSource === "bungie" && bungieProfileState && unified.kind === "inventory") {
+    const equipState = getInventorySolutionEquipState(witness);
     if (!equipState.available && equipState.plan) {
       const blocking = equipState.plan.assignment?.unassignedMods || [];
       if (blocking.length > 0) {

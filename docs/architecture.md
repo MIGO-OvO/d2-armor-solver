@@ -70,6 +70,19 @@ witness, keeping the original immutable and resealing the mapped display.
 Matching equivalence is mathematical/ownership equivalence, not an execution
 certificate. `mathDataKnown` and `executionKnown` are separate predicates.
 
+Rule satisfaction is the single ranking axis shared by every plan kind. A bound
+`ProblemSpec.constraintModel` decides it: `satisfiesConstraintModel` partitions
+the theory witnesses in `armor-engine.mjs`, and `rankInventoryPlans` marks each
+physical plan with `rulesFeasible` before `feasible` is computed as
+`rulesFeasible && setFeasible && assignmentCanReachExact`. No plan that satisfies
+every exact *and* fuzzy rule can be ranked below an approximation, whether or not
+the fuzzy search proved its bound, so a proven fuzzy rule set no longer collapses
+to a single witness and approximate plans can never displace satisfying ones.
+The UI renders one merged list: owned-armor entries and theoretical skeletons
+share `compareUnifiedEntries` (satisfying → exact → more owned pieces → fewer
+farm gaps → search rank → farmability), and dedup keeps the inventory entry,
+which carries the execution preflight, when both describe the same armor.
+
 Result proof status and execution status are orthogonal. `assignArmorMods`
 round-trips a concrete owned witness through sockets, energy, plug availability,
 and fixed Tuning. It returns `VERIFIED`, `UNVERIFIED`, or `BLOCKED`; Scratch and

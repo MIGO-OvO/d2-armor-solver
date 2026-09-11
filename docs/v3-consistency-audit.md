@@ -94,15 +94,17 @@ its witness is changing the input, not presenting the original result.
 | Files | Main change |
 | --- | --- |
 | `src/core/solver-v3-contract.mjs` | Capability/source validation, canonical binding, serialization/display model, consistency assertion, strict integer input and rule intersection. |
-| `src/core/armor-engine.mjs` | Single verified return boundary; no invalid Scratch/Inventory witness reaches the renderer; Upgrade snapshots and explicit execution comparison. |
+| `src/core/armor-engine.mjs` | Single verified return boundary; no invalid Scratch/Inventory witness reaches the renderer; Upgrade snapshots and explicit execution comparison. `orderByRuleSatisfaction` partitions satisfied witnesses ahead of approximations. |
 | `src/core/upgrade-optimizer.mjs` | Preserve null physical data, distinguish no installed Tuning, retained-identity assertion, assignment validation, complete cache keys and cloning, snapshot payloads. |
-| `src/core/inventory-plan.mjs` | Physical-base matching, capability-aware dedup, reconstruct the existing assignment without re-optimizing it. |
+| `src/core/inventory-plan.mjs` | Physical-base matching, capability-aware dedup, reconstruct the existing assignment without re-optimizing it. Plans are additionally marked `rulesFeasible` from the bound `constraintModel` and ranked on it first. |
+| `src/core/solver.mjs` | A proven fuzzy rule set returns every verified candidate behind the globally proven witness instead of collapsing the plan list to one entry. |
 | `src/core/inventory-solver.mjs` | Resource ceilings/statistics, deterministic ties, explicit incomplete proof metadata. |
 | `src/core/solver.mjs`, `target-constraints.mjs`, `reachability.mjs` | Integer prefix ranking, centralized visible/armor conversion, isolated/lossless reachability cache. |
 | `src/core/dim-csv.mjs`, `bungie-inventory.mjs` | Canonical fixed Tuning and confidence/no-installed-assignment information. |
 | `src/core/armor-mod-assignment.mjs`, `bungie-loadout.mjs` | Missing-piece/evidence failures, source binding, expected sockets and actual-total read-back. |
-| `src/app.mjs` | Display/save/export verification, per-piece rows, remove pre-search rule reimplementation, keep unknown results out of success UI. |
+| `src/app.mjs` | Display/save/export verification, per-piece rows, remove pre-search rule reimplementation, keep unknown results out of success UI. Owned-armor and theoretical plans render as one rule-ordered list with per-entry owned/gap pieces; the old theoretical picker and the partial owned-gear list are gone. |
 | `tests/witness-consistency.test.mjs`, `tests/v3-differential.test.mjs`, `tests/helpers/reference-witness.mjs` | New regressions, independent oracle, seeded tests, corruption and round trips. |
+| `tests/unified-loadout-list.test.mjs` | Unified-entry comparator and dedup-key regressions, plus a proven fuzzy rule set that must keep every rule-satisfying plan. |
 | `tests/inventory-plan.test.mjs`, `scripts/browser-smoke.mjs`, `check-upgrade-plan.js` | Concrete physical fixtures and integration assertions without relaxing existing expectations. |
 | `scripts/benchmark-v3-realistic.mjs`, `package.json`, `docs/benchmarks/*` | Reproducible stress harness, commands, measured raw records and comparison. |
 | `docs/architecture.md`, this document | Updated boundary and explicit merge limitations. |

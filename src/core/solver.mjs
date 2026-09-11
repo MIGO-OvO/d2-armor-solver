@@ -1133,7 +1133,18 @@ export function runSolver(problemSpec, search = null) {
     secondaryPerkId: exoticSettings.secondaryPerkId,
     secondaryPerkName: exoticSettings.secondaryPerkName,
   } : null;
+  // The globally proven witness leads, but every other verified candidate is
+  // kept behind it. Returning only [provenBest] collapsed the plan list to a
+  // single entry whenever a fuzzy rule set was proven, so the alternative
+  // rule-satisfying loadouts the exact branch exposes would silently vanish.
   const proven = [provenBest];
+  const seenIds = new Set([createCanonicalId(provenBest)]);
+  for (const solution of incumbentSolutions) {
+    const id = createCanonicalId(solution);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    proven.push(solution);
+  }
   proven.proof = globalProof;
   return proven;
 }
