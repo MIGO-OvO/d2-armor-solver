@@ -1303,6 +1303,26 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   gap: 14px;
   min-width: 0;
 }
+/* Glyph widths vary by platform (the CI runner has none of the Windows CJK
+   fonts), so every box in the workspace must be able to shrink below its
+   min-content width. Otherwise a few pixels of font drift push the whole panel
+   past its container and the desktop/smoke overflow guards fail. */
+.inventory-results-head > *,
+.loadout-header > *,
+.inventory-result-actions,
+.armor-table,
+.armor-table-head,
+.inventory-result-piece,
+.inventory-result-piece-name,
+.armor-state-cell,
+.farm-requirements-heading > *,
+.farm-requirement-row > *,
+.advanced-row > *,
+.advice-row > * { min-width: 0; }
+.inventory-result-actions { flex-wrap: wrap; }
+.farm-requirement-row > span,
+.advanced-row > span,
+.advice-row > strong { overflow-wrap: anywhere; }
 
 /* ---------- Plan browser ---------- */
 .plan-browser {
@@ -1581,6 +1601,7 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 .inventory-result-stat {
   display: grid;
   gap: 2px;
+  min-width: 0;
   padding: 10px 12px;
   border-left: 1px solid var(--border-subtle);
   background: transparent;
@@ -1588,18 +1609,22 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 .inventory-result-stat:first-child { border-left: 0; }
 .inventory-result-stat > span {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   font-size: .75rem;
   font-weight: 650;
 }
 .inventory-result-stat > span .icon { width: .875rem; height: .875rem; }
 .inventory-result-stat strong {
+  min-width: 0;
   color: var(--text);
   font-family: var(--font-numeric);
   font-size: clamp(1.125rem, 1.6vw, 1.5rem);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 .inventory-result-stat strong em { color: var(--text-dim); font-size: .6875rem; font-style: normal; font-weight: 600; }
 .inventory-result-stat small {
@@ -1838,6 +1863,11 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   .armor-tertiary { grid-column: 1 / -1; grid-row: 4; }
   .armor-tuning { grid-column: 1 / -1; grid-row: 5; }
   .armor-mod { grid-column: 1 / -1; grid-row: 6; }
+  /* Six stat cells in one row need ~85px each because "100/100" cannot break;
+     in a narrow loadout column they become a 3x2 grid instead of overflowing. */
+  .inventory-result-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .inventory-result-stat:nth-child(3n + 1) { border-left: 0; }
+  .inventory-result-stat:nth-child(n + 4) { border-top: 1px solid var(--border-subtle); }
 }
 
 @media (max-width: 1099px) {
@@ -1865,9 +1895,6 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   .inventory-results-layout { grid-template-columns: minmax(0, 1fr); }
   .inventory-result-detail { padding-top: 12px; border-top: 1px solid var(--border-subtle); }
   .target-strip-card .comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .inventory-result-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .inventory-result-stat:nth-child(3n + 1) { border-left: 0; }
-  .inventory-result-stat:nth-child(n + 4) { border-top: 1px solid var(--border-subtle); }
   .farm-requirement-row { grid-template-columns: minmax(0, 1fr) auto; }
   .advanced-row,
   .advice-row { grid-template-columns: minmax(0, 1fr); }

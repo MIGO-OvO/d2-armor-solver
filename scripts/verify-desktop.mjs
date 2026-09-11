@@ -79,7 +79,24 @@ try {
     await page.screenshot({ path: `.audit/desktop/results-${width}.png` });
     const overflow = await page.evaluate(() => [...document.querySelectorAll(".desktop-inputs, .desktop-output")]
       .filter(element => element.scrollWidth > element.clientWidth + 2)
-      .map(element => ({ panel: element.className, width: element.clientWidth, content: element.scrollWidth })));
+      .map(element => ({
+        panel: element.className,
+        width: element.clientWidth,
+        content: element.scrollWidth,
+        // Name the widest offending descendants: a panel-level number alone
+        // cannot tell which row or grid is over its budget.
+        offenders: [...element.querySelectorAll("*")]
+          .filter(node => node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 1)
+          .sort((left, right) =>
+            (right.scrollWidth - right.clientWidth) - (left.scrollWidth - left.clientWidth))
+          .slice(0, 5)
+          .map(node => ({
+            tag: node.tagName,
+            cls: String(node.className || "").slice(0, 48),
+            client: node.clientWidth,
+            scroll: node.scrollWidth,
+          })),
+      })));
     assert.deepEqual(overflow, [], `Panels must not overflow at ${width}px`);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2));
     const singleColumn = await page.evaluate(() => {
