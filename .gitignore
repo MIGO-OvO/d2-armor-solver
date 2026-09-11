@@ -5,6 +5,7 @@
 .impeccable.md
 .impeccable/
 .omo/
+.workbuddy/
 
 # Local build and Cloudflare Wrangler state
 dist/
