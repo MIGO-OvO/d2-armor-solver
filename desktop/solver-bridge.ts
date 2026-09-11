@@ -21,12 +21,12 @@ export async function mountSolver(host: HTMLElement, languageHost: HTMLElement) 
   content.className = "desktop-content";
 
   for (const selector of [".header", ".notice--free", ".solver-mode-switch",
-    "#inventoryImportCard", "#upgradeBuildCard", ".workspace-grid", ".solver-actions"]) {
+    "#inventoryImportCard", "#upgradeBuildCard", ".workspace-grid", ".cmd-bar"]) {
     const node = main.querySelector(selector);
     if (!node) throw new Error(`Missing solver input: ${selector}`);
     inputs.append(node);
   }
-  for (const selector of ["#messages", "#loading", "#savedCard", "#inventoryResults", "#upgradeResults", "#results", ".card--intro", ".footer"]) {
+  for (const selector of ["#messages", "#loading", "#resultWorkspace", ".card--intro", ".footer"]) {
     const node = main.querySelector(selector);
     if (!node) throw new Error(`Missing solver output: ${selector}`);
     output.append(node);

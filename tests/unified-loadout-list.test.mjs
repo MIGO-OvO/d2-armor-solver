@@ -9,12 +9,17 @@ import { solveLoadout } from '../src/core/armor-engine.mjs';
 // theoretical owned/farm skeletons) into one entry. Its ordering and identity
 // are pure functions, so they are extracted and exercised directly.
 const source = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
-const context = vm.createContext({});
+const context = vm.createContext({
+  // `normalizeTheoryPlan` asks the sealed witness whether the six stats satisfy
+  // the rules; the physical owned/farm + set mapping is a separate question.
+  certifiedFeasible: () => true,
+});
 vm.runInContext([
   'compareRankTuples',
   'unifiedPieceIdentity',
   'unifiedEntryKey',
   'compareUnifiedEntries',
+  'normalizeTheoryPlan',
 ].map(name => source.slice(source.indexOf(`function ${name}(`)).split('\nfunction ')[0]).join('\n'), context);
 
 function entry(overrides) {
@@ -51,6 +56,31 @@ test('the unified dedup key separates owned instances from farm gaps', () => {
   assert.equal(owned, context.unifiedEntryKey({pieces: [
     {slot: 'arms', sourceId: 'b'}, {slot: 'helmet', sourceId: 'a'},
   ]}), 'piece order must not change the identity');
+});
+
+// Regression: a theoretical witness can satisfy every stat rule while the
+// owned/farm + set mapping still cannot reach it (plan.feasible === false).
+// The unified list used to count such a plan as 达标 and rank it above real,
+// implementable loadouts. Both conditions must hold.
+test('a rule-feasible but unmappable theory plan is never qualifying', () => {
+  const witness = {certificate: {status: 'EXACT_TARGET_PROVEN'}, rank: [0, 0]};
+  const mappable = context.normalizeTheoryPlan({feasible: true, solution: witness, pieces: [], ownedCount: 3, farmCount: 2});
+  assert.equal(mappable.ruleFeasible, true);
+  assert.equal(mappable.planFeasible, true);
+  assert.equal(mappable.feasible, true);
+
+  const unmappable = context.normalizeTheoryPlan({feasible: false, solution: witness, pieces: [], ownedCount: 5, farmCount: 0});
+  assert.equal(unmappable.ruleFeasible, true, 'the witness itself still proves the stat rules');
+  assert.equal(unmappable.planFeasible, false);
+  assert.equal(unmappable.feasible, false, 'property-feasible must not survive an unmappable plan');
+  assert.equal(unmappable.exact, true, 'rule exactness is a property of the witness math');
+
+  const missingFlag = context.normalizeTheoryPlan({solution: witness, pieces: [], ownedCount: 5, farmCount: 0});
+  assert.equal(missingFlag.feasible, false, 'an absent plan.feasible is not a pass');
+
+  assert.ok(context.compareUnifiedEntries(mappable, unmappable) < 0,
+    'a mappable plan must outrank an unmappable one even with less owned armor');
+  assert.equal(context.normalizeTheoryPlan({pieces: []}), null, 'a plan without a witness is not an entry');
 });
 
 // Regression: a proven fuzzy rule set used to return only [provenBest], so the

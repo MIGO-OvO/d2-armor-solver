@@ -33,32 +33,19 @@ async function checkWitnessDomRoundTrip(page) {
   }
 }
 
-// Owned armor and theoretical skeletons now share one list ("配装方案"). A piece
-// row counts as owned when it names a concrete item instead of the farm
-// placeholder. Two markups exist: `renderUnifiedPieceRow` emits
-// `.inventory-result-piece` for farm gaps and inventory entries, while a
-// theoretical skeleton with a matched item reuses `renderOwnedArmorMatch`
-// (`.owned-armor-match`). Both always carry the slot label.
-const FARM_PLACEHOLDERS = ["Farm", "需刷取", "需取得"];
+// Owned armor and theoretical skeletons now share one list ("配装方案") and one
+// five-piece armor table. A row counts as owned when it names a concrete item
+// instead of the farm placeholder; every row carries a slot label.
+const FARM_PLACEHOLDERS = ["Farm", "待刷取", "待取得"];
 
 async function countUnifiedOwnedRows(page, slotLabel = null) {
   return page.evaluate(({ slot, placeholders }) => {
     const farm = new Set(placeholders);
-    const rows = [...document.querySelectorAll(
-      "#inventoryResults .inventory-result-piece, #inventoryResults .owned-armor-match",
-    )];
+    const rows = [...document.querySelectorAll("#inventoryResults .inventory-result-piece")];
     return rows.filter(row => {
-      const slotText = (
-        row.querySelector(".inventory-result-piece-slot")?.textContent
-        || row.querySelector("strong")?.textContent
-        || ""
-      ).trim();
+      const slotText = (row.querySelector(".inventory-result-piece-slot")?.textContent || "").trim();
       if (slot && slotText !== slot) return false;
-      const nameText = (
-        row.querySelector(".inventory-result-piece-name")?.textContent
-        || row.querySelector(".owned-armor-match-body b")?.textContent
-        || ""
-      ).trim();
+      const nameText = (row.querySelector(".inventory-result-piece-name")?.textContent || "").trim();
       return nameText !== "" && !farm.has(nameText);
     }).length;
   }, { slot: slotLabel, placeholders: FARM_PLACEHOLDERS });
@@ -574,6 +561,16 @@ async function checkInventoryPlanning(browser) {
       'an unowned Exotic reservation must exclude owned chests from the plan list',
     );
     assert.match(await page.locator('.farm-requirement-row', { hasText: 'Any Exotic' }).innerText(), /Chest/);
+    // (5) The reserved-but-unowned Exotic must be flagged in its own armor row,
+    // not only in the farm summary, and the row must read as a farm gap.
+    const reservedChestRow = page.locator('.inventory-result-piece[data-piece-slot="chest"]').first();
+    assert.equal(
+      await page.locator('.inventory-result-piece.is-farm .inventory-fixed-badge').count() >= 1,
+      true,
+      "an unowned Exotic requirement must be marked on the farm gap row",
+    );
+    assert.match(await reservedChestRow.innerText(), /Farm|待刷|待取得/);
+    assert.match(await reservedChestRow.innerText(), /Exotic|异域|異域/);
     await page.locator('#inventoryFixedExoticName').selectOption('');
     assert.ok(
       await countUnifiedOwnedRows(page, 'Chest') > 0,
@@ -586,32 +583,46 @@ async function checkInventoryPlanning(browser) {
     await page.evaluate(() => window.solve());
     await page.locator("#ownedGearSection").waitFor({ state: "visible" });
     await checkWitnessDomRoundTrip(page);
+    // Solver V3 proof semantics must stay reachable, but they are diagnostics
+    // now: the global state is on the command bar, the per-plan proof is in the
+    // advanced panel's data attribute (readable while collapsed).
+    const proofSurfaces = [
+      await page.locator("#searchStatus").innerText(),
+      await page.locator(".loadout-status").first().innerText(),
+      ...(await page.locator("#inventoryResults [data-proof-label]").evaluateAll(
+        elements => elements.map(element => element.dataset.proofLabel || ""),
+      )),
+    ].join(" | ");
     assert.match(
-      await page.locator("#scoreDisplay").innerText(),
-      /(proven|Search limited|current-best witness)/i,
-      "Worker results should expose Solver V3 proof semantics in the UI",
+      proofSurfaces,
+      /(proven|Search limited|current-best witness|已证明|已證明|搜索上限)/i,
+      "Worker results should expose Solver V3 proof semantics in the UI: " + proofSurfaces,
     );
     assert.equal(
-      await page.locator("#piecesCard > h2").innerText(),
-      "Solution details",
-      "the loadout card should describe itself as solution details",
+      await page.locator(".inventory-results-title").first().innerText(),
+      "Loadouts",
+      "the plan browser should describe itself as the loadout list",
     );
     assert.match(
-      await page.locator("#piecesOutput .farm-requirements-title").innerText(),
-      /Still to farm/,
-      "solution details should retain the missing-armor section",
+      await page.locator(".inventory-result-detail .farm-requirements-title").innerText(),
+      /to farm/,
+      "the selected loadout should retain a per-slot missing-armor summary",
     );
     assert.ok(
-      await page.locator("#piecesOutput .farm-requirement-row").count() > 0,
+      await page.locator(".inventory-result-detail .farm-requirement-row").count() > 0,
       "missing armor should be listed per slot",
     );
+    // Advanced diagnostics are collapsed by default; expand them to read the
+    // allocation contract.
+    await page.locator('#inventoryResults details[data-disclosure-key="advanced"] > summary').click();
+    await page.locator('#inventoryResults details[data-disclosure-key="advanced-allocation"] > summary').click();
     assert.match(
-      await page.locator("#piecesOutput .solution-tuning-primary").innerText(),
+      await page.locator("#inventoryResults .solution-tuning-primary").innerText(),
       /Planned \+5/,
       "planned +5 tuning must not describe freely selectable Exotic tuning as a fixed roll",
     );
     assert.match(
-      await page.locator("#piecesOutput .solution-tuning-secondary").innerText(),
+      await page.locator("#inventoryResults .solution-tuning-secondary").innerText(),
       /Suggested -5/,
       "freely selected -5 tuning should be visually secondary",
     );
@@ -1535,6 +1546,258 @@ async function checkBungieAuthFlow(browser) {
   }
 }
 
+// The result page is a two-column workspace: one command bar, one target
+// summary, one plan browser, one selected loadout. These regressions pin the
+// information architecture so card soup and duplicated status banners cannot
+// come back, and they cover selection, filtering and diagnostics folding.
+async function checkResultWorkspace(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.evaluate(() => window.solve());
+    await page.locator("#inventoryResults:not([hidden])").waitFor();
+
+    // (12) (13) exactly one plan surface and exactly one target comparison.
+    for (const legacy of ["#solutionNav", "#piecesCard", "#exoticCard", "#exoticRecommendation", "#resultsMain"]) {
+      assert.equal(await page.locator(legacy).count(), 0, legacy + " must not exist any more");
+    }
+    assert.equal(await page.locator(".inventory-results-title").count(), 1, "one plan-browser heading");
+    assert.equal(await page.locator(".inventory-result-list").count(), 1, "one plan list");
+    assert.equal(await page.locator(".inventory-result-detail").count(), 1, "one selected-loadout column");
+    assert.equal(await page.locator(".comparison").count(), 1, "目标 vs 实际 must appear exactly once");
+    assert.equal(await page.locator("#comparisonGrid .comp-item").count(), 6);
+    assert.equal(await page.locator(".inventory-result-stats").count(), 1, "the six stats appear once");
+    assert.equal(
+      await page.locator(".inventory-result-stats .inventory-result-stat").count(),
+      6,
+      "the selected loadout shows six stats",
+    );
+
+    // (9) desktop keeps a real two-column workspace.
+    const layout = await page.locator(".inventory-results-layout").evaluate(element => {
+      const listBox = document.getElementById("planBrowser").getBoundingClientRect();
+      const detailBox = document.getElementById("loadoutDetail").getBoundingClientRect();
+      return {
+        columns: getComputedStyle(element).gridTemplateColumns.split(" ").length,
+        listLeft: Math.round(listBox.left),
+        detailLeft: Math.round(detailBox.left),
+        listWidth: Math.round(listBox.width),
+      };
+    });
+    assert.equal(layout.columns, 2, ">=1100px must render two workspace columns");
+    assert.ok(layout.detailLeft > layout.listLeft, "the loadout column must sit to the right of the plan browser");
+    assert.ok(layout.listWidth >= 300 && layout.listWidth <= 400,
+      "the plan browser must stay clamp(300px, 26vw, 380px): " + layout.listWidth);
+
+    // (10) diagnostics are folded by default and the constraint matrix lives in
+    // the 编辑条件 drawer, not on the first screen.
+    for (const key of ["advanced", "advanced-allocation", "farming-advice"]) {
+      const open = await page.locator(`#inventoryResults details[data-disclosure-key="${key}"]`)
+        .first().evaluate(element => element.open);
+      assert.equal(open, false, key + " must be collapsed by default");
+    }
+    assert.equal(await page.locator("#conditionsDrawer").isHidden(), true, "the constraint drawer starts collapsed");
+    assert.equal(await page.locator("#refineCard .constraint-matrix").isVisible(), false);
+
+    // (1) selecting a different plan swaps only the detail column.
+    await page.locator("#planList").evaluate(element => { element.dataset.listMarker = "kept"; });
+    // Park the workspace in view first, so the measurement isolates the app's own
+    // scrolling rather than the click helper's scroll-into-view.
+    await page.locator(".inventory-results-layout").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(50);
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    const listScrollBefore = await page.locator("#planList").evaluate(element => element.scrollTop);
+    const firstLabel = await page.locator(".loadout-header .inventory-result-detail-label").innerText();
+    await page.locator("#planList .inventory-result-option").nth(3).click();
+    assert.equal(
+      await page.locator('.inventory-result-option[aria-selected="true"]').getAttribute("data-plan-index"),
+      "3",
+      "clicking a plan row must select it",
+    );
+    assert.notEqual(
+      await page.locator(".loadout-header .inventory-result-detail-label").innerText(),
+      firstLabel,
+      "switching plans must re-render the selected loadout",
+    );
+    assert.equal(
+      await page.locator("#planList").getAttribute("data-list-marker"),
+      "kept",
+      "switching plans must not rebuild the plan list DOM",
+    );
+    assert.equal(
+      await page.evaluate(() => window.scrollY),
+      scrollBefore,
+      "switching plans must not yank the reader back to the top of the page",
+    );
+    assert.equal(
+      await page.locator("#planList").evaluate(element => element.scrollTop),
+      listScrollBefore,
+      "switching plans must keep the plan browser scroll position",
+    );
+
+    // (2) every qualifying plan outranks every non-qualifying one, and a
+    // qualifying row always carries the verified wording.
+    const rows = await page.locator("#planList .inventory-result-option").evaluateAll(elements =>
+      elements.map(element => ({
+        tone: element.querySelector(".inventory-result-state")?.className || "",
+        proof: element.querySelector(".inventory-result-state")?.getAttribute("data-proof-label") || "",
+        meta: element.querySelector(".inventory-result-option-meta")?.textContent || "",
+      })));
+    assert.ok(rows.length > 0, "the plan browser must render rows");
+    const lastQualifying = rows.map(row => row.tone.includes("is-met")).lastIndexOf(true);
+    const firstNonQualifying = rows.map(row => !row.tone.includes("is-met")).indexOf(true);
+    assert.ok(
+      firstNonQualifying === -1 || lastQualifying === -1 || firstNonQualifying > lastQualifying,
+      "达标 must be the first ranking axis: " + JSON.stringify(rows.slice(0, 6)),
+    );
+    // (3) a plan whose stats satisfy the rules but whose owned/farm mapping
+    // cannot implement them must never be presented as qualifying.
+    for (const row of rows) {
+      if (!row.tone.includes("is-met")) continue;
+      assert.doesNotMatch(row.proof, /不可实施|不可實施|Unmappable/, "unmappable plan marked 达标: " + row.proof);
+      assert.match(row.proof, /verified|已驗證|已验证/i, "qualifying rows must be verified: " + row.proof);
+    }
+
+    // (4) 达标 / 已有齐全 / 待刷 <=1 filters agree with the rows they render.
+    const chipCounts = await page.locator(".plan-chip").evaluateAll(elements => elements.map(element => ({
+      label: element.textContent || "",
+      count: Number(element.querySelector("span")?.textContent || 0),
+    })));
+    assert.equal(chipCounts.length, 4, "the plan browser exposes four filters");
+    const expectFiltered = async (index, predicate, description) => {
+      await page.locator(".plan-chip").nth(index).click();
+      if (chipCounts[index].count === 0) {
+        // An emptied filter must keep the toolbar reachable so the reader can
+        // switch back; hiding the whole workspace would trap them.
+        assert.equal(await page.locator("#inventoryResults").isHidden(), false,
+          description + " must keep the workspace and its filter toolbar visible");
+        assert.equal(await page.locator("#planList .inventory-result-option").count(), 0,
+          description + " must render no plan rows");
+        assert.ok(await page.locator(".plan-empty").count() >= 1,
+          description + " should explain that the filter matched nothing");
+      } else {
+        const metas = await page.locator("#planList .inventory-result-option-meta")
+          .evaluateAll(elements => elements.map(element => element.textContent || ""));
+        assert.ok(metas.length > 0, description + " must render its matches");
+        assert.equal(metas.length, Math.min(chipCounts[index].count, 60),
+          description + " must render exactly the counted plans");
+        for (const meta of metas) assert.ok(predicate(meta), description + " leaked a non-matching row: " + meta);
+      }
+      await page.locator(".plan-chip").nth(0).click();
+      await page.locator("#inventoryResults:not([hidden])").waitFor();
+    };
+    await expectFiltered(1, () => true, "达标");
+    await expectFiltered(2, meta => /已有 5\/5|5\/5 owned/.test(meta), "已有齐全");
+    await expectFiltered(3, meta => /待刷 (0|1)\b|to farm/.test(meta) && !/待刷 [2-9]/.test(meta), "待刷 ≤1");
+    assert.equal(
+      await page.locator(".plan-chip").evaluateAll(elements =>
+        elements.findIndex(element => element.getAttribute("aria-pressed") === "true")),
+      0,
+      "the 全部 filter is restored after the filter round-trip",
+    );
+
+    // (4b) the farm-count sort is ascending and the owned sort is descending.
+    await page.locator(".plan-sort select").selectOption("farm");
+    const farmOrder = await page.locator("#planList .inventory-result-option-meta").evaluateAll(elements =>
+      elements.map(element => {
+        const match = /待刷\s*(\d+)/.exec(element.textContent || "");
+        return match ? Number(match[1]) : 0;
+      }));
+    assert.deepEqual(farmOrder, [...farmOrder].sort((left, right) => left - right),
+      "待刷最少 sort must be ascending");
+    await page.locator(".plan-sort select").selectOption("owned");
+    const ownedOrder = await page.locator("#planList .inventory-result-option-meta").evaluateAll(elements =>
+      elements.map(element => {
+        const match = /已有\s*(\d+)\/5/.exec(element.textContent || "");
+        return match ? Number(match[1]) : 0;
+      }));
+    assert.deepEqual(ownedOrder, [...ownedOrder].sort((left, right) => right - left),
+      "已有最多 sort must be descending");
+    await page.locator(".plan-sort select").selectOption("recommended");
+
+    // (7) a full workspace re-render (what a progressive search update does)
+    // must keep the reader's plan, matched by content key rather than position.
+    await page.locator("#planList .inventory-result-option").nth(5).click();
+    const keptKey = await page.locator('.inventory-result-option[aria-selected="true"]').getAttribute("data-plan-key");
+    await page.locator(".plan-sort select").selectOption("farm");
+    await page.locator(".plan-sort select").selectOption("recommended");
+    assert.equal(
+      await page.locator('.inventory-result-option[aria-selected="true"]').getAttribute("data-plan-key"),
+      keptKey,
+      "a re-render must keep the selected plan",
+    );
+
+    // (11) the command bar and the loadout header agree about exportability, and
+    // the export path addresses the plan that is actually selected.
+    const exportState = await page.evaluate(() => ({
+      command: document.getElementById("cmdExportDim").disabled,
+      detail: document.querySelector(".inventory-export-button").disabled,
+      commandTitle: document.getElementById("cmdExportDim").title,
+    }));
+    assert.equal(exportState.command, exportState.detail,
+      "the command bar and the loadout header must agree about exportability");
+    if (exportState.command) {
+      assert.match(exportState.commandTitle, /还需刷取|still needs/,
+        "a disabled export action must explain what is missing");
+    }
+    const selectedOption = page.locator('.inventory-result-option[aria-selected="true"]');
+    const selectedIndex = Number(await selectedOption.getAttribute("data-plan-index"));
+    const selectedFarmCount = Number(
+      /待刷\s*(\d+)/.exec(await selectedOption.locator(".inventory-result-option-meta").innerText())?.[1] ?? 0,
+    );
+    await page.evaluate(index => window.exportInventorySolution(index), selectedIndex);
+    const exportMessage = await page.locator("#messages").innerText();
+    if (selectedFarmCount > 0) {
+      assert.match(
+        exportMessage,
+        new RegExp("还需刷取 " + selectedFarmCount + " 件"),
+        "exporting must describe the selected plan's own farm gap: " + exportMessage,
+      );
+    } else {
+      assert.match(exportMessage, /DIM/, "a fully owned plan must produce a DIM link message");
+    }
+
+    // (14) the inventory manager stays reachable, just folded away.
+    await page.locator("#manualOwnedManageButton").click();
+    assert.equal(await page.locator("#manualOwnedEditor").evaluate(element => element.open), true,
+      "the 管理 button must open the manual armor editor");
+    await page.locator("#addManualOwnedButton").click();
+    assert.ok(
+      await page.locator("#ownedGearSection .manual-owned-list li").count() > 0,
+      "the manual armor editor must still register armor",
+    );
+
+    // (15) stopping the search keeps every verified result on screen.
+    await page.locator("#searchProfile").selectOption("deep");
+    await page.evaluate(() => { window.__stoppedSearch = window.solve(); });
+    await page.locator("#inventoryResults:not([hidden])").waitFor({ timeout: 60000 });
+    await page.waitForFunction(() => !document.getElementById("cancelSearch").disabled);
+    const rowsBeforeStop = await page.locator("#planList .inventory-result-option").count();
+    const statsBeforeStop = await page.locator(".inventory-result-stats .inventory-result-stat").count();
+    await page.locator("#cancelSearch").click();
+    await page.evaluate(() => window.__stoppedSearch);
+    assert.match(await page.locator("#searchStatus").innerText(), /停止|stopped/);
+    assert.equal(await page.locator("#inventoryResults").isHidden(), false,
+      "stopping the search must keep the verified plan list");
+    assert.ok(rowsBeforeStop > 0, "the partial result should already expose verified plans");
+    assert.equal(await page.locator("#planList .inventory-result-option").count(), rowsBeforeStop,
+      "stopping the search must not drop retained plan rows");
+    assert.equal(statsBeforeStop, 6, "the selected loadout shows its six stats");
+    await page.locator("#searchProfile").selectOption("balanced");
+
+    assert.deepEqual(browserErrors, []);
+    console.log("browser smoke: result workspace IA/selection/filter regressions OK");
+  } finally {
+    await context.close();
+  }
+}
+
 // Phase 1: secret-less build (login hidden) plus all existing regressions.
 const envWithoutBungie = { ...process.env };
 delete envWithoutBungie.BUNGIE_OAUTH_CLIENT_ID;
@@ -1554,6 +1817,7 @@ try {
   await checkUpgradeTargetSync(browser);
   await checkSetRequirementSnapshot(browser);
   await checkBungieLoginHidden(browser);
+  await checkResultWorkspace(browser);
   if (process.argv.includes("--target-sync-only")) {
     console.log("upgrade target sync and set requirement browser regressions OK");
   } else {
@@ -1608,10 +1872,22 @@ try {
   await page.evaluate(() => window.solve());
   await page.locator("#results.show").waitFor();
   assert.equal(await page.locator("#comparisonGrid .comp-item").count(), 6);
-  assert.doesNotMatch(
-    await page.locator("#piecesOutput").innerText(),
-    /\+3/,
-    "+5/-5-only solutions should not contain +3 tuning",
+  const armorTuningCells = await page.locator("#inventoryResults .armor-tuning")
+    .evaluateAll(elements => elements.map(element => element.textContent));
+  assert.ok(
+    armorTuningCells.length > 0,
+    "the five-piece armor table should expose one Tuning cell per piece",
+  );
+  assert.ok(
+    armorTuningCells.every(text => !text.includes("+3")),
+    "+5/-5-only solutions should not contain +3 tuning: " + JSON.stringify(armorTuningCells),
+  );
+  await page.locator('#inventoryResults details[data-disclosure-key="advanced"] > summary').click();
+  await page.locator('#inventoryResults details[data-disclosure-key="advanced-allocation"] > summary').click();
+  assert.equal(
+    await page.locator("#inventoryResults .solution-tuning-plus3").count(),
+    0,
+    "+5/-5-only solutions should not report a +3 allocation",
   );
   await page.locator("#onlyPlus5Tuning").uncheck();
   assert.equal(await page.locator("#usePlus3").isDisabled(), false);
@@ -1884,6 +2160,14 @@ try {
     "the loadout picker should stay inside the 390px viewport: " +
       JSON.stringify(mobileResultLayout),
   );
+  // The full constraint matrix is an input surface behind 编辑条件, not part of
+  // the first screen; it must still be reachable and keyboard scrollable.
+  assert.equal(
+    await page.locator("#conditionsDrawer").isHidden(),
+    true,
+    "the constraint drawer should start collapsed",
+  );
+  await page.locator("#btnEditConditions").click();
   await page.locator(".constraint-scroll-hint").waitFor({ state: "visible" });
   assert.equal(
     await page.locator(".constraint-matrix").getAttribute("tabindex"),

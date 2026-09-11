@@ -265,85 +265,99 @@
   </div>
   </div>
 
-  <div class="btn-row solver-actions">
-    <section class="search-toolbar" aria-label="搜索设置">
+  <!-- ============================================================
+       Search / Command Bar — the single place for search state and every
+       result-level action. It never repeats what a plan header already says.
+       ============================================================ -->
+  <section class="cmd-bar" id="searchCommandBar" aria-label="搜索与配装命令">
+    <div class="cmd-bar-status">
+      <span class="cmd-status" id="searchStatus" role="status" aria-live="polite" aria-atomic="true">等待开始</span>
+      <small class="cmd-meta" id="searchStatistics"></small>
+    </div>
+    <div class="cmd-bar-depth">
       <label for="searchProfile" id="searchProfileLabel">搜索深度</label>
       <select id="searchProfile" onchange="setSearchProfile(this.value)" aria-describedby="searchProfileHelp">
         <option value="fast">快速</option><option value="balanced" selected>均衡</option><option value="deep">深度</option>
       </select>
-      <span id="searchProfileHelp">先显示已验证结果，再继续扩大搜索。</span>
+      <span id="searchProfileHelp" class="cmd-bar-help"></span>
+    </div>
+    <div class="cmd-bar-actions">
       <button type="button" class="btn" id="cancelSearch" onclick="stopSearches()" disabled>停止搜索</button>
-      <div class="search-progress" role="status" aria-live="polite" aria-atomic="true">
-        <span id="searchStatus">等待开始</span><small id="searchStatistics"></small>
-      </div>
-    </section>
-    <button class="btn-solve" id="btnSolve" type="button" onclick="solve()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="solveButton">求解最佳配装</span></button>
-    <button class="btn-solve" id="btnUpgradeAnalyze" type="button" onclick="analyzeArmorUpgrades()" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="upgradeAnalyzeButton">分析优先替换</span></button>
-    <button class="btn" id="saveBuildButton" type="button" onclick="saveBuild()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
-  </div>
-
-  <!-- Floating jump button -->
-  <div id="floatJump" style="display:none;position:fixed;bottom:20px;right:20px;z-index:99;flex-direction:column;gap:8px;">
-    <button type="button" class="icon-btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" aria-label="返回方案列表" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="返回方案列表" data-i18n-title="backToSolutionsTitle" data-i18n-aria="backToSolutionsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg></button>
-    <button type="button" class="icon-btn" onclick="document.getElementById('compCard').scrollIntoView({behavior:'smooth'})" aria-label="跳转到配装详情" style="width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);background:var(--card);color:var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);" title="跳转到配装详情" data-i18n-title="jumpToDetailsTitle" data-i18n-aria="jumpToDetailsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-down"/></svg></button>
-  </div>
+      <button class="btn-solve" id="btnSolve" type="button" onclick="solve()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span id="btnSolveLabel">求解最佳配装</span></button>
+      <button class="btn-solve" id="btnUpgradeAnalyze" type="button" onclick="analyzeArmorUpgrades()" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-solve"/></svg><span data-i18n="upgradeAnalyzeButton">分析优先替换</span></button>
+      <button class="btn" id="saveBuildButton" type="button" onclick="saveBuild()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-save"/></svg><span data-i18n="saveBuildButton">保存当前配装</span></button>
+      <button class="btn" id="cmdExportDim" type="button" onclick="exportInventorySolution(selectedUnifiedIndex)" disabled><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-share"/></svg><span id="cmdExportDimLabel">导出 DIM</span></button>
+      <button class="btn btn-solve" id="cmdEquipButton" type="button" onclick="equipInventorySolution(selectedUnifiedIndex)" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span id="cmdEquipLabel">装备</span></button>
+    </div>
+  </section>
 
   <div id="messages" aria-live="polite" aria-atomic="false"></div>
 
-  <section class="card inventory-results" id="inventoryResults" hidden aria-live="polite"></section>
-
-  <section class="card upgrade-results" id="upgradeResults" hidden aria-labelledby="upgradeResultsHeading">
-    <h2 id="upgradeResultsHeading" data-i18n="upgradeResultsHeading">护甲替换分析</h2>
-    <div id="upgradeResultsBody"></div>
-  </section>
-
-  <div class="card" id="savedCard" style="display:none;">
-    <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n-html="savedBuildsHeading">已保存配装 <span style="color:var(--text-dim);">（点击名称加载，点 × 删除）</span></span></h2>
-    <div id="savedBuildsList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-    <button class="btn danger" onclick="clearAllBuilds()" style="margin-top:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span data-i18n="clearAllButton">清空全部</span></button>
-  </div>
   <div class="loading" id="loading" role="status" aria-live="polite" aria-busy="false">
     <div class="spinner"></div>
     <p style="margin-top:10px;color:var(--text-dim);" data-i18n="calculating">正在计算最优配装...</p>
   </div>
 
-  <div class="results" id="results">
-    <div class="card" id="solutionNav" style="display:none;padding:12px 24px;margin-bottom:0;border-bottom:none;border-radius:12px 12px 0 0;"></div>
-    <div class="results-main">
-    <div class="card" id="compCard" style="border-radius:0 0 12px 12px;">
-      <h2><span data-i18n="targetVsActual">目标 vs 实际</span> <button class="btn" onclick="document.getElementById('solutionNav').scrollIntoView({behavior:'smooth'})" style="padding:2px 8px;float:right;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg><span data-i18n="backToSolutionsButton">返回方案列表</span></button></h2>
-      <div class="comparison" id="comparisonGrid"></div>
-      <div id="exoticRangeSummary" style="display:none;margin-bottom:14px;"></div>
-      <div style="text-align:center;margin-top:12px;color:var(--text-dim);" id="scoreDisplay"></div>
-      <div id="ownedGearSection" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:none;"></div>
+  <!-- Floating jump button -->
+  <div id="floatJump">
+    <button type="button" class="icon-btn" onclick="document.getElementById('inputCard').scrollIntoView({behavior:'smooth'})" aria-label="返回目标输入" title="返回目标输入" data-i18n-title="backToTargetsTitle" data-i18n-aria="backToTargetsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg></button>
+    <button type="button" class="icon-btn" onclick="document.getElementById('inventoryResults').scrollIntoView({behavior:'smooth'})" aria-label="跳转到配装方案" title="跳转到配装方案" data-i18n-title="jumpToDetailsTitle" data-i18n-aria="jumpToDetailsTitle"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-down"/></svg></button>
+  </div>
+
+  <!-- ============================================================
+       Result workspace — target strip, inventory source strip, and the
+       two-column plan browser / selected loadout surface.
+       ============================================================ -->
+  <div class="result-workspace" id="resultWorkspace">
+    <div class="results" id="results">
+      <section class="target-strip" id="targetSummary" aria-label="目标与约束摘要">
+        <div class="target-strip-card" id="compCard">
+          <div class="comparison" id="comparisonGrid"></div>
+          <div class="target-strip-aside">
+            <div class="target-strip-meta" id="targetSummaryMeta"></div>
+            <div class="target-strip-foot">
+              <div class="target-strip-score" id="scoreDisplay"></div>
+              <button class="btn" id="btnEditConditions" type="button" onclick="toggleConditionsDrawer()" aria-expanded="false" aria-controls="conditionsDrawer"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-gear"/></svg><span id="btnEditConditionsLabel">编辑条件</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="conditions-drawer" id="conditionsDrawer" hidden>
+          <div id="exoticRangeSummary" style="display:none"></div>
+          <div id="refineCard" style="display:none;">
+            <h2 data-i18n="refineHeading">优先属性与约束调整</h2>
+            <p class="refine-card-copy" data-i18n="refineDescription">
+              选择优化目标后点击下方按钮重新求解。约束条件对求解器施加硬性限制。
+            </p>
+            <div id="refineCheckboxes"></div>
+            <div class="refine-actions">
+              <button class="btn" type="button" onclick="resetConstraints()"><span data-i18n="clearAllButton">清空全部</span></button>
+              <button class="btn-solve" id="btnRefine" type="button" onclick="refineWithPriorities()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="refineButton">重新优化</span></button>
+            </div>
+            <div id="refineCost" style="margin-top:14px;"></div>
+          </div>
+          <p class="conditions-drawer-note" data-i18n="conditionsDrawerNote">
+            需要修改精确 / 至少 / 至多 / 区间 / 优先级或模组数量时，请回到上方“目标六维属性”与碎片区域编辑。
+          </p>
+          <button class="btn" type="button" onclick="document.getElementById('inputCard').scrollIntoView({behavior:'smooth'})"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-up"/></svg><span data-i18n="openTargetInputsButton">打开目标与规则输入</span></button>
+        </div>
+      </section>
+
+      <section class="inventory-strip" id="ownedGearSection" hidden aria-label="库存来源"></section>
     </div>
 
-    <!-- Priority Refinement (shown when solve is not perfect) -->
-    <div class="card" id="refineCard" style="display:none;">
-      <h2 data-i18n="refineHeading">优先属性与约束调整</h2>
-      <p class="refine-card-copy" data-i18n="refineDescription">
-        选择优化目标后点击下方按钮重新求解。约束条件对求解器施加硬性限制。
-      </p>
-      <div id="refineCheckboxes"></div>
-      <div class="refine-actions">
-        <button class="btn" type="button" onclick="resetConstraints()"><span data-i18n="clearAllButton">清空全部</span></button>
-        <button class="btn-solve" id="btnRefine" type="button" onclick="refineWithPriorities()"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-refresh"/></svg><span data-i18n="refineButton">重新优化</span></button>
-      </div>
-      <div id="refineCost" style="margin-top:14px;"></div>
-    </div>
+    <!-- Live feedback lives in the command bar status and #messages; announcing
+         the whole workspace again on every progressive tick would be noise. -->
+    <section class="inventory-results" id="inventoryResults" hidden></section>
 
-    <div class="card" id="piecesCard">
-      <h2 data-i18n="recommendedBuildHeading">方案详情</h2>
-      <div id="piecesOutput"></div>
-    </div>
+    <section class="card upgrade-results" id="upgradeResults" hidden aria-labelledby="upgradeResultsHeading">
+      <h2 id="upgradeResultsHeading" data-i18n="upgradeResultsHeading">护甲替换分析</h2>
+      <div id="upgradeResultsBody"></div>
+    </section>
 
-    <div class="card" id="exoticCard" style="display:none;">
-      <h2 data-i18n="exoticRecommendationHeading">异域护甲推荐</h2>
-      <p style="color:var(--text-dim);margin-bottom:14px;" data-i18n="exoticRecommendationDescription">
-        普通模式按方案推荐异域护甲框架；异域职业物品模式严格使用你锁定的护甲框架。
-      </p>
-      <div id="exoticRecommendation"></div>
-    </div>
+    <div class="card" id="savedCard" style="display:none;">
+      <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n-html="savedBuildsHeading">已保存配装 <span style="color:var(--text-dim);">（点击名称加载，点 × 删除）</span></span></h2>
+      <div id="savedBuildsList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+      <button class="btn danger" onclick="clearAllBuilds()" style="margin-top:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span data-i18n="clearAllButton">清空全部</span></button>
     </div>
   </div>
 

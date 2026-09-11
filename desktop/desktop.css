@@ -33,13 +33,11 @@ body { overflow: hidden; }
 .desktop-solver .card h2 { font-size: 1.125rem; }
 .desktop-solver .workspace-grid { gap: 0; grid-template-columns: minmax(0, 1fr); }
 .desktop-solver .card--fragments .input-grid,
-.desktop-solver #targetGrid, .desktop-solver .comparison { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
-.desktop-solver .solver-actions { position: static; margin: 4px 0 24px; padding: 16px 0; border-block: 1px solid var(--border); }
-.desktop-solver .search-toolbar { flex-wrap: wrap; }
-/* Results are single-column too, including the solution list and inventory panels. */
-.desktop-solver #results.show { display: block; }
-.desktop-solver #results > #solutionNav { position: static; max-height: none; margin: 0; }
-.desktop-solver .inventory-results-layout { grid-template-columns: minmax(0, 1fr); }
+.desktop-solver #targetGrid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+/* The target strip keeps the shared six-column divider layout; only the input
+   grids above need a wider gap. */
+.desktop-solver #comparisonGrid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.desktop-solver .cmd-bar { margin: 0 0 20px; }
 .desktop-solver .footer { margin-top: 24px; font-size: .75rem; }
 .desktop-startup, .desktop-error { padding: 16px; }
 .desktop-error { background: var(--card); color: var(--health); }

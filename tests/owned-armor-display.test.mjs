@@ -4,7 +4,9 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const source = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
-const functions = ['formatInventoryItemTuning', 'renderOwnedArmorMatch'].map(name =>
+// The five-piece armor table renders one row per piece; an owned piece of a
+// theoretical skeleton gets its required-vs-installed Tuning note from here.
+const functions = ['formatInventoryItemTuning', 'renderOwnedPieceRequirement'].map(name =>
   source.slice(source.indexOf(`function ${name}(`)).split('\nfunction ')[0]);
 const context = vm.createContext({
   l: (...labels) => labels[0], t: () => '第三属性',
@@ -18,13 +20,13 @@ vm.runInContext(functions.join('\n'), context);
 test('owned armor shows required tuning separately from currently installed tuning', () => {
   const piece = { slot: 'helmet', tuningMode: 'shift', tuningTo: 'super',
     item: { name: '忠诚面具', exotic: true, tertiary: 'grenade', tuningMode: 'shift', tuningTo: 'melee' } };
-  const html = context.renderOwnedArmorMatch(piece);
+  const html = context.renderOwnedPieceRequirement(piece);
   assert.match(html, /方案.*\+5超能/);
   assert.match(html, /当前.*\+5近战/);
   assert.match(html, /需更换/);
   assert.equal(piece.item.tuningTo, 'melee', 'rendering must not overwrite physical inventory');
-  assert.match(context.renderOwnedArmorMatch({ ...piece, tuningMode: 'plus3' }), /方案.*\+3/);
-  assert.doesNotMatch(context.renderOwnedArmorMatch({ ...piece, tuningTo: 'melee' }), /需更换/);
+  assert.match(context.renderOwnedPieceRequirement({ ...piece, tuningMode: 'plus3' }), /方案.*\+3/);
+  assert.doesNotMatch(context.renderOwnedPieceRequirement({ ...piece, tuningTo: 'melee' }), /需更换/);
 });
 
 test('re-ranking owned plans keeps the solution being read', () => {
