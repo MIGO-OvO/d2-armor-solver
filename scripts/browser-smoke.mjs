@@ -2875,6 +2875,271 @@ async function checkInformationArchitecture(browser) {
   }
 }
 
+// One workspace measure, used from first paint. A solve must not move the
+// layout, and the wide layout must actually spend the width it claims: six
+// stats on one row, a three-lane replacement step, capped controls.
+async function checkWorkspaceLayout(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+
+  const readContainer = () => page.evaluate(() => {
+    const rect = document.querySelector(".container").getBoundingClientRect();
+    return {
+      width: Math.round(rect.width),
+      left: Math.round(rect.left),
+      available: document.documentElement.clientWidth,
+    };
+  });
+  const readOverflow = () => page.evaluate(() => {
+    const doc = document.documentElement;
+    return {
+      viewport: doc.clientWidth,
+      content: doc.scrollWidth,
+      offenders: [...document.querySelectorAll("body *")]
+        .filter(element => {
+          const rect = element.getBoundingClientRect();
+          return rect.right > doc.clientWidth + 1 || rect.left < -1;
+        })
+        .slice(0, 6)
+        .map(element => `${element.tagName}${element.id ? "#" + element.id : ""}.`
+          + String(element.className || "").slice(0, 40)),
+    };
+  });
+  const assertNoOverflow = async label => {
+    const overflow = await readOverflow();
+    assert.ok(
+      overflow.content <= overflow.viewport + 1,
+      `document horizontal overflow at ${label}: ${JSON.stringify(overflow)}`,
+    );
+  };
+  // The same owned-armor fixture the other regressions build, so the optimize
+  // flow has real replacement candidates to plan steps from.
+  const seedOwnedArmor = () => page.evaluate(({ storageKeys, configs }) => {
+    const slots = ["helmet", "arms", "chest", "legs", "classItem"];
+    const archetypes = [
+      "Siegebreaker", "Bulwark", "Brawler", "Skirmisher", "Grenadier", "Demolitionist",
+      "Colossus", "Paragon", "Reaver", "Specialist", "Gunner", "Powerhouse",
+    ];
+    const stats = ["health", "melee", "grenade", "super", "class", "weapons"];
+    const inventory = [];
+    let id = 0;
+    for (const slot of slots) {
+      for (const archetypeId of archetypes) {
+        for (const tertiary of stats) {
+          const config = configs.find(entry => entry.archetype === archetypeId && entry.tertiary === tertiary);
+          if (!config) continue;
+          for (const tuningTo of stats) {
+            inventory.push({
+              id: `layout-regression-${id++}`,
+              hash: 700000 + id,
+              name: `Owned ${slot} ${archetypeId} ${tertiary} ${tuningTo}`,
+              slot,
+              classId: "hunter",
+              tier: "5",
+              exotic: false,
+              archetypeId,
+              tertiary,
+              tuningMode: "shift",
+              tuningFrom: "health",
+              tuningTo,
+              armorModSize: 10,
+              armorModStat: "weapons",
+              baseStats: { ...config.baseStats },
+              effectiveBaseStats: { ...config.baseStats },
+              optimizationBaseStats: { ...config.baseStats },
+              masterworkTier: 5,
+              setHash: null,
+            });
+          }
+        }
+      }
+    }
+    localStorage.setItem(storageKeys.upgradeDraft, JSON.stringify({
+      schemaVersion: 1,
+      pieces: [],
+      inventory,
+      setRequirement: { type: "none" },
+      manualLocked: [],
+      importClassFilter: "hunter",
+      importTier5Only: true,
+      reassignModifiers: true,
+    }));
+    localStorage.setItem(storageKeys.calculatorMode, "solve");
+  }, { storageKeys: TEST_STORAGE_KEYS, configs: BASE_CONFIGS });
+
+  try {
+    // (1) The input page already uses the wide measure — there is no
+    // "narrow before solving" state left to regress to.
+    const before = {};
+    for (const width of [1920, 1440, 1280, 1024, 800, 600, 390]) {
+      await page.setViewportSize({ width, height: width <= 800 ? 720 : 1000 });
+      await page.goto(baseUrl, { waitUntil: "networkidle" });
+      if (width >= 1280) before[width] = await readContainer();
+      await assertNoOverflow(`${width}px input page`);
+    }
+    assert.ok(
+      before[1920].width >= 1500 && before[1920].width <= 1524,
+      `1920px must already use the capped wide measure: ${JSON.stringify(before[1920])}`,
+    );
+    for (const width of [1440, 1280]) {
+      assert.ok(
+        before[width].width >= 1200,
+        `the input page at ${width}px must not fall back to the old 1180px measure: `
+        + JSON.stringify(before[width]),
+      );
+      // `scrollbar-gutter: stable` reserves the scrollbar's width inside the
+      // root, so the container fills the viewport minus that gutter.
+      assert.ok(
+        before[width].width >= before[width].available - 20,
+        `at ${width}px the workspace must fill the viewport: ${JSON.stringify(before[width])}`,
+      );
+    }
+
+    // (2) Solving must not move the container: same width, same left edge.
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await seedOwnedArmor();
+    await page.reload({ waitUntil: "networkidle" });
+    await page.evaluate(() => window.setCalculatorMode("upgrade"));
+    await page.locator("#btnUpgradeAnalyze").click();
+    await page.locator("#upgradeResults:not([hidden])").waitFor({ timeout: 60000 });
+    await page.locator("#btnUpgradeAnalyze:not([disabled])").waitFor({ timeout: 60000 });
+
+    const after = {};
+    for (const width of [1920, 1440, 1280]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.waitForTimeout(150);
+      after[width] = await readContainer();
+      assert.ok(
+        Math.abs(after[width].width - before[width].width) <= 2,
+        `the workspace width must not change when results land (${width}px): `
+        + `before ${before[width].width}, after ${after[width].width}`,
+      );
+      assert.ok(
+        Math.abs(after[width].left - before[width].left) <= 2,
+        `the workspace left edge must not shift when results land (${width}px): `
+        + `before ${before[width].left}, after ${after[width].left}`,
+      );
+      await assertNoOverflow(`${width}px result workspace`);
+
+      // (3) The six-stat readouts stay on one row once there is room for six:
+      // the optimize result's stat comparison and the six target inputs.
+      // Measured as geometry — Blink may serialise the track list as
+      // `repeat(6, …)`, which does not split into six tokens.
+      for (const [selector, label] of [
+        [".upgrade-stat-comparison", "the result stat comparison"],
+        ["#targetGrid", "the six target inputs"],
+      ]) {
+        const grid = await page.locator(selector).first().evaluate(element => {
+          const cells = [...element.children];
+          const raw = getComputedStyle(element).gridTemplateColumns;
+          const repeat = raw.match(/^repeat\((\d+),/);
+          return {
+            cells: cells.length,
+            rows: new Set(cells.map(cell => Math.round(cell.getBoundingClientRect().top))).size,
+            tracks: repeat ? Number(repeat[1]) : raw.split(" ").filter(Boolean).length,
+          };
+        });
+        assert.equal(grid.cells, 6, `${label} must render six cells at ${width}px`);
+        assert.equal(grid.rows, 1, `${label} must be a single row at ${width}px`);
+        assert.equal(grid.tracks, 6, `${label} must keep six columns at ${width}px`);
+      }
+    }
+
+    // (4) The replacement path spends its width on three lanes instead of one
+    // narrow column plus empty space, and each step stays a row, not a card.
+    let stepHeight = null;
+    if (await page.locator("#upgradeResults .upgrade-plan-step").count() > 0) {
+      const lane = await page.locator("#upgradeResults .upgrade-plan-step").first()
+        .evaluate(element => {
+          const lanes = element.querySelector(".upgrade-plan-lanes");
+          const laneElements = [...element.querySelectorAll(".upgrade-plan-lane")];
+          const raw = lanes ? getComputedStyle(lanes).gridTemplateColumns : "";
+          const repeat = raw.match(/^repeat\((\d+),/);
+          return {
+            laneColumns: repeat ? Number(repeat[1]) : raw.split(" ").filter(Boolean).length,
+            laneCount: laneElements.length,
+            laneRows: new Set(laneElements.map(item => Math.round(item.getBoundingClientRect().top))).size,
+            stepHeight: Math.round(element.getBoundingClientRect().height),
+          };
+        });
+      stepHeight = lane.stepHeight;
+      assert.equal(lane.laneCount, 3, "a replacement step must expose three regions");
+      assert.equal(lane.laneColumns, 3, "a wide replacement step must lay those regions out in a row");
+      assert.equal(lane.laneRows, 1, "the three replacement regions must share one row");
+      assert.ok(
+        lane.stepHeight <= 160,
+        `a wide replacement step must stay compact instead of stacking into a card: ${lane.stepHeight}px`,
+      );
+    }
+
+    // (5) Five-piece summaries are aligned columns at this width. The cells are
+    // vertically centred, so "one row" is read from the column positions, not
+    // from their tops.
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.waitForTimeout(150);
+    const pieceSummary = await page.locator("#upgradeBuildEditor .upgrade-piece-row summary")
+      .first().evaluate(element => {
+        const identity = element.querySelector(".upgrade-piece-identity");
+        const cells = [...identity.children].map(cell => cell.getBoundingClientRect());
+        const raw = getComputedStyle(identity).gridTemplateColumns;
+        const repeat = raw.match(/^repeat\((\d+),/);
+        return {
+          display: getComputedStyle(identity).display,
+          cells: cells.length,
+          columns: new Set(cells.map(cell => Math.round(cell.left))).size,
+          tracks: repeat ? Number(repeat[1]) : raw.split(" ").filter(Boolean).length,
+          identityHeight: Math.round(identity.getBoundingClientRect().height),
+        };
+      });
+    assert.equal(pieceSummary.display, "grid", "a wide piece summary must use aligned columns");
+    assert.equal(pieceSummary.tracks, 5, "a wide piece summary must expose five aligned columns");
+    assert.equal(
+      pieceSummary.columns,
+      pieceSummary.cells,
+      `every piece-summary cell must own a column: ${JSON.stringify(pieceSummary)}`,
+    );
+    assert.ok(
+      pieceSummary.identityHeight <= 76,
+      `the piece summary cells must not stack into a column: ${pieceSummary.identityHeight}px tall`,
+    );
+
+    // (6) A control follows its parent's width only up to a sensible cap.
+    await openAdvancedConstraints(page);
+    const controlWidths = await page.evaluate(() => {
+      const measure = selector => {
+        const element = document.querySelector(selector);
+        return element ? Math.round(element.getBoundingClientRect().width) : null;
+      };
+      return {
+        container: Math.round(document.querySelector(".container").getBoundingClientRect().width),
+        importClass: measure("#importClass"),
+        setReqMode: measure("#setReqMode"),
+      };
+    });
+    for (const [name, width] of [["#importClass", controlWidths.importClass], ["#setReqMode", controlWidths.setReqMode]]) {
+      assert.ok(width !== null && width > 0, `${name} must be rendered`);
+      assert.ok(width <= 342, `${name} must keep its own max-width instead of filling the row: ${width}px`);
+      assert.ok(
+        width < controlWidths.container / 3,
+        `${name} must not stretch with the workspace: ${width}px in ${controlWidths.container}px`,
+      );
+    }
+
+    assert.deepEqual(browserErrors, []);
+    console.log(
+      "browser smoke: one workspace measure (no solve-time width jump), six-up stats, "
+      + `three-lane replacement steps${stepHeight === null ? "" : ` (~${stepHeight}px each)`}, capped controls OK`,
+    );
+  } finally {
+    await context.close();
+  }
+}
+
 let browser;
 try {
   browser = await chromium.launch({
@@ -2890,6 +3155,7 @@ try {
   await checkLoadoutPresentation(browser);
   await checkExactInventoryTotals(browser);
   await checkInformationArchitecture(browser);
+  await checkWorkspaceLayout(browser);
   if (process.argv.includes("--target-sync-only")) {
     console.log("upgrade target sync and set requirement browser regressions OK");
   } else {

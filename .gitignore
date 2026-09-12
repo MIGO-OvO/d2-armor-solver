@@ -1,6 +1,8 @@
 # Local agent, design context, and visual-review artifacts
 .agents/
 .audit/
+.audit-logs/
+.layout-audit/
 .codex/
 .impeccable.md
 .impeccable/

@@ -2363,8 +2363,8 @@ function renderUpgradeImportPanel() {
       "In DIM open Settings → Spreadsheets → Armor and click Export CSV, then pick the exported file. The file is processed locally in your browser.",
     )}</p>
     <div class="upgrade-import-body" id="upgradeImportBody" ${inventoryImportExpanded ? '' : 'hidden'}>
-      <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
       <div class="armor-filter-toolbar" id="armorFilterToolbar" aria-label="${l("已有护甲筛选与操作", "已有防具篩選與操作", "Owned armor filters and actions")}">
+        <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
         <label class="import-class-select">
           <span>${l("职业", "職業", "Class")}</span>
           <select id="importClass" onchange="updateImportOptions()">${classOptions}</select>
@@ -2389,20 +2389,26 @@ function renderUpgradeImportPanel() {
         <span class="advanced-constraints-value" id="advancedConstraintsSummary"></span>
       </summary>
       <div class="advanced-constraints-body">
-        <div class="inventory-solve-options" id="inventorySolveOptions">
-          <div class="inventory-exotic-picker" aria-label="${l("固定异域筛选", "固定異域篩選", "Fixed Exotic filters")}">
-            <label class="inventory-fixed-exotic-control">
-              <span>${l("异域部位", "異域部位", "Exotic slot")}</span>
-              <select id="inventoryExoticSlotFilter" onchange="updateInventoryExoticSlot()" ${!importClassFilter || exoticSlots.length === 0 ? "disabled" : ""}>${exoticSlotOptions}</select>
-            </label>
-            <label class="inventory-fixed-exotic-control">
-              <span>${l("异域名称", "異域名稱", "Exotic name")}</span>
-              <select id="inventoryFixedExoticName" onchange="updateInventorySolveOptions()" ${isClassItemSlot || !inventoryExoticSlotFilter || exoticNames.length === 0 ? "disabled" : ""}>${exoticNameOptions}</select>
-            </label>
+        <section class="constraint-panel" aria-labelledby="exoticConstraintTitle">
+          <h4 class="constraint-panel-title" id="exoticConstraintTitle">${l("异域约束", "異域限制", "Exotic constraint")}</h4>
+          <div class="inventory-solve-options" id="inventorySolveOptions">
+            <div class="inventory-exotic-picker" aria-label="${l("固定异域筛选", "固定異域篩選", "Fixed Exotic filters")}">
+              <label class="inventory-fixed-exotic-control">
+                <span>${l("异域部位", "異域部位", "Exotic slot")}</span>
+                <select id="inventoryExoticSlotFilter" onchange="updateInventoryExoticSlot()" ${!importClassFilter || exoticSlots.length === 0 ? "disabled" : ""}>${exoticSlotOptions}</select>
+              </label>
+              <label class="inventory-fixed-exotic-control">
+                <span>${l("异域名称", "異域名稱", "Exotic name")}</span>
+                <select id="inventoryFixedExoticName" onchange="updateInventorySolveOptions()" ${isClassItemSlot || !inventoryExoticSlotFilter || exoticNames.length === 0 ? "disabled" : ""}>${exoticNameOptions}</select>
+              </label>
+            </div>
+            <p class="inventory-solve-option-hint constraint-caption" id="inventorySolveOptionHint"></p>
           </div>
-          <p class="inventory-solve-option-hint" id="inventorySolveOptionHint"></p>
-        </div>
-        <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
+        </section>
+        <section class="constraint-panel" aria-labelledby="setConstraintTitle">
+          <h4 class="constraint-panel-title" id="setConstraintTitle">${l("套装要求", "套裝要求", "Set requirement")}</h4>
+          <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
+        </section>
       </div>
     </details>
     ${getSavedBungieLoadoutsHtml()}
@@ -3694,6 +3700,9 @@ function updateInventorySolveOptions({ refreshPlans = true } = {}) {
             : getFilteredInventoryExotics().length === 0
               ? l('暂无已有异域；可选择部位和“任意异域”，为尚未拥有的异域预留位置。', '暫無現有異域；可選擇部位和「任意異域」，為尚未擁有的異域預留位置。', 'No owned Exotics. Choose a slot and Any Exotic to reserve it for an unowned item.')
               : l('可选。先选异域部位和名称；没有完全匹配时，结果会显示同名最接近的现有件以及建议刷取属性。', '可選。先選異域部位和名稱；沒有完全符合時，結果會顯示同名最接近的現有件以及建議取得數值。', 'Optional. Choose an Exotic slot and name. If no copy fully matches, the result shows the closest owned copy and the roll to farm.');
+    // The sentence stays reachable as a tooltip; on wide screens the visible
+    // line is elided to one caption row instead of a full-width paragraph.
+    hint.title = hint.textContent;
   }
   saveUpgradeDraft();
   if (refreshPlans) refreshInventoryPlansFromSolutions();
@@ -4077,6 +4086,17 @@ function renderSetEffects() {
   const setOptions = makeSetOptions(firstSetHash);
   const secondSetOptions = makeSetOptions(secondSetHash, firstSetHash);
   const mode = setRequirement.type === "set" ? `set${setRequirement.count}` : setRequirement.type;
+  // 2pc/4pc status is one compact line: the counter carries the number and the
+  // explanatory sentence moves into its tooltip, so the panel no longer stacks
+  // four full-width notes. Bonus cards only appear when one is actually active.
+  const activePieces = active.reduce((max, bonus) => Math.max(max, bonus.pieceCount || 0), 0);
+  const activeBadgeTitle = active.length > 0
+    ? active.map(bonus => `${bonus.name} ${bonus.pieceCount}/5`).join(" · ")
+    : l(
+      "当前五件护甲没有激活任何护甲套装加成（2 件或 4 件）。",
+      "目前五件防具沒有啟動任何防具套裝獎勵（2 件或 4 件）。",
+      "No Armor Set Bonus (2pc/4pc) is active with the current five pieces.",
+    );
 
   el.innerHTML = `
     <div class="set-requirement-head">
@@ -4098,18 +4118,20 @@ function renderSetEffects() {
         <select id="setReqB" onchange="updateSetRequirementPicks()">${secondSetOptions}</select>
       </label>
     </div>
-    ${renderSetRequirementSummary(language, ownedSetCounts)}
-    <details class="set-effects-toggle" data-disclosure-key="set-effects">
-      <summary>${l("查看套装效果", "檢視套裝獎勵", "View set bonuses")}</summary>
-      ${renderSetRequirementPreview(language, ownedSetCounts)}
-    </details>
-    ${calculatorMode === "upgrade" ? `<div class="set-active-list">${active.length === 0
-      ? `<div class="set-active-empty">${l(
-        "当前五件护甲没有激活任何护甲套装加成（2 件或 4 件）。",
-        "目前五件防具沒有啟動任何防具套裝獎勵（2 件或 4 件）。",
-        "No Armor Set Bonus (2pc/4pc) is active with the current five pieces."
-      )}</div>`
-      : active.map(bonus => `
+    <div class="set-status-row">
+      ${renderSetRequirementSummary(language, ownedSetCounts)}
+      ${calculatorMode === "upgrade" ? `<span class="set-active-badge ${active.length > 0 ? "is-active" : ""}" title="${escapeHtml(activeBadgeTitle)}">${l(
+        `当前 ${activePieces}/5 激活`,
+        `目前 ${activePieces}/5 啟動`,
+        `${activePieces}/5 active`,
+      )}</span>` : ""}
+      <div class="set-requirement-state" id="setRequirementState" aria-live="polite"></div>
+      <details class="set-effects-toggle" data-disclosure-key="set-effects">
+        <summary>${l("查看套装效果", "檢視套裝獎勵", "View set bonuses")}</summary>
+        ${renderSetRequirementPreview(language, ownedSetCounts)}
+      </details>
+    </div>
+    ${calculatorMode === "upgrade" && active.length > 0 ? `<div class="set-active-list">${active.map(bonus => `
         <div class="set-active-card">
           <div class="set-active-head">
             <strong>${escapeHtml(getSetName(bonus.set))}</strong>
@@ -4118,9 +4140,7 @@ function renderSetEffects() {
           </div>
           <div class="set-active-name">${escapeHtml(bonus.name)}</div>
           <p class="set-active-desc">${escapeHtml(bonus.desc)}</p>
-        </div>`).join("")}
-    </div>` : ""}
-    <div class="set-requirement-state" id="setRequirementState" aria-live="polite"></div>
+        </div>`).join("")}</div>` : ""}
   `;
   syncUpgradeLocks();
   restoreDetails();
@@ -4241,16 +4261,26 @@ function renderUpgradeBuildEditor(openIndex = null) {
       : l('无属性模组', '無數值模組', 'No stat mod');
     const setForPiece = piece.setHash ? getArmorSetByHash(piece.setHash) : null;
     const pieceNameLabel = piece.itemName
-      ? `<span class="upgrade-piece-name">${escapeHtml(piece.itemName)}</span> · `
+      ? `<span class="upgrade-piece-name">${escapeHtml(piece.itemName)}</span>`
       : '';
     const setLabel = setForPiece
-      ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(setForPiece))}</span> · `
+      ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(setForPiece))}</span>`
       : '';
     const perkIds = [piece.primaryPerkId, piece.secondaryPerkId].filter(Boolean);
     const perkLabel = perkIds.length > 0
-      ? `<span class="upgrade-piece-perks">${perkIds.map(id => escapeHtml(getExoticPerkName(id, id))).join(' + ')}</span> · `
+      ? `<span class="upgrade-piece-perks">${perkIds.map(id => escapeHtml(getExoticPerkName(id, id))).join(' + ')}</span>`
       : '';
-    const identity = `${pieceNameLabel}${setLabel}${perkLabel}<span class="upgrade-piece-arch">${getArchetypeLabel(archetype.id)}</span><span class="upgrade-piece-detail"> · ${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]} · ${tuning} · ${armorMod}</span>`;
+    // Five cells instead of one run-on sentence: a 1500px row used to hold a
+    // single left-aligned string and leave the right half empty. Wide screens
+    // lay these out as name | archetype | tertiary | tuning | mod; narrow
+    // screens fall back to the same sentence, separated by CSS.
+    const identity = [
+      `<span class="upgrade-piece-name-cell">${[pieceNameLabel, setLabel, perkLabel].filter(Boolean).join(' · ')}</span>`,
+      `<span class="upgrade-piece-arch">${getArchetypeLabel(archetype.id)}</span>`,
+      `<span class="upgrade-piece-tertiary">${t('tertiaryStat')} ${STAT_LABELS[piece.tertiary]}</span>`,
+      `<span class="upgrade-piece-tuning">${tuning}</span>`,
+      `<span class="upgrade-piece-mod">${armorMod}</span>`,
+    ].join('');
     const status = piece.exotic
       ? l('异域固定件','異域固定件','Fixed Exotic')
       : (piece.locked ? l('固定不替换','固定不替換','Fixed') : l('可替换','可替換','Replaceable'));
@@ -4728,29 +4758,32 @@ function buildUpgradePlanFlow(analysis, plan) {
       const finalArmorMod = plan.evaluation.modAssignments[step.slotIndex];
       return `<li class="upgrade-plan-step">
         <span class="upgrade-plan-number">${index + 1}</span>
-        <div class="upgrade-plan-change">
-          <strong class="upgrade-plan-slot">${getUpgradeSlotLabel(step.slotIndex)}${step.tuningOnly
-            ? ` · ${l('只差 +5 属性','只差 +5 數值','+5 stat only')}`
-            : ''}</strong>
-          <div class="upgrade-plan-swap">
-            <span class="upgrade-plan-config upgrade-plan-config--before">${formatUpgradePieceSummary(step.beforePiece)}</span>
-            <span class="upgrade-plan-arrow" aria-hidden="true">→</span>
-            <strong class="upgrade-plan-config upgrade-plan-config--after">${formatUpgradePieceSummary(step.afterPiece)}</strong>
-          </div>
-          <div class="upgrade-plan-progress ${complete ? 'is-complete' : ''}">
-            <strong>${complete
+        <div class="upgrade-plan-step-body">
+          <div class="upgrade-plan-step-head">
+            <strong class="upgrade-plan-slot">${getUpgradeSlotLabel(step.slotIndex)}${step.tuningOnly
+              ? `<span class="upgrade-plan-tag">${l('只差 +5 属性','只差 +5 數值','+5 stat only')}</span>`
+              : ''}</strong>
+            <span class="upgrade-plan-progress ${complete ? 'is-complete' : ''}">${complete
               ? l('换完后六维都达标','換完後六維都達標','All targets met after this step')
-              : l(`换完还差 ${step.evaluation.metrics.shortfall} 点`, `換完還差 ${step.evaluation.metrics.shortfall} 點`, `${step.evaluation.metrics.shortfall} points short after this step`)}</strong>
-            <div class="upgrade-plan-totals">${formatUpgradeTotals(step.evaluation.finalTotals)}</div>
+              : l(`换完还差 ${step.evaluation.metrics.shortfall} 点`, `換完還差 ${step.evaluation.metrics.shortfall} 點`, `${step.evaluation.metrics.shortfall} points short after this step`)}</span>
           </div>
+          <div class="upgrade-plan-lanes">
+            <div class="upgrade-plan-lane">
+              <span class="upgrade-plan-lane-label">${l('当前','目前','Now')}</span>
+              <span class="upgrade-plan-config upgrade-plan-config--before">${formatUpgradePieceSummary(step.beforePiece)}</span>
+            </div>
+            <div class="upgrade-plan-lane">
+              <span class="upgrade-plan-lane-label"><span class="upgrade-plan-arrow" aria-hidden="true">→</span>${l('目标','目標','Target')}</span>
+              <strong class="upgrade-plan-config upgrade-plan-config--after">${formatUpgradePieceSummary(step.afterPiece)}</strong>
+            </div>
+            <div class="upgrade-plan-lane">
+              <span class="upgrade-plan-lane-label">${l('执行','執行','Do')}</span>
+              <span class="upgrade-plan-exec-item"><em>${l('调整','調校','Tuning')}</em>${formatUpgradeTuning(finalTuning)}</span>
+              <span class="upgrade-plan-exec-item"><em>${l('模组','模組','Mod')}</em>${formatUpgradeArmorMod(finalArmorMod)}</span>
+            </div>
+          </div>
+          <div class="upgrade-plan-totals">${formatUpgradeTotals(step.evaluation.finalTotals)}</div>
         </div>
-        <details class="upgrade-plan-setup-details" data-disclosure-key="plan-step-${index}">
-          <summary>${term('tuningModSlot')} / ${t('armorMod')}</summary>
-          <div class="upgrade-plan-setup">
-            <span><strong>${term('tuningModSlot')}</strong>${formatUpgradeTuning(finalTuning)}</span>
-            <span><strong>${t('armorMod')}</strong>${formatUpgradeArmorMod(finalArmorMod)}</span>
-          </div>
-        </details>
       </li>`;
     }).join('')}</ol>
     <p class="upgrade-plan-note">${l(

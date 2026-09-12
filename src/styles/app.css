@@ -10,7 +10,9 @@ body {
   background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.6; font-size: 15px;
   -webkit-text-size-adjust: 100%;
 }
-.container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+/* Legacy base declarations for `.container` used to live here; the themed rule
+   further down the sheet sets width, max-width, centring and padding, so this
+   earlier one only ever lost the cascade. */
 .header { text-align: center; padding: 30px 20px 10px; }
 .header h1 { font-size: 26px; color: #fff; }
 .header h1 span { color: var(--accent); }
@@ -173,7 +175,6 @@ body {
 
 /* Tablet */
 @media (max-width: 768px) {
-  .container { padding: 10px; }
   .header h1 { font-size: 20px; }
   .header { padding: 16px 10px 8px; }
   .card { padding: 14px; margin-bottom: 12px; }
@@ -198,7 +199,6 @@ body {
 
 /* Phone */
 @media (max-width: 480px) {
-  .container { padding: 6px; }
   .card { padding: 10px; margin-bottom: 8px; }
   .input-grid { grid-template-columns: 1fr; gap: 6px; }
   .comparison { grid-template-columns: 1fr; gap: 6px; }
@@ -248,7 +248,15 @@ body {
   font-size: 14px;
   line-height: 1.55;
 }
-.container { max-width: 1180px; padding: 32px 28px 52px; }
+/* One measure for the whole app. The input page and the result workspace share
+   this width so solving never moves the layout; the sideways gutter comes from
+   the padding, which the breakpoints below already tighten for small screens. */
+.container {
+  width: 100%;
+  max-width: 1520px;
+  margin: 0 auto;
+  padding: 32px 28px 52px;
+}
 .header {
   display: block;
   padding: 10px 0 28px;
@@ -965,8 +973,6 @@ input[type="checkbox"]:focus-visible {
    (page < workspace < selected) plus low-contrast dividers carry
    the structure, so full rounded cards stay rare.
    ============================================================ */
-body:has(#results.show) .container { max-width: min(1520px, 100%); }
-
 .result-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -4098,11 +4104,9 @@ a:focus-visible {
   color: var(--archetype);
   font-weight: 650;
 }
-.upgrade-piece-detail {
-  color: var(--text-dim);
-  font-size: .8125rem;
-  font-weight: 500;
-}
+/* The summary's secondary cells (tertiary / tuning / mod) carry their own
+   styling now that the identity is split into columns; the single run-on
+   `.upgrade-piece-detail` rule this replaces is gone. */
 .upgrade-piece-status {
   display: inline-flex;
   align-items: center;
@@ -4448,56 +4452,94 @@ a:focus-visible {
   margin-top: 12px;
   border-top: 1px solid var(--border);
 }
+/* A step is a numbered block, not a four-column table. The slot and the step's
+   own progress share the header line; the swap and the execution share a lane
+   row, so short copy stops reserving a wide empty column. */
 .upgrade-plan-step {
   display: grid;
-  grid-template-columns: 36px minmax(260px, 1.15fr) minmax(230px, .9fr) minmax(245px, .95fr);
-  align-items: center;
-  gap: 16px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--border);
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border-subtle);
   contain: layout style;
 }
 .upgrade-plan-number {
   display: inline-grid;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   border: 1px solid color-mix(in oklab, var(--accent) 48%, var(--border));
   border-radius: 50%;
   color: var(--accent);
   font-family: var(--font-numeric);
-  font-size: .875rem;
+  font-size: .8125rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.upgrade-plan-change,
-.upgrade-plan-setup,
-.upgrade-plan-progress {
+.upgrade-plan-step-body {
+  grid-column: 2;
   display: grid;
-  align-content: center;
-  gap: 3px;
+  gap: 5px;
   min-width: 0;
 }
-.upgrade-plan-change {
-  gap: 6px;
+.upgrade-plan-step-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
 }
 .upgrade-plan-slot {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
   color: var(--text);
-  font-size: 1rem;
+  font-size: .9375rem;
   font-weight: 700;
   line-height: 1.35;
 }
-.upgrade-plan-swap {
+.upgrade-plan-tag {
+  padding: 1px 7px;
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: .6875rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+/* The per-step progress is a status next to the slot, not a third column. */
+.upgrade-plan-progress {
+  color: var(--warning);
+  font-size: .8125rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.upgrade-plan-progress.is-complete { color: var(--success); }
+.upgrade-plan-lanes {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
+  gap: 6px 20px;
   min-width: 0;
+}
+.upgrade-plan-lane {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.upgrade-plan-lane-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .04em;
 }
 .upgrade-plan-config {
   min-width: 0;
   font-size: .9375rem;
-  line-height: 1.5;
+  line-height: 1.45;
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -4511,57 +4553,52 @@ a:focus-visible {
 }
 .upgrade-plan-arrow {
   color: var(--accent);
-  font-size: .875rem;
-  text-align: center;
+  font-size: .8125rem;
 }
-.upgrade-plan-setup {
-  gap: 7px;
-  padding-left: 16px;
-  border-left: 1px solid var(--border);
-}
-.upgrade-plan-setup span {
-  display: grid;
-  grid-template-columns: minmax(4.5rem, auto) minmax(0, 1fr);
-  gap: 10px;
-  color: var(--text-dim);
-  font-size: .9375rem;
-  line-height: 1.5;
-}
-.upgrade-plan-setup strong {
-  color: var(--text);
-  font-size: .9375rem;
-  font-weight: 650;
-}
-.upgrade-plan-progress > strong {
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.4;
-}
-.upgrade-plan-progress > span {
-  color: var(--text-dim);
-  font-size: .875rem;
-  line-height: 1.65;
-}
-.upgrade-plan-progress {
+.upgrade-plan-exec-item {
+  display: flex;
+  align-items: baseline;
   gap: 6px;
-  padding-left: 16px;
-  border-left: 1px solid var(--border);
-  text-align: left;
+  min-width: 0;
+  color: var(--text);
+  font-size: .875rem;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
 }
-.upgrade-plan-progress.is-complete strong { color: var(--success); }
+.upgrade-plan-exec-item em {
+  flex: 0 0 auto;
+  min-width: 1.75rem;
+  color: var(--accent);
+  font-size: .6875rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
 .upgrade-plan-totals {
   display: grid;
-  grid-template-columns: repeat(3, max-content);
-  justify-content: start;
-  gap: 3px 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 12px;
+  margin-top: 1px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border-subtle);
 }
 .upgrade-plan-totals span {
   color: var(--text-dim);
   font-family: var(--font-numeric);
-  font-size: .9375rem;
-  line-height: 1.55;
+  font-size: .75rem;
+  line-height: 1.5;
   white-space: nowrap;
+}
+/* Wide screens read the swap as three lanes: now | → target | do. */
+@media (min-width: 1000px) {
+  .upgrade-plan-lanes {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  }
+  .upgrade-plan-lane + .upgrade-plan-lane {
+    padding-left: 20px;
+    border-left: 1px solid var(--border-subtle);
+  }
+  .upgrade-plan-totals { grid-template-columns: repeat(6, max-content); gap: 0 18px; }
 }
 .upgrade-assignment-details { margin-top: 16px; }
 .upgrade-assignment-details summary {
@@ -4613,15 +4650,9 @@ a:focus-visible {
   }
   .upgrade-piece-fields { grid-template-columns: minmax(0, 1fr); }
   .upgrade-stat-comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .upgrade-plan-step {
-    grid-template-columns: 32px minmax(0, 1fr) minmax(180px, .8fr);
-    align-items: start;
-  }
-  .upgrade-plan-progress {
-    grid-column: 2 / -1;
-    text-align: left;
-  }
-  .upgrade-plan-totals { justify-content: start; }
+  .upgrade-plan-step { grid-template-columns: 30px minmax(0, 1fr); }
+  .upgrade-plan-lanes { grid-template-columns: minmax(0, 1fr); }
+  .upgrade-plan-totals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 680px) {
   .solver-mode-switch {
@@ -4699,29 +4730,8 @@ a:focus-visible {
   }
   .upgrade-stat-comparison { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .upgrade-requirement { grid-template-columns: 1fr; }
-  .upgrade-plan-step {
-    grid-template-columns: 32px minmax(0, 1fr);
-    align-items: start;
-  }
-  .upgrade-plan-swap {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-  .upgrade-plan-arrow {
-    justify-self: start;
-    margin-left: .2rem;
-    transform: rotate(90deg);
-  }
-  .upgrade-plan-setup {
-    grid-column: 2;
-    padding: 8px 0 0;
-    border-top: 1px solid var(--border);
-    border-left: 0;
-  }
-  .upgrade-plan-progress {
-    grid-column: 2;
-    text-align: left;
-  }
+  .upgrade-plan-step { grid-template-columns: 24px minmax(0, 1fr); gap: 2px 10px; }
+  .upgrade-plan-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .upgrade-assignment-row {
     grid-template-columns: minmax(80px, .7fr) minmax(0, 1.3fr);
   }
@@ -5647,8 +5657,10 @@ a:focus-visible {
 }
 
 /* --- Advanced constraints: one summary line by default --------------------- */
+/* The host panel is a grid with its own gap, so a top margin here would be
+   counted twice between the disclosure and the block above it. */
 .advanced-constraints {
-  margin-top: 12px;
+  margin-top: 0;
   border-top: 1px solid var(--border);
 }
 .advanced-constraints > summary {
@@ -5793,16 +5805,9 @@ a:focus-visible {
   padding: 0;
   list-style: none;
 }
-.upgrade-plan-step { border-top: 1px solid var(--border-subtle); }
-.upgrade-plan-setup-details { margin-top: 2px; }
-.upgrade-plan-setup-details > summary {
-  padding: 2px 0 8px;
-  color: var(--text-dim);
-  font-size: .75rem;
-  font-weight: 620;
-  cursor: pointer;
-}
-.upgrade-plan-setup-details .upgrade-plan-setup { padding-top: 0; padding-bottom: 8px; }
+/* The step owns its bottom divider; a top border here would double it. The
+   per-step tuning/mod disclosure was folded into the execution lane, so its
+   rules are gone with it. */
 .upgrade-plan-note {
   margin-top: 10px;
   color: var(--text-dim);
@@ -6062,16 +6067,221 @@ body.has-overlay { overflow: hidden; }
 }
 .witness-breakdown > summary:hover { color: var(--text); }
 
-/* The recommended replacement path is a list of steps, not a three-column
-   card. Pinned explicitly so it cannot inherit the retired setup-column grid. */
+/* The recommended replacement path is a list of steps, not a card grid. The
+   numbered column is pinned so a step can never inherit a retired column
+   template; the rest of the step is laid out by `.upgrade-plan-step-body`. */
 .upgrade-plan-steps { border-top: 0; }
-.upgrade-plan-step {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: start;
-  gap: 4px 12px;
-  padding: 12px 0;
-}
 .upgrade-plan-step > .upgrade-plan-number { grid-column: 1; grid-row: 1; }
-.upgrade-plan-step > .upgrade-plan-change { grid-column: 2; }
-.upgrade-plan-step > .upgrade-plan-setup-details { grid-column: 2; }
+.upgrade-plan-step > .upgrade-plan-step-body { grid-column: 2; }
+
+/* ============================================================
+   Workspace density pass
+   ------------------------------------------------------------
+   The app paints at one ~1520px measure from first load, so the
+   regions that were tuned for a 1180px input page are rebalanced
+   here: content moves into columns, controls stop stretching with
+   their parent, and short metadata becomes one line. Written as
+   min-width ranges so the narrow breakpoints keep the stacking
+   behaviour they already have.
+   ============================================================ */
+
+/* --- Constraint workspace: two panels instead of seven rows ------ */
+.constraint-panel {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.constraint-panel-title {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 750;
+  letter-spacing: .04em;
+}
+/* The panels own their own divider, so the inner blocks drop theirs. */
+.constraint-panel .inventory-solve-options,
+.constraint-panel .upgrade-set-effects {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  gap: 10px;
+}
+/* One elided caption instead of a full-width paragraph; the whole sentence
+   stays reachable through the element's title. */
+.constraint-caption {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+@media (min-width: 1000px) {
+  .advanced-constraints-body {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    align-items: start;
+    gap: 14px 28px;
+  }
+  .constraint-panel + .constraint-panel {
+    padding-left: 28px;
+    border-left: 1px solid var(--border-subtle);
+  }
+  .constraint-panel .inventory-exotic-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .constraint-caption {
+    font-size: .75rem;
+    line-height: 1.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Label above select, three to a row, so the panel reads as a workspace
+     instead of a column of half-empty rows. */
+  .constraint-panel .set-requirement-head {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+    gap: 8px 12px;
+  }
+  .constraint-panel .set-requirement-head label {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    min-height: 0;
+  }
+  .constraint-panel .set-requirement-head label > span {
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+  }
+  .constraint-panel .set-requirement-head select { max-width: 340px; }
+}
+
+/* --- Requirement + 2pc/4pc status + bonus help: one line ---------- */
+.set-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-width: 0;
+}
+.set-status-row .set-requirement-summary,
+.set-status-row .set-requirement-state,
+.set-status-row .set-effects-toggle { margin-top: 0; }
+.set-status-row .set-effects-toggle { border-top: 0; }
+.set-status-row .set-effects-toggle > summary { padding: 2px 0; }
+/* An opened bonus list takes its own line instead of squeezing the row. */
+.set-status-row .set-effects-toggle[open] { flex: 1 1 100%; }
+.set-active-badge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.set-active-badge.is-active {
+  border-color: color-mix(in oklab, var(--success) 45%, var(--border));
+  color: var(--success);
+}
+
+/* --- Owned armor: header on one line, filters in a compact block -- */
+.upgrade-import-status:empty { display: none; }
+@media (min-width: 1000px) {
+  .armor-source-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 24px;
+  }
+  .armor-source-head .armor-source-actions {
+    grid-area: 1 / 2;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+  .armor-source-help { max-width: 92ch; }
+  /* Row 1 carries the whole import state with Clear on its right edge; row 2 is
+     Class | Tier 5 | effective count, packed left. The toolbar keeps its own
+     top rule as the divider, so no extra margin is stacked on the panel gap. */
+  .armor-filter-toolbar {
+    display: grid;
+    grid-template-columns: max-content max-content minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 18px;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .armor-filter-toolbar > .upgrade-import-status { grid-area: 1 / 1 / 2 / 4; }
+  .armor-filter-toolbar .upgrade-import-actions {
+    grid-area: 1 / 4;
+    justify-self: end;
+    margin-left: 0;
+  }
+  .armor-filter-toolbar .import-class-select { grid-area: 2 / 1; }
+  .armor-filter-toolbar .import-tier-toggle { grid-area: 2 / 2; }
+  .armor-filter-toolbar .armor-filter-count { grid-area: 2 / 3; }
+  .armor-filter-toolbar .upgrade-import-counts,
+  .armor-filter-toolbar .upgrade-import-empty {
+    min-height: 0;
+    padding: 0;
+    border-block: 0;
+  }
+  .armor-filter-toolbar .import-class-select select { min-width: 140px; }
+}
+
+/* --- Controls stop stretching just because their parent grew ------ */
+@media (min-width: 1000px) {
+  .armor-filter-toolbar select,
+  .constraint-panel select { max-width: 340px; }
+}
+
+/* --- Six-stat readouts: six across wide, 3x2 mid, 2x3 phones ------ */
+@media (min-width: 1200px) {
+  /* The six target inputs are one row, not three rows of very wide inputs.
+     The desktop shell has used six columns above 1400px for the same reason. */
+  #targetGrid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+  .upgrade-stat-comparison { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .target-strip-card .comparison { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (min-width: 901px) and (max-width: 1199px) {
+  .upgrade-stat-comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .target-strip-card .comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .target-strip-card .comp-item:nth-child(3n + 1) { border-left: 0; }
+  .target-strip-card .comp-item:nth-child(n + 4) { border-top: 1px solid var(--border-subtle); }
+}
+
+/* --- Five-piece summaries: five aligned cells on a wide screen ---- */
+/* Narrow screens read the same cells as one sentence. */
+.upgrade-piece-identity > span + span::before {
+  content: " · ";
+  color: var(--text-dim);
+}
+@media (min-width: 1100px) {
+  .upgrade-piece-identity {
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1.4fr)
+      minmax(0, .9fr)
+      minmax(0, .9fr)
+      minmax(0, 1.05fr)
+      minmax(0, .85fr);
+    align-items: center;
+    gap: 2px 14px;
+  }
+  .upgrade-piece-identity > span + span::before { content: none; }
+  .upgrade-piece-identity > span { min-width: 0; }
+  .upgrade-piece-tertiary,
+  .upgrade-piece-tuning,
+  .upgrade-piece-mod {
+    color: var(--text-dim);
+    font-size: .8125rem;
+    font-weight: 500;
+  }
+  .upgrade-piece-mod { font-variant-numeric: tabular-nums; }
+  .upgrade-piece-row summary { min-height: 48px; }
+}

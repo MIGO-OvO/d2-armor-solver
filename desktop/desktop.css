@@ -22,7 +22,7 @@ body { overflow: hidden; }
 .desktop-language select { width: 100%; min-height: 44px; }
 .desktop-free { margin: 12px 8px 0; font-size: .6875rem; color: var(--text-dim); }
 .desktop-workspace { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-padding-block: 24px; }
-.desktop-solver > .container { max-width: 1440px; padding: 24px 32px; margin: 0 auto; }
+.desktop-solver > .container { max-width: 1520px; padding: 24px 32px; margin: 0 auto; }
 .desktop-content { display: block; }
 .desktop-inputs, .desktop-output { min-width: 0; overflow: visible; }
 /* Desktop-only: remove the duplicate heading and the notice marked in the screenshot.
@@ -59,8 +59,10 @@ body { overflow: hidden; }
   .desktop-solver .card { padding: 18px; }
   .desktop-solver .card--fragments .input-grid, .desktop-solver .comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .desktop-solver .upgrade-import-panel { padding: 16px; }
-  .desktop-solver .armor-source-head { flex-direction: column; align-items: flex-start; gap: 12px; }
-  .desktop-solver .armor-source-actions { margin-left: 0; justify-content: flex-start; }
+  /* The shared sheet makes this header a two-column grid above 1000px; below
+     the desktop shell's own cap it stacks again. */
+  .desktop-solver .armor-source-head { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 12px; }
+  .desktop-solver .armor-source-actions { justify-content: flex-start; }
   .desktop-solver .armor-filter-toolbar,
   .desktop-solver .set-requirement-head,
   .desktop-solver .exotic-settings-grid { grid-template-columns: minmax(0, 1fr); }
