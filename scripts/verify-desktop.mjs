@@ -113,6 +113,75 @@ try {
       })));
     assert.deepEqual(overflow, [], `Panels must not overflow at ${width}px`);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2));
+    if (width >= 1024) {
+      // The plan browser is a bounded workspace inside the desktop shell too.
+      // The shell's scrollport is shorter than the viewport (60px topbar + 30px
+      // status bar), so its cap must leave room for the sticky offset and the
+      // container's bottom padding, or the panel could not fit once pinned.
+      const planBrowser = await page.evaluate(() => {
+        const panel = document.getElementById("planBrowser");
+        const list = document.getElementById("planList");
+        if (!panel || !list) return null;
+        const workspaceBox = document.querySelector(".desktop-workspace").getBoundingClientRect();
+        const box = panel.getBoundingClientRect();
+        return {
+          position: getComputedStyle(panel).position,
+          height: Math.round(box.height),
+          workspaceHeight: Math.round(workspaceBox.height),
+          workspaceOverflowY: getComputedStyle(document.querySelector(".desktop-workspace")).overflowY,
+          rows: list.querySelectorAll(".inventory-result-option").length,
+          listScrolls: list.scrollHeight > list.clientHeight,
+          listOverflowX: list.scrollWidth - list.clientWidth,
+        };
+      });
+      assert.ok(planBrowser, `the desktop shell must render the plan browser at ${width}px`);
+      assert.equal(planBrowser.position, "sticky", `the plan browser must be a sticky workspace at ${width}px`);
+      assert.ok(planBrowser.height <= 780,
+        `the plan browser must stay bounded at ${width}px: ${planBrowser.height}`);
+      assert.ok(planBrowser.height <= planBrowser.workspaceHeight - 78 - 24 + 2,
+        `the plan browser must fit the desktop workspace once pinned at ${width}px: `
+        + `${planBrowser.height} vs ${planBrowser.workspaceHeight}`);
+      assert.equal(planBrowser.workspaceOverflowY, "auto", "the desktop workspace owns the page scroll");
+      // The list is the only thing that scrolls vertically inside the panel.
+      const pinnedList = await page.evaluate(() => {
+        const list = document.getElementById("planList");
+        list.scrollTop = 400;
+        return {
+          listScrollTop: list.scrollTop,
+          pageOverflowX: document.documentElement.scrollWidth - window.innerWidth,
+          workspaceScrollTop: document.querySelector(".desktop-workspace").scrollTop,
+        };
+      });
+      assert.ok(pinnedList.listScrollTop > 0,
+        `the plan list must own its own vertical scroll inside the desktop shell at ${width}px`);
+      assert.ok(pinnedList.pageOverflowX <= 2,
+        `the desktop shell must not overflow horizontally at ${width}px`);
+      assert.ok(planBrowser.rows > 0, "the desktop plan browser must list plans");
+      if (planBrowser.rows > 12) {
+        assert.ok(planBrowser.listScrolls,
+          "the plan list must scroll internally instead of growing the desktop panel");
+      }
+      const listOverflow = await page.evaluate(() => {
+        const list = document.getElementById("planList");
+        return {
+          client: list.clientWidth,
+          scroll: list.scrollWidth,
+          offenders: [...list.querySelectorAll("*")]
+            .filter(node => node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 1)
+            .sort((left, right) =>
+              (right.scrollWidth - right.clientWidth) - (left.scrollWidth - left.clientWidth))
+            .slice(0, 6)
+            .map(node => ({
+              tag: node.tagName,
+              cls: String(node.className || "").slice(0, 48),
+              client: node.clientWidth,
+              scroll: node.scrollWidth,
+            })),
+        };
+      });
+      assert.ok(listOverflow.scroll <= listOverflow.client + 2,
+        `the plan list must not overflow horizontally at ${width}px: ` + JSON.stringify(listOverflow));
+    }
     const singleColumn = await page.evaluate(() => {
       const inputs = document.querySelector(".desktop-inputs").getBoundingClientRect();
       const output = document.querySelector(".desktop-output").getBoundingClientRect();

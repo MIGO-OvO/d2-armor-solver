@@ -34,8 +34,9 @@ async function checkWitnessDomRoundTrip(page) {
 }
 
 // Owned armor and theoretical skeletons now share one list ("配装方案") and one
-// five-piece armor table. A row counts as owned when it names a concrete item
-// instead of the farm placeholder; every row carries a slot label.
+// five-piece armor table. Ownership is read from the row's own projection
+// attribute, so a farm row can never be miscounted just because a set badge
+// happens to share its name cell.
 const FARM_PLACEHOLDERS = ["Farm", "待刷取", "待取得"];
 
 async function countUnifiedOwnedRows(page, slotLabel = null) {
@@ -45,10 +46,29 @@ async function countUnifiedOwnedRows(page, slotLabel = null) {
     return rows.filter(row => {
       const slotText = (row.querySelector(".inventory-result-piece-slot")?.textContent || "").trim();
       if (slot && slotText !== slot) return false;
+      const ownership = row.dataset.ownership;
+      if (ownership) return ownership === "owned";
       const nameText = (row.querySelector(".inventory-result-piece-name")?.textContent || "").trim();
       return nameText !== "" && !farm.has(nameText);
     }).length;
   }, { slot: slotLabel, placeholders: FARM_PLACEHOLDERS });
+}
+
+// Reads the selected loadout's five rows in rendered order. `assignmentIndex`
+// is the Solver's own config index, which is what must line up with
+// tuningAssignments / modAssignments — never the row's display position.
+async function readLoadoutRows(page) {
+  return page.locator("#loadoutDetail .inventory-result-piece").evaluateAll(elements => elements.map(row => ({
+    slot: row.dataset.pieceSlot,
+    assignmentIndex: Number(row.dataset.assignmentIndex),
+    ownership: row.dataset.ownership,
+    slotLabel: (row.querySelector(".inventory-result-piece-slot")?.textContent || "").trim(),
+    archetype: (row.querySelector(".armor-archetype")?.textContent || "").trim(),
+    tertiary: (row.querySelector(".armor-tertiary")?.textContent || "").trim(),
+    tuning: (row.querySelector(".armor-tuning")?.textContent || "").trim(),
+    mod: (row.querySelector(".armor-mod")?.textContent || "").trim(),
+    state: (row.querySelector(".armor-state-cell")?.textContent || "").trim(),
+  })));
 }
 
 async function findChrome() {
@@ -560,7 +580,7 @@ async function checkInventoryPlanning(browser) {
       0,
       'an unowned Exotic reservation must exclude owned chests from the plan list',
     );
-    assert.match(await page.locator('.farm-requirement-row', { hasText: 'Any Exotic' }).innerText(), /Chest/);
+    assert.match(await page.locator('.acquisition-row', { hasText: 'Any Exotic' }).innerText(), /Chest/);
     // (5) The reserved-but-unowned Exotic must be flagged in its own armor row,
     // not only in the farm summary, and the row must read as a farm gap.
     const reservedChestRow = page.locator('.inventory-result-piece[data-piece-slot="chest"]').first();
@@ -604,12 +624,12 @@ async function checkInventoryPlanning(browser) {
       "the plan browser should describe itself as the loadout list",
     );
     assert.match(
-      await page.locator(".inventory-result-detail .farm-requirements-title").innerText(),
+      await page.locator(".inventory-result-detail .acquisition-count").innerText(),
       /to farm/,
       "the selected loadout should retain a per-slot missing-armor summary",
     );
     assert.ok(
-      await page.locator(".inventory-result-detail .farm-requirement-row").count() > 0,
+      await page.locator(".inventory-result-detail .acquisition-row").count() > 0,
       "missing armor should be listed per slot",
     );
     // Advanced diagnostics are collapsed by default; expand them to read the
@@ -1597,7 +1617,7 @@ async function checkResultWorkspace(browser) {
 
     // (10) diagnostics are folded by default and the constraint matrix lives in
     // the 编辑条件 drawer, not on the first screen.
-    for (const key of ["advanced", "advanced-allocation", "farming-advice"]) {
+    for (const key of ["advanced", "advanced-allocation"]) {
       const open = await page.locator(`#inventoryResults details[data-disclosure-key="${key}"]`)
         .first().evaluate(element => element.open);
       assert.equal(open, false, key + " must be collapsed by default");
@@ -1798,6 +1818,517 @@ async function checkResultWorkspace(browser) {
   }
 }
 
+const CANONICAL_SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
+
+function sumArchetypeTally(text) {
+  return [...String(text || "").matchAll(/×\s*(\d+)/g)]
+    .reduce((total, match) => total + Number(match[1]), 0);
+}
+
+// The selected loadout's presentation contract: one canonical slot order, an
+// assignment index that still addresses the Solver's own Tuning/mod arrays, the
+// planned armour mods of farm pieces, and an acquisition plan whose tallies only
+// ever count what is actually missing.
+async function checkLoadoutPresentation(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.evaluate(() => window.solve());
+    await page.locator("#inventoryResults:not([hidden])").waitFor();
+
+    // (1) (2) Slot order is a display projection, so an Exotic Class Item must
+    // render last no matter which Solver config index carries it. The synthetic
+    // entries make every config index reachable deterministically.
+    const syntheticOrder = await page.evaluate(() => {
+      const legendary = ["helmet", "arms", "chest", "legs"];
+      const results = [];
+      for (let exoticIndex = 0; exoticIndex < 5; exoticIndex++) {
+        const pieces = [];
+        const tuningAssignments = [];
+        const modAssignments = [];
+        let legendaryCursor = 0;
+        for (let index = 0; index < 5; index++) {
+          const isExotic = index === exoticIndex;
+          pieces.push({
+            index,
+            slot: isExotic ? "classItem" : legendary[legendaryCursor++],
+            exotic: isExotic,
+            archetypeId: "brawler",
+            tertiary: "class",
+            tuningMode: "shift",
+            tuningTo: "weapons",
+          });
+          tuningAssignments.push({ mode: "+5-5", to: "weapons", from: "health" });
+          modAssignments.push({ stat: "weapons", size: 10, marker: index });
+        }
+        const rows = window.createEntryPieceRows({kind: "theory", pieces, tuningAssignments, modAssignments});
+        results.push({
+          exoticIndex,
+          order: rows.map(row => row.slot),
+          assignmentIndexes: rows.map(row => row.assignmentIndex),
+          // The marker is the assignment's own identity: if a row read
+          // modAssignments by its *rendered* position instead of its
+          // assignmentIndex, these two arrays would not line up.
+          renderedMarkers: rows.map(row => row.armorModAssignment?.marker ?? null),
+        });
+      }
+      return results;
+    });
+    for (const result of syntheticOrder) {
+      assert.deepEqual(result.order, CANONICAL_SLOT_ORDER,
+        `exotic class item at config index ${result.exoticIndex} must not change UI slot order`);
+      assert.deepEqual([...result.assignmentIndexes].sort((left, right) => left - right), [0, 1, 2, 3, 4],
+        "every slot must keep a distinct Solver assignment index");
+      assert.deepEqual(result.renderedMarkers, result.assignmentIndexes,
+        `rows must read modAssignments by assignmentIndex (config index ${result.exoticIndex})`);
+    }
+
+    // (3) (7) (8) Tuning vocabulary: the rolled +5 direction and the chosen −5
+    // side are named apart, and +3 Balanced has its own label.
+    const tuningLabels = await page.evaluate(() => ({
+      plus5: window.formatIntrinsicTuning({
+        intrinsicTuningMode: "shift", intrinsicTuningTo: "weapons", tuningAssignment: null,
+      }),
+      plus3: window.formatIntrinsicTuning({
+        intrinsicTuningMode: "plus3", intrinsicTuningTo: null, tuningAssignment: null,
+      }),
+      minus: window.formatFinalMinusTuning({
+        intrinsicTuningMode: "shift", tuningAssignment: { mode: "+5-5", to: "weapons", from: "health" },
+      }),
+      plus3Final: window.formatFinalMinusTuning({
+        intrinsicTuningMode: "plus3", tuningAssignment: { mode: "+3" },
+      }),
+      none: window.formatFinalMinusTuning({ intrinsicTuningMode: "shift", tuningAssignment: null }),
+    }));
+    assert.match(tuningLabels.plus5, /^\+5\s/, "the intrinsic requirement must read as +5 <stat>");
+    assert.match(tuningLabels.minus, /^-5\s/, "the final side must read as -5 <stat>, never +5");
+    assert.equal(tuningLabels.plus3, tuningLabels.plus3Final, "+3 Balanced must be labelled the same on both sides");
+    assert.equal(tuningLabels.none, "—");
+
+    // (9)-(16) Walk the rendered plans and audit the acquisition plan against
+    // the selected entry. A plan with N missing pieces must render exactly N
+    // acquisition rows, and a fully owned plan must render none.
+    const planRows = Math.min(await page.locator("#planList .inventory-result-option").count(), 20);
+    assert.ok(planRows > 0, "the plan browser must render rows");
+    let farmPlans = 0;
+    let fullyOwnedPlans = 0;
+    const exoticLabels = [];
+    for (let index = 0; index < planRows; index++) {
+      await page.locator("#planList .inventory-result-option").nth(index).click();
+      const snapshot = await page.evaluate(() => {
+        const entry = window.getSelectedUnifiedEntry();
+        const detail = document.getElementById("loadoutDetail");
+        const componentRows = [...detail.querySelectorAll(".inventory-result-piece")];
+        const acquisitionRows = [...detail.querySelectorAll(".acquisition-row")];
+        return {
+          kind: entry?.kind || null,
+          farmCount: Number(entry?.farmCount ?? 0),
+          ownedCount: Number(entry?.ownedCount ?? 0),
+          hasPlan: Boolean(detail.querySelector(".acquisition-plan")),
+          countText: detail.querySelector(".acquisition-count")?.textContent || "",
+          constraints: [...detail.querySelectorAll(".acquisition-constraint-row")]
+            .map(node => node.textContent.replace(/\s+/g, " ").trim()),
+          rowSlots: componentRows.map(node => node.dataset.pieceSlot),
+          rowAssignmentIndexes: componentRows.map(node => Number(node.dataset.assignmentIndex)),
+          // Every rendered mod/tuning cell must trace back to its own row's
+          // assignment index, never to the row's position.
+          assignmentMismatch: componentRows.filter(node => {
+            const assignmentIndex = Number(node.dataset.assignmentIndex);
+            return entry?.pieces?.[assignmentIndex]?.slot !== node.dataset.pieceSlot;
+          }).length,
+          farmMods: [...detail.querySelectorAll(".inventory-result-piece.is-farm")].map(node => {
+            const assignmentIndex = Number(node.dataset.assignmentIndex);
+            return {
+              text: (node.querySelector(".armor-mod")?.textContent || "").replace(/\s+/g, " ").trim(),
+              assigned: Boolean(entry?.modAssignments?.[assignmentIndex]),
+            };
+          }),
+          plannedFlags: detail.querySelectorAll(".inventory-result-piece.is-farm .armor-cell-flag").length,
+          acquisitionSlots: acquisitionRows.map(node => node.dataset.slot),
+          acquisitionExotic: acquisitionRows.map(node => node.dataset.exotic === "true"),
+          acquisitionTargets: acquisitionRows.map(node => ({
+            slot: node.dataset.slot,
+            text: (node.querySelector(".acquisition-target")?.textContent || "").trim(),
+          })),
+          closestNotices: detail.querySelectorAll(".acquisition-notice").length,
+          closestDetails: detail.querySelectorAll('details[data-disclosure-key^="acquisition-compare-"]').length,
+          closestExpected: (entry?.pieces || [])
+            .filter(piece => piece?.closestItem && !(entry?.kind === "inventory" ? piece : piece.item)).length,
+          templateDetails: detail.querySelectorAll('details[data-disclosure-key^="acquisition-template-"]').length,
+          openTemplateDetails: detail.querySelectorAll('details[data-disclosure-key^="acquisition-template-"][open]').length,
+          badges: [...detail.querySelectorAll(".acquisition-badge")].map(node => node.textContent.trim()),
+        };
+      });
+
+      assert.deepEqual(snapshot.rowSlots, CANONICAL_SLOT_ORDER,
+        `plan ${index} must render 头盔→臂铠→胸甲→腿铠→职业物品: ` + JSON.stringify(snapshot.rowSlots));
+      assert.equal(snapshot.assignmentMismatch, 0,
+        `plan ${index}: a row's assignment index must address the same slot it renders`);
+
+      if (snapshot.farmCount === 0) {
+        fullyOwnedPlans++;
+        assert.equal(snapshot.hasPlan, false, "a fully owned plan must not render an acquisition panel");
+        assert.equal(snapshot.acquisitionSlots.length, 0);
+        assert.equal(snapshot.farmMods.length, 0);
+        continue;
+      }
+
+      farmPlans++;
+      assert.equal(snapshot.hasPlan, true, "a plan with missing armor must render the acquisition plan");
+      assert.equal(snapshot.acquisitionSlots.length, snapshot.farmCount,
+        `plan ${index} must list exactly its ${snapshot.farmCount} missing pieces`);
+      assert.match(snapshot.countText, new RegExp(`待刷\\s*${snapshot.farmCount}\\s*件`),
+        "the acquisition header must state the farm count: " + snapshot.countText);
+      assert.match(snapshot.countText, new RegExp(`已有\\s*${snapshot.ownedCount}/5`),
+        "the acquisition header must state the owned count: " + snapshot.countText);
+      // The missing-slot list follows the same canonical order as the table.
+      assert.deepEqual(snapshot.acquisitionSlots,
+        CANONICAL_SLOT_ORDER.filter(slot => snapshot.acquisitionSlots.includes(slot)),
+        `plan ${index}: the acquisition list must follow the canonical slot order`);
+
+      // (4) (5) (6) A missing piece still carries the Solver's planned armour
+      // mod. `isOwned === false` must never be the reason a mod cell is empty:
+      // it is "—" only when the Solver assigned no mod to that piece at all.
+      for (const row of snapshot.farmMods) {
+        if (!row.assigned) {
+          assert.equal(row.text, "—", "a farm piece without a mod assignment must render —: " + row.text);
+          continue;
+        }
+        assert.notEqual(row.text, "—", "a farm piece must not hide its planned armour mod");
+        assert.match(row.text, /\+\d+\s/, "a farm armour mod must name its size and stat: " + row.text);
+        assert.match(row.text, /计划|計畫|Planned/,
+          "a planned armour mod must be flagged as planned, not as a verified instance: " + row.text);
+      }
+      assert.equal(snapshot.plannedFlags,
+        snapshot.farmMods.filter(row => row.assigned).length,
+        "every assigned farm armour mod must carry the planned flag");
+
+      // (10) The archetype tally counts missing pieces only: its total can never
+      // exceed the farm count, and it must match the missing Legendary count.
+      const archetypeRow = snapshot.constraints.find(text => /待刷框架|Missing archetypes/.test(text));
+      const missingExotic = snapshot.acquisitionExotic.filter(Boolean).length;
+      const tally = sumArchetypeTally(archetypeRow);
+      assert.ok(tally <= snapshot.farmCount,
+        `plan ${index}: the missing-archetype tally (${tally}) must not exceed the farm count (${snapshot.farmCount})`);
+      if (snapshot.farmCount - missingExotic > 0) {
+        assert.equal(tally, snapshot.farmCount - missingExotic,
+          `plan ${index}: the tally must count exactly the missing Legendary pieces`);
+      }
+
+      // (12) (13) Set requirements and Exotics are named explicitly.
+      if (snapshot.acquisitionSlots.some(slot => slot !== "classItem")
+          && snapshot.badges.some(badge => /套装要求|Set required/.test(badge))) {
+        assert.ok(snapshot.constraints.some(text => /套装要求|Set requirement/.test(text)),
+          "a set-constrained farm piece must state the set requirement");
+      }
+      if (missingExotic > 0) {
+        assert.ok(snapshot.badges.some(badge => /异域|Exotic/.test(badge)),
+          "a missing Exotic must be labelled as an Exotic");
+        assert.ok(snapshot.constraints.some(text => /异域护甲|Exotic Armor/.test(text)),
+          "the acquisition constraints must name the missing Exotic requirement");
+      }
+
+      // (15) closestItem / closestMismatch is surfaced, and only when the
+      // Inventory Planner actually produced it.
+      if (snapshot.closestExpected > 0) {
+        assert.ok(snapshot.closestNotices >= 1,
+          "an owned near-miss must be explained instead of silently requiring a farm");
+        assert.equal(snapshot.closestDetails, snapshot.closestNotices,
+          "every near-miss notice must offer a readable difference breakdown");
+      }
+      assert.equal(snapshot.openTemplateDetails, 0,
+        "acquisition disclosures must start collapsed");
+      for (const target of snapshot.acquisitionTargets) {
+        exoticLabels.push(target);
+      }
+    }
+
+    // (11) Every rendered plan is either fully owned or farming, and the two
+    // states are handled by their own assertions above.
+    assert.ok(farmPlans > 0, "the fixture must contain a plan with missing armor");
+    assert.equal(farmPlans + fullyOwnedPlans, planRows, "every rendered plan is either owned or farming");
+    // The fully-owned path is also checked synthetically, because an empty
+    // fixture cannot be relied on to contain one.
+    const fullyOwnedPanel = await page.evaluate(() => {
+      const pieces = [];
+      const tuningAssignments = [];
+      const modAssignments = [];
+      for (const slot of ["helmet", "arms", "chest", "legs", "classItem"]) {
+        pieces.push({index: pieces.length, slot, item: {name: `Owned ${slot}`, slot}});
+        tuningAssignments.push({mode: "+5-5", to: "weapons", from: "health"});
+        modAssignments.push({stat: "weapons", size: 10});
+      }
+      const rows = window.createEntryPieceRows({kind: "theory", pieces, tuningAssignments, modAssignments});
+      return {owned: rows.filter(row => row.isOwned).length, html: window.renderAcquisitionPlan(rows)};
+    });
+    assert.equal(fullyOwnedPanel.owned, 5, "the synthetic entry must be fully owned");
+    assert.equal(fullyOwnedPanel.html, "", "a fully owned plan must not render an acquisition panel");
+
+    // (14) Only a class-item Exotic may take a class-item name. A helmet/arms/
+    // chest/legs Exotic must keep its own item name.
+    const classItemExoticNames = ["Relativism", "Stoicism", "Solipsism",
+      "相對主義", "禁慾主義", "唯我主義", "相对主义", "禁欲主义", "唯我主义"];
+    for (const {slot, text} of exoticLabels) {
+      if (slot === "classItem" || !text) continue;
+      for (const name of classItemExoticNames) {
+        assert.ok(!text.includes(name),
+          `a ${slot} Exotic must not be labelled as an Exotic Class Item (${name}): ${text}`);
+      }
+    }
+
+    // (16) The exact stat template is collapsed by default and expands to the
+    // six-stat layout.
+    const templateSummary = page.locator('#loadoutDetail details[data-disclosure-key^="acquisition-template-"]').first();
+    if (await templateSummary.count() > 0) {
+      assert.equal(await templateSummary.evaluate(element => element.open), false,
+        "the exact stat template must start collapsed");
+      await templateSummary.locator("summary").click();
+      const templateStats = await page.locator('#loadoutDetail details[data-disclosure-key^="acquisition-template-"][open]')
+        .first().locator(".acquisition-template-stat")
+        .evaluateAll(elements => elements.map(element => ({
+          label: (element.querySelector(".acquisition-template-label")?.textContent || "").trim(),
+          value: Number(element.querySelector("strong")?.textContent || "NaN"),
+          color: getComputedStyle(element).color,
+        })));
+      assert.equal(templateStats.length, 6, "the exact stat template must show six stats");
+      assert.ok(templateStats.every(stat => stat.label.length > 0 && Number.isFinite(stat.value)),
+        "every template stat must carry a label and a numeric value: " + JSON.stringify(templateStats));
+      assert.ok(new Set(templateStats.map(stat => stat.color)).size > 1,
+        "template stats must keep their per-stat colours");
+    }
+
+    // (17) (18) (19) (21) The plan browser is a fixed workspace: the panel is
+    // bounded, the list scrolls internally, and the toolbar does not move.
+    const workspace = await page.evaluate(() => {
+      const panel = document.getElementById("planBrowser");
+      const list = document.getElementById("planList");
+      return {
+        panelHeight: Math.round(panel.getBoundingClientRect().height),
+        panelPosition: getComputedStyle(panel).position,
+        panelOverflow: getComputedStyle(panel).overflow,
+        listClientHeight: list.clientHeight,
+        listScrollHeight: list.scrollHeight,
+        listOverflowY: getComputedStyle(list).overflowY,
+        listOverflowX: list.scrollWidth - list.clientWidth,
+        renderedRows: list.querySelectorAll(".inventory-result-option").length,
+        toolbarOverflowX: (() => {
+          const toolbar = document.querySelector(".plan-browser-toolbar");
+          return toolbar.scrollWidth - toolbar.clientWidth;
+        })(),
+      };
+    });
+    assert.equal(workspace.panelPosition, "sticky", "the desktop plan browser must be a sticky workspace");
+    assert.equal(workspace.panelOverflow, "hidden", "the panel must clip its scrolling row");
+    assert.equal(workspace.listOverflowY, "auto");
+    assert.ok(workspace.listOverflowX <= 2,
+      "the plan list must not gain a horizontal scrollbar: " + workspace.listOverflowX);
+    assert.ok(workspace.toolbarOverflowX <= 2,
+      "the plan toolbar must not widen the panel: " + workspace.toolbarOverflowX);
+    assert.ok(workspace.renderedRows >= 10, "the fixture must render a long plan list");
+    assert.ok(workspace.panelHeight <= 780,
+      "the plan browser must stay bounded on a tall viewport: " + workspace.panelHeight);
+    assert.ok(workspace.listScrollHeight > workspace.listClientHeight,
+      "the plan list must overflow internally instead of growing the page");
+
+    await page.locator(".inventory-results-layout").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(50);
+    const beforeScroll = await page.evaluate(() => ({
+      pageScroll: window.scrollY,
+      toolbarTop: Math.round(document.querySelector(".plan-browser-toolbar").getBoundingClientRect().top),
+      pageHeight: document.documentElement.scrollHeight,
+    }));
+    await page.locator("#planList").evaluate(element => { element.scrollTop = 500; });
+    const afterScroll = await page.evaluate(() => ({
+      pageScroll: window.scrollY,
+      listScrollTop: document.getElementById("planList").scrollTop,
+      toolbarTop: Math.round(document.querySelector(".plan-browser-toolbar").getBoundingClientRect().top),
+      panelHeight: Math.round(document.getElementById("planBrowser").getBoundingClientRect().height),
+    }));
+    assert.ok(afterScroll.listScrollTop > 0, "the plan list must own its vertical scroll");
+    assert.equal(afterScroll.pageScroll, beforeScroll.pageScroll,
+      "scrolling the plan list must not scroll the page");
+    assert.ok(Math.abs(afterScroll.toolbarTop - beforeScroll.toolbarTop) <= 1,
+      "the plan toolbar must stay in place while the list scrolls");
+    assert.ok(afterScroll.panelHeight <= 780,
+      "the panel height must not change while its list scrolls");
+
+    // The sticky panel must clear the sticky command bar at every page offset,
+    // or the filter/sort controls would sit underneath it.
+    const stickyClearance = [];
+    for (const offset of [0, 400, 900, 1600]) {
+      await page.evaluate(position => window.scrollTo(0, position), offset);
+      await page.waitForTimeout(60);
+      stickyClearance.push(await page.evaluate(() => {
+        const bar = document.getElementById("searchCommandBar").getBoundingClientRect();
+        const toolbar = document.querySelector(".plan-browser-toolbar").getBoundingClientRect();
+        const panel = document.getElementById("planBrowser").getBoundingClientRect();
+        return {
+          scrollY: Math.round(window.scrollY),
+          barBottom: Math.round(bar.bottom),
+          toolbarTop: Math.round(toolbar.top),
+          panelTop: Math.round(panel.top),
+          viewportHeight: window.innerHeight,
+        };
+      }));
+    }
+    for (const state of stickyClearance) {
+      assert.ok(state.toolbarTop >= state.barBottom - 1,
+        `the plan toolbar must stay clear of the command bar at scrollY=${state.scrollY}: `
+        + JSON.stringify(state));
+      assert.ok(state.panelTop >= state.barBottom - 1,
+        `the plan panel must stay clear of the command bar at scrollY=${state.scrollY}`);
+    }
+    // Once the workspace is pinned, the panel must remain inside the viewport.
+    const pinned = stickyClearance.at(-1);
+    assert.ok(pinned.toolbarTop < pinned.viewportHeight,
+      "the pinned plan toolbar must remain inside the viewport");
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    // (21) 1440p and 4K viewports must not let the list expand without bound.
+    for (const height of [1440, 2160]) {
+      await page.setViewportSize({ width: 1920, height });
+      const capped = await page.locator("#planBrowser")
+        .evaluate(element => Math.round(element.getBoundingClientRect().height));
+      assert.ok(capped <= 780,
+        `the plan browser must stay capped at a ${height}px viewport: ${capped}`);
+      const listState = await page.locator("#planList")
+        .evaluate(element => ({client: element.clientHeight, scroll: element.scrollHeight}));
+      assert.ok(listState.scroll > listState.client,
+        `the plan list must keep scrolling internally at a ${height}px viewport`);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+
+    // (22) (23) Below 900px the panel becomes a horizontally browsable strip and
+    // must not leak the desktop height cap, a second scroll axis or page-level
+    // horizontal overflow.
+    for (const width of [880, 480, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const narrow = await page.evaluate(() => {
+        const panel = document.getElementById("planBrowser");
+        const list = document.getElementById("planList");
+        const detail = document.getElementById("loadoutDetail");
+        return {
+          panelPosition: getComputedStyle(panel).position,
+          panelHeight: Math.round(panel.getBoundingClientRect().height),
+          listOverflowX: getComputedStyle(list).overflowX,
+          listOverflowY: getComputedStyle(list).overflowY,
+          pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+          acquisitionOverflow: [...detail.querySelectorAll(".acquisition-head, .acquisition-row, .acquisition-field, .acquisition-constraint-row, .acquisition-compare-row")]
+            .filter(element => element.scrollWidth > element.clientWidth + 1).length,
+          truncatedLabels: [...detail.querySelectorAll(".acquisition-field-label")]
+            .filter(element => element.scrollWidth > element.clientWidth + 1).length,
+        };
+      });
+      assert.equal(narrow.panelPosition, "static", `the plan browser must unstick at ${width}px`);
+      assert.ok(narrow.panelHeight < 900, `the plan browser must not keep a fixed desktop height at ${width}px`);
+      assert.equal(narrow.listOverflowX, "auto", `the plan list must scroll horizontally at ${width}px`);
+      assert.equal(narrow.listOverflowY, "hidden", `the plan list must not gain a second scroll axis at ${width}px`);
+      assert.ok(narrow.pageOverflow <= 2, `no horizontal page overflow at ${width}px: ${narrow.pageOverflow}`);
+      assert.equal(narrow.acquisitionOverflow, 0, `the acquisition plan must not overflow at ${width}px`);
+      assert.equal(narrow.truncatedLabels, 0, `acquisition field labels must not be clipped at ${width}px`);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+
+    // (15) An owned Exotic whose identity matches the pinned Exotic but whose
+    // stat distribution does not is the exact case the old UI left unexplained:
+    // the vault clearly holds the item, yet the plan still demands a farm. Seed
+    // one and require the acquisition plan to say why.
+    await page.evaluate(storageKeys => {
+      const exotic = {
+        id: "closest-regression-exotic",
+        hash: 910777,
+        name: "Closest Regression Exotic",
+        slot: "helmet",
+        classId: "hunter",
+        tier: "5",
+        exotic: true,
+        archetypeId: "Siegebreaker",
+        tertiary: "health",
+        tuningMode: "shift",
+        tuningFrom: "melee",
+        tuningTo: "grenade",
+        armorModSize: 10,
+        armorModStat: "weapons",
+        // Deliberately not any Armor Archetype template, so this copy can never
+        // satisfy a plan while still being the same Exotic by name.
+        baseStats: {health: 11, melee: 12, grenade: 13, super: 14, class: 15, weapons: 16},
+        optimizationBaseStats: {health: 11, melee: 12, grenade: 13, super: 14, class: 15, weapons: 16},
+        masterworkTier: 5,
+        dataConfidence: {stats: "exact", tuning: "exact"},
+        setHash: null,
+      };
+      localStorage.setItem(storageKeys.upgradeDraft, JSON.stringify({
+        schemaVersion: 1, pieces: [], inventory: [exotic],
+        setRequirement: {type: "none"}, manualLocked: [],
+        importClassFilter: "hunter", importTier5Only: true, reassignModifiers: true,
+      }));
+      localStorage.setItem(storageKeys.calculatorMode, "solve");
+    }, TEST_STORAGE_KEYS);
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator("#inventoryExoticSlotFilter").selectOption("helmet");
+    const pinnedExoticValue = await page
+      .locator("#inventoryFixedExoticName option", { hasText: "Closest Regression Exotic" })
+      .getAttribute("value");
+    assert.ok(pinnedExoticValue, "the seeded Exotic must be pinnable by name");
+    await page.locator("#inventoryFixedExoticName").selectOption(pinnedExoticValue);
+    await page.evaluate(() => window.solve());
+    await page.locator("#inventoryResults:not([hidden])").waitFor();
+
+    let closestCase = null;
+    const seededPlans = Math.min(await page.locator("#planList .inventory-result-option").count(), 20);
+    for (let index = 0; index < seededPlans; index++) {
+      await page.locator("#planList .inventory-result-option").nth(index).click();
+      // A pinned-but-unmatched Exotic must not disturb the canonical order the
+      // table renders, nor the assignment index every row resolves through.
+      const seededRowsForSlotOrder = await readLoadoutRows(page);
+      assert.deepEqual(seededRowsForSlotOrder.map(row => row.slot), CANONICAL_SLOT_ORDER,
+        `plan ${index} with a pinned Exotic must still render the canonical slot order`);
+      assert.deepEqual(new Set(seededRowsForSlotOrder.map(row => row.assignmentIndex)),
+        new Set([0, 1, 2, 3, 4]),
+        `plan ${index} with a pinned Exotic must keep all five assignment indexes reachable`);
+      const probe = await page.evaluate(() => {
+        const entry = window.getSelectedUnifiedEntry();
+        const detail = document.getElementById("loadoutDetail");
+        return {
+          expected: (entry?.pieces || [])
+            .filter(piece => piece?.closestItem && !piece.item).length,
+          farmCount: Number(entry?.farmCount ?? 0),
+          notices: detail.querySelectorAll(".acquisition-notice").length,
+          details: detail.querySelectorAll('details[data-disclosure-key^="acquisition-compare-"]').length,
+          noticeText: (detail.querySelector(".acquisition-notice")?.textContent || "").trim(),
+        };
+      });
+      if (probe.expected > 0) { closestCase = probe; break; }
+    }
+    assert.ok(closestCase, "the seeded near-miss Exotic must reach an acquisition plan");
+    assert.equal(closestCase.notices, closestCase.expected,
+      "every owned near-miss must produce exactly one notice");
+    assert.equal(closestCase.details, closestCase.notices,
+      "every near-miss notice must offer a collapsed difference breakdown");
+    assert.match(closestCase.noticeText, /相近|similar/i,
+      "the notice must explain the mismatch instead of repeating the farm demand: " + closestCase.noticeText);
+    // The breakdown is reachable by keyboard and readable without a tooltip.
+    const closestBreakdown = page.locator('#loadoutDetail details[data-disclosure-key^="acquisition-compare-"]').first();
+    await closestBreakdown.locator("summary").click();
+    assert.equal(await closestBreakdown.evaluate(element => element.open), true,
+      "the near-miss breakdown must expand");
+    const compareRows = await closestBreakdown.locator(".acquisition-compare-row")
+      .evaluateAll(elements => elements.map(element => element.textContent.replace(/\s+/g, " ").trim()));
+    assert.ok(compareRows.length >= 2, "the breakdown must show the owned and target rolls: " + JSON.stringify(compareRows));
+
+    assert.deepEqual(browserErrors, []);
+    console.log("browser smoke: loadout presentation, acquisition plan and plan browser regressions OK");
+  } finally {
+    await context.close();
+  }
+}
+
 // Phase 1: secret-less build (login hidden) plus all existing regressions.
 const envWithoutBungie = { ...process.env };
 delete envWithoutBungie.BUNGIE_OAUTH_CLIENT_ID;
@@ -1818,6 +2349,7 @@ try {
   await checkSetRequirementSnapshot(browser);
   await checkBungieLoginHidden(browser);
   await checkResultWorkspace(browser);
+  await checkLoadoutPresentation(browser);
   if (process.argv.includes("--target-sync-only")) {
     console.log("upgrade target sync and set requirement browser regressions OK");
   } else {
