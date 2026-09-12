@@ -385,6 +385,56 @@ export function createPieceCapability(piece = {}, slotIndex = 0) {
     valid: errors.length === 0,
     errors,
   };
+  // Three identity levels, in the order a compressed search would consume
+  // them (see docs/math-equivalence-compression.md):
+  //   mathEquivalenceKey      — only what changes the mathematical search
+  //                             result. Owner/equipped/instance id are absent:
+  //                             two rolls with the same numbers are the same
+  //                             math no matter who holds them.
+  //   executionEquivalenceKey — what changes whether the plan can actually be
+  //                             executed on this instance (energy, sockets,
+  //                             tuning executability, equippability).
+  //   physicalIdentity        — the specific instance: id, hash, owner, equipped.
+  capability.mathEquivalenceKey = stableSerialize({
+    slot: capability.slot,
+    baseStats: capability.baseStats,
+    projectedBaseStats: capability.projectedBaseStats,
+    archetype: capability.archetype,
+    tertiary: capability.tertiary,
+    exotic: capability.exotic,
+    classId: capability.classId,
+    locked: capability.locked,
+    setHash: capability.setHash,
+    tunedStat: capability.tunedStat,
+    allowedTuningStats: capability.allowedTuningStats,
+    tuningConfidence: capability.tuningConfidence,
+    tuningAssignment: capability.tuningAssignment,
+    armorModSize: capability.armorModSize,
+    armorModStat: capability.armorModStat,
+    primaryPerkId: capability.primaryPerkId,
+    secondaryPerkId: capability.secondaryPerkId,
+    masterworkStats: capability.masterworkStats,
+  });
+  capability.executionEquivalenceKey = stableSerialize({
+    slot: capability.slot,
+    exotic: capability.exotic,
+    classId: capability.classId,
+    tuningConfidence: capability.tuningConfidence,
+    tuningAssignment: capability.tuningAssignment,
+    armorModSize: capability.armorModSize,
+    armorModStat: capability.armorModStat,
+    canEquip: capability.canEquip,
+    cannotEquipReason: capability.cannotEquipReason,
+    sockets: capability.sockets,
+    energy: capability.energy,
+    executionKnown: capability.executionKnown,
+  });
+  capability.physicalIdentity = stableSerialize({
+    identity: capability.identity,
+    hash: capability.hash,
+    owner: capability.owner,
+    equipped: capability.equipped,
+  });
   capability.equivalenceKey = stableSerialize({
     slot: capability.slot,
     baseStats: capability.baseStats,
@@ -578,17 +628,45 @@ export function stableSerialize(value) {
   return `{${keys.map(key => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(",")}}`;
 }
 
+// The ruleset id is a canonical serialization of the whole capability registry,
+// so on a real 1300-piece inventory one call costs milliseconds. It is derived
+// far more often than the spec changes — every witness certificate and every
+// proof projection recomputes it — and the parallel client does that for every
+// retained row on every progressive merge. The result is memoized against the
+// *identity* of the five inputs, so replacing `problemSpec.budget` or
+// `problemSpec.inventoryContext` (as the Upgrade certifier does) invalidates it
+// automatically.
+const rulesetIdCache = new WeakMap();
+
 export function createRulesetId(problemSpec) {
   // Canonical serialization is intentionally collision-free. Runtime limits
   // are not rules; inventory identities, assignments and set requirements are.
-  return `solver-v3-proof-v1:${stableSerialize({
-    operation: problemSpec?.operation,
+  const inputs = {
     constraintModel: problemSpec?.constraintModel,
     budget: problemSpec?.budget,
     pieceCapabilities: problemSpec?.pieceCapabilities,
     solverContext: problemSpec?.solverContext,
     inventoryContext: problemSpec?.inventoryContext,
+  };
+  if (problemSpec && typeof problemSpec === "object") {
+    const cached = rulesetIdCache.get(problemSpec);
+    if (cached
+        && cached.constraintModel === inputs.constraintModel
+        && cached.budget === inputs.budget
+        && cached.pieceCapabilities === inputs.pieceCapabilities
+        && cached.solverContext === inputs.solverContext
+        && cached.inventoryContext === inputs.inventoryContext) {
+      return cached.id;
+    }
+  }
+  const id = `solver-v3-proof-v1:${stableSerialize({
+    operation: problemSpec?.operation,
+    ...inputs,
   })}`;
+  if (problemSpec && typeof problemSpec === "object") {
+    rulesetIdCache.set(problemSpec, {...inputs, id});
+  }
+  return id;
 }
 
 // Internal producer API. Public payloads never flow into this function as
@@ -790,6 +868,24 @@ function witnessAssignments(witness) {
   };
 }
 
+// Verification looks a witness up in the ProblemSpec's capability registry.
+// That registry is the entire vault (1300 entries in a real inventory) and the
+// parallel client re-verifies every retained witness on every progressive
+// merge, so rebuilding the identity index each time dominated the client's wall
+// clock. The array is immutable once derived, so the index is cached against it.
+const capabilitySourceCache = new WeakMap();
+
+function capabilitySources(problemSpec) {
+  const capabilities = problemSpec?.pieceCapabilities;
+  if (!Array.isArray(capabilities)) return new Map();
+  const cached = capabilitySourceCache.get(capabilities);
+  if (cached) return cached;
+  const sources = new Map(capabilities.filter(piece => piece.identity)
+    .map(piece => [piece.identity, piece]));
+  capabilitySourceCache.set(capabilities, sources);
+  return sources;
+}
+
 export function verifyWitness(problemSpec, witness) {
   const errors = [];
   const pieces = witness?.config || witness?.pieces;
@@ -808,7 +904,7 @@ export function verifyWitness(problemSpec, witness) {
   let plus5ModCount = 0;
   let plus10ModCount = 0;
   const capabilities = problemSpec?.pieceCapabilities || [];
-  const sources = new Map(capabilities.filter(p => p.identity).map(p => [p.identity, p]));
+  const sources = capabilitySources(problemSpec);
   const identities = new Set();
   const slots = new Set();
   const inventoryContext = problemSpec?.inventoryContext;

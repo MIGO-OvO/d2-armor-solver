@@ -78,7 +78,7 @@ export function solveInventoryLoadout({
   const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers,
     shardIndex, shardCount,
     mathCacheHits: 0, mathEvaluations: 0, evaluationMs: 0, prunedJoint: 0, refinedAssignments: 0,
-    statesExamined: 0, equivalentItems: 0, mergedStates: 0, peakStates: 0,
+    statesExamined: 0, equivalentItems: 0, mathEquivalentItems: 0, mergedStates: 0, peakStates: 0,
     prunedBounds: 0, prunedSets: 0, layers: [0, 0, 0, 0, 0], firstFeasibleMs: null, firstExactMs: null,
     maxStates: limit(searchLimits.maxStates, 50000), maxNodes: limit(searchLimits.maxNodes, 2000000),
     maxEvaluations: limit(searchLimits.maxEvaluations, 50000),
@@ -96,12 +96,20 @@ export function solveInventoryLoadout({
     const candidates = locked.has(slot) ? [locked.get(slot)]
       : items.filter(item => item.slot === slot).map(item => ({...project(createUpgradePieceFromItem(item, index)), classId: item.classId}));
     const equivalent = new Set();
+    const mathEquivalent = new Set();
     const physical = [];
     for (const piece of candidates.filter(eligible)) {
-      const key = createPieceCapability(piece, index).equivalenceKey;
+      const capability = createPieceCapability(piece, index);
       const candidate = {piece, ...bounds(piece, reassignModifiers, onlyPlus5Tuning), cover: coverage(piece, setRequirement)};
-      if (equivalent.has(key)) searchStats.equivalentItems++;
-      equivalent.add(key);
+      if (equivalent.has(capability.equivalenceKey)) searchStats.equivalentItems++;
+      if (mathEquivalent.has(capability.mathEquivalenceKey)) searchStats.mathEquivalentItems++;
+      equivalent.add(capability.equivalenceKey);
+      mathEquivalent.add(capability.mathEquivalenceKey);
+      // `keyOf` and the min-vector key are pure functions of the piece. The
+      // DFS comparator needs both for every sibling comparison, so they are
+      // computed once per candidate instead of inside the comparator.
+      candidate.identity = keyOf([piece]);
+      candidate.minKey = candidate.min.join(",");
       physical.push(candidate);
     }
     rows.push({slotIndex: index, candidates: physical});
@@ -257,8 +265,8 @@ export function solveInventoryLoadout({
       }
       return {candidate, distance};
     }).sort((a, b) => a.distance - b.distance
-      || a.candidate.min.join(",").localeCompare(b.candidate.min.join(","))
-      || keyOf([a.candidate.piece]).localeCompare(keyOf([b.candidate.piece])));
+      || a.candidate.minKey.localeCompare(b.candidate.minKey)
+      || a.candidate.identity.localeCompare(b.candidate.identity));
     for (const {candidate} of ordered) {
       if (depth === 0 && !belongs(candidate.piece)) continue;
       search?.checkpoint(1, searchStats);

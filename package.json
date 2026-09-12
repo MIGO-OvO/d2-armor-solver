@@ -21,6 +21,7 @@
     "test:upgrade": "node check-upgrade-plan.js",
     "test:consistency": "node --test tests/witness-consistency.test.mjs tests/v3-differential.test.mjs",
     "benchmark:v3": "node scripts/benchmark-solver-v3.mjs",
+    "benchmark:v3-client": "node scripts/benchmark-v3-client.mjs",
     "benchmark:inventory": "node scripts/benchmark-v3-realistic.mjs",
     "test:browser": "npm run build && node scripts/browser-smoke.mjs",
     "verify:offline": "node scripts/build-offline.mjs && node scripts/verify-offline.mjs",

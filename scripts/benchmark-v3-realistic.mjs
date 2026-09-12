@@ -79,7 +79,11 @@ if (!process.argv[3]) {
       reassignModifiers: name === "hard-rules", userConstraints: name === "hard-rules"
         ? {minimums: {melee: 90, grenade: 90}, maximums: {health: 50, weapons: 100}, priorityLevels: {super: 1}}
         : {exact}};
-  const payload = withSearchProfile(operation, {...basePayload, searchProfile, maxResults: 3});
+  const payload = withSearchProfile(operation, {...basePayload, searchProfile, maxResults: 3,
+    // Reproduce the historical client-wrapper behaviour (it injected
+    // `exhaustive: true` into every shard) so the early-stop regression can be
+    // measured on the backend path too.
+    ...(process.env.BENCH_FORCE_EXHAUSTIVE === "1" ? {searchLimits: {exhaustive: true}} : {})});
   const session = createSearchSession({operation, generation: 1, profile: searchProfile});
   let result;
   try {

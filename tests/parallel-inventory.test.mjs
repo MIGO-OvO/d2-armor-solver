@@ -238,3 +238,92 @@ test('new batches supersede old batches and ordinary requests supersede batches'
   worker.reply(worker.requests[0], solveInventory(worker.requests[0].payload));
   assert.ok((await third).results.length);
 });
+
+// --- Search profile must survive the client wrapper -------------------------
+// The wrapper used to inject `searchLimits.exhaustive = true` into every shard,
+// which removed Fast/Balanced early termination: the whole browser path paid
+// Deep's cost while still reporting the balanced profile.
+
+test("the parallel client forwards the profile's exhaustive flag unchanged", async t => {
+  const client = await clientFor(t);
+  let seen = 0;
+  for (const [searchProfile, expected] of [["fast", false], ["balanced", false], ["deep", true]]) {
+    const pending = client.solveInventoryParallelAsync({...request(), searchProfile}, {parallelism: 2});
+    const instances = ControlledWorker.instances.slice(seen);
+    seen = ControlledWorker.instances.length;
+    assert.equal(instances.length, 2);
+    for (const worker of instances) {
+      assert.equal(worker.requests[0].payload.searchLimits.exhaustive, expected,
+        `${searchProfile} must reach the shard unchanged`);
+      worker.reply(worker.requests[0], solveInventory(worker.requests[0].payload));
+    }
+    await pending;
+  }
+});
+
+test("an explicit caller exhaustive flag still overrides Fast and Balanced", async t => {
+  const client = await clientFor(t);
+  let seen = 0;
+  for (const searchProfile of ["fast", "balanced"]) {
+    const pending = client.solveInventoryParallelAsync(
+      {...request(), searchProfile, searchLimits: {exhaustive: true}}, {parallelism: 2});
+    const instances = ControlledWorker.instances.slice(seen);
+    seen = ControlledWorker.instances.length;
+    for (const worker of instances) {
+      assert.equal(worker.requests[0].payload.searchLimits.exhaustive, true);
+      worker.reply(worker.requests[0], solveInventory(worker.requests[0].payload));
+    }
+    await pending;
+  }
+});
+
+test("a non-exhaustive search stops early without ever claiming infeasibility", async () => {
+  const {withSearchProfile} = await import("../src/core/search-session.mjs");
+  const base = request(6);
+  const seed = solveInventory({...base, maxResults: 1});
+  const payload = {
+    ...base,
+    targets: seed.results[0].visibleTotals,
+    userConstraints: {exact: Object.fromEntries(STATS.map(stat => [stat, true]))},
+    maxResults: 1,
+  };
+
+  const fast = withSearchProfile("solveInventory", {...payload, searchProfile: "fast"});
+  assert.equal(fast.searchLimits.exhaustive, false);
+  const result = solveInventory(fast);
+  // The early stop the wrapper used to disable.
+  assert.equal(result.searchStats.termination, "exact-witness-quota");
+  assert.equal(result.searchStats.frontierComplete, false);
+  assert.notEqual(result.certificate.status, "INFEASIBLE_PROVEN",
+    "a bounded search may not claim the inventory has no solution");
+  assert.equal(result.certificate.proof.complete, false);
+  assert.ok(result.results.length > 0, "and it must still return the verified candidates it found");
+  assert.ok(result.results.every(row => row.certificate.witnessVerification.valid));
+
+  // Forcing exhaustive — exactly what the wrapper used to do — removes the
+  // early stop, which is the cost regression this guards against.
+  const forced = solveInventory({...fast, searchLimits: {...fast.searchLimits, exhaustive: true}});
+  assert.equal(forced.searchStats.termination, "exhausted");
+
+  // Deep remains the profile that is allowed to exhaust the frontier.
+  const deep = withSearchProfile("solveInventory", {...payload, searchProfile: "deep"});
+  assert.equal(deep.searchLimits.exhaustive, true);
+});
+
+test("a budget-limited search for an unreachable target returns a limit, not a proof", async () => {
+  const {withSearchProfile} = await import("../src/core/search-session.mjs");
+  const payload = {
+    ...request(8),
+    targets: Object.fromEntries(STATS.map(stat => [stat, 199])),
+    userConstraints: {exact: Object.fromEntries(STATS.map(stat => [stat, true]))},
+    maxResults: 2,
+  };
+  const fast = withSearchProfile("solveInventory", {...payload, searchProfile: "fast"});
+  assert.equal(fast.searchLimits.exhaustive, false);
+  const result = solveInventory(fast);
+  assert.notEqual(result.certificate.status, "INFEASIBLE_PROVEN",
+    "\"no solution in the budget\" is not \"no solution exists\"");
+  assert.equal(result.status, "SEARCH_LIMIT_REACHED");
+  assert.equal(result.certificate.proof.complete, false);
+  assert.equal(result.searchStats.frontierComplete, false);
+});

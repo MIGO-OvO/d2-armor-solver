@@ -447,8 +447,22 @@ function certifyUpgradeResult(result, problemSpec, pieces, reassignModifiers, on
   }));
 }
 
+// Building a ProblemSpec walks every inventory item to derive its capability.
+// The parallel client merges shard results on every progressive publication, so
+// rebuilding it there costs O(events x vault size) on the main thread — the
+// 1300-piece benchmark spent ~28 s of wall clock to produce a 3 s search. The
+// payload is immutable for the lifetime of a request, so the spec is derived
+// once per payload object. Nothing here mutates the cached spec:
+// `certifyInventoryResult` only reads it and `sealWitness` clones a filtered
+// copy.
+const inventoryProblemCache = new WeakMap();
+
 function inventoryProblem(payload) {
-  return createProblemSpec({operation: "solveInventory", targets: payload?.targets, fragments: payload?.fragments,
+  if (payload && typeof payload === "object") {
+    const cached = inventoryProblemCache.get(payload);
+    if (cached) return cached;
+  }
+  const spec = createProblemSpec({operation: "solveInventory", targets: payload?.targets, fragments: payload?.fragments,
     constraints: upgradeVisibleConstraints(payload?.userConstraints, payload?.fragments, payload?.targets, payload?.requiredStats),
     targetDomain: STAT_DOMAIN.VISIBLE, pieces: payload?.items, runtimeOptions: {verifyInventoryCandidates: true},
     inventoryContext: {setRequirement: payload?.setRequirement || null,
@@ -457,6 +471,8 @@ function inventoryProblem(payload) {
       fixedExotic: payload?.fixedExotic || null,
       autoStatMods: payload?.reassignModifiers !== false && payload?.autoStatMods !== false,
       modifierBudget: payload?.modifierBudget || null}});
+  if (payload && typeof payload === "object") inventoryProblemCache.set(payload, spec);
+  return spec;
 }
 
 export function mergeInventoryShardResults(payload, parts, count) {

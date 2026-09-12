@@ -139,9 +139,13 @@ function buildModifierStates(numPlus5, numPlus10) {
 }
 
 function buildAdjustmentIndexFromShiftStates(shiftStates, numPlus5, numPlus10, checkpoint = null) {
-  const modifier = buildModifierStates(numPlus5, numPlus10);
+  const modifier = getModifierStates(numPlus5, numPlus10);
   // Zero means unreachable. Every stored witness is offset by one.
   const witnesses = new Int32Array(ADJUSTMENT_TABLE_SIZE);
+  // Collect reachable keys while filling instead of scanning all ~4.08M slots
+  // twice afterwards. The table is fill-once (the guard below skips any key
+  // that already has a witness), so every key lands here exactly once.
+  const reachedKeys = [];
 
   for (let shiftIndex = 0; shiftIndex < shiftStates.length; shiftIndex++) {
     checkpoint?.(0);
@@ -155,18 +159,18 @@ function buildAdjustmentIndexFromShiftStates(shiftStates, numPlus5, numPlus10, c
       const key = packAdjustment(values);
       if (key < 0 || witnesses[key] !== 0) continue;
       witnesses[key] = shiftIndex * modifier.states.length + modifierIndex + 1;
+      reachedKeys.push(key);
     }
   }
 
-  let reachableCount = 0;
-  for (let key = 0; key < witnesses.length; key++) {
-    if (witnesses[key] !== 0) reachableCount++;
-  }
+  // The dense scan produced keys in ascending order and later queries rely on
+  // that order (the first in-box key wins), so restore it explicitly.
+  reachedKeys.sort((left, right) => left - right);
+  const reachableCount = reachedKeys.length;
   const reachableKeys = new Int32Array(reachableCount);
   const reachableUnits = new Int8Array(reachableCount * STATS.length);
-  let cursor = 0;
-  for (let key = 0; key < witnesses.length; key++) {
-    if (witnesses[key] === 0) continue;
+  for (let cursor = 0; cursor < reachableCount; cursor++) {
+    const key = reachedKeys[cursor];
     reachableKeys[cursor] = key;
     const units = unpackAdjustment(key);
     units[5] = modifier.sizes.reduce((sum, size) => sum + size / 5, 0)
@@ -174,7 +178,6 @@ function buildAdjustmentIndexFromShiftStates(shiftStates, numPlus5, numPlus10, c
     for (let statIndex = 0; statIndex < STATS.length; statIndex++) {
       reachableUnits[cursor * STATS.length + statIndex] = units[statIndex];
     }
-    cursor++;
   }
 
   return {
@@ -196,9 +199,47 @@ function buildAdjustmentIndexFromShiftStates(shiftStates, numPlus5, numPlus10, c
   };
 }
 
+// Shift states depend only on the number of shifted pieces; modifier states
+// depend only on (numPlus5, numPlus10). Deriving both separately means asking
+// for a new modifier budget no longer rebuilds the shift layer, and vice versa.
+const MAX_DERIVED_STATE_CACHE_ENTRIES = 3;
+const shiftStateCache = new Map();
+const modifierStateCache = new Map();
+
+function getShiftStates(count, checkpoint = null) {
+  const cached = shiftStateCache.get(count);
+  if (cached) {
+    shiftStateCache.delete(count);
+    shiftStateCache.set(count, cached);
+    return cached;
+  }
+  const states = buildShiftStates(count, checkpoint);
+  shiftStateCache.set(count, states);
+  while (shiftStateCache.size > MAX_DERIVED_STATE_CACHE_ENTRIES) {
+    shiftStateCache.delete(shiftStateCache.keys().next().value);
+  }
+  return states;
+}
+
+function getModifierStates(numPlus5, numPlus10) {
+  const cacheKey = `${numPlus5}|${numPlus10}`;
+  const cached = modifierStateCache.get(cacheKey);
+  if (cached) {
+    modifierStateCache.delete(cacheKey);
+    modifierStateCache.set(cacheKey, cached);
+    return cached;
+  }
+  const modifier = buildModifierStates(numPlus5, numPlus10);
+  modifierStateCache.set(cacheKey, modifier);
+  while (modifierStateCache.size > MAX_DERIVED_STATE_CACHE_ENTRIES) {
+    modifierStateCache.delete(modifierStateCache.keys().next().value);
+  }
+  return modifier;
+}
+
 function buildAdjustmentIndex(shiftCount, numPlus5, numPlus10, checkpoint = null) {
   const index = buildAdjustmentIndexFromShiftStates(
-    buildShiftStates(shiftCount, checkpoint),
+    getShiftStates(shiftCount, checkpoint),
     numPlus5,
     numPlus10,
     checkpoint,
@@ -208,7 +249,7 @@ function buildAdjustmentIndex(shiftCount, numPlus5, numPlus10, checkpoint = null
 }
 
 function buildSparseAdjustmentIndex(shiftStates, numPlus5, numPlus10, checkpoint = null) {
-  const modifier = buildModifierStates(numPlus5, numPlus10);
+  const modifier = getModifierStates(numPlus5, numPlus10);
   const witnesses = new Map();
   for (let shiftIndex = 0; shiftIndex < shiftStates.length; shiftIndex++) {
     checkpoint?.(0);
@@ -256,6 +297,25 @@ function getAdjustmentIndex(shiftCount, numPlus5, numPlus10, checkpoint = null) 
 
 const restrictedAdjustmentCache = new Map();
 const MAX_RESTRICTED_ADJUSTMENT_CACHE_ENTRIES = 2;
+const restrictedShiftStateCache = new Map();
+
+function getRestrictedShiftStates(targets, checkpoint = null) {
+  const cacheKey = targets.map(target => Array.isArray(target)
+    ? `[${target.join(",")}]`
+    : target || "*").join(";");
+  const cached = restrictedShiftStateCache.get(cacheKey);
+  if (cached) {
+    restrictedShiftStateCache.delete(cacheKey);
+    restrictedShiftStateCache.set(cacheKey, cached);
+    return cached;
+  }
+  const states = buildRestrictedShiftStates(targets, checkpoint);
+  restrictedShiftStateCache.set(cacheKey, states);
+  while (restrictedShiftStateCache.size > MAX_RESTRICTED_ADJUSTMENT_CACHE_ENTRIES) {
+    restrictedShiftStateCache.delete(restrictedShiftStateCache.keys().next().value);
+  }
+  return states;
+}
 
 function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10, checkpoint = null) {
   if (targets.every(target => target === undefined || target === null)) {
@@ -274,7 +334,7 @@ function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10, checkpoint =
   diagnostics.cacheMisses++;
   const started = performance.now();
   const index = buildSparseAdjustmentIndex(
-    buildRestrictedShiftStates(targets, checkpoint),
+    getRestrictedShiftStates(targets, checkpoint),
     numPlus5,
     numPlus10,
     checkpoint,

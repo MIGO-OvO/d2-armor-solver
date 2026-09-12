@@ -119,13 +119,25 @@ export const analyzeUpgradeAsync = (payload, options) => run("analyzeUpgrade", p
 export const calculateReachabilityAsync = (payload, options) => run("calculateReachability", payload, options);
 export const solveInventoryAsync = (payload, options) => run("solveInventory", payload, options);
 
+// A merge re-verifies every retained witness against the whole vault, which
+// costs hundreds of milliseconds on a 1300-piece inventory. Publishing on every
+// shard callback therefore costs O(events x vault) on the main thread and made
+// a 3 s Balanced search take ~27 s of wall clock. Progressive publication is
+// coalesced to one merge per interval (the first one is immediate, so a positive
+// witness still reaches the UI without waiting for the batch to finish).
+const PROGRESS_MERGE_INTERVAL_MS = 150;
+
 // A batch owns separate workers; normal operation workers remain reusable.
 export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...options} = {}) {
   if (!Number.isSafeInteger(parallelism) || parallelism < 1 || parallelism > 8) {
     throw new RangeError("parallelism must be an integer between 1 and 8");
   }
-  const request = structuredClone({...payload, shardIndex: 0, shardCount: 1,
-    searchLimits: {...payload.searchLimits, exhaustive: true}});
+  // The search profile owns effort. Forcing `exhaustive: true` here silently
+  // removed Fast/Balanced early termination (their `exact-witness-quota` stop),
+  // so every browser solve paid Deep's cost. The wrapper only forwards the
+  // shard coordinates; `withSearchProfile` still honours an explicit
+  // `searchLimits.exhaustive === true` from the caller.
+  const request = structuredClone({...payload, shardIndex: 0, shardCount: 1});
   if (parallelism === 1 || OFFLINE_MODE || typeof Worker === "undefined") return solveInventoryAsync(request, options);
   cancelOperation('solveInventory');
   const batch = nextRequestId++;
@@ -140,20 +152,44 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
   let progressRevision = 0;
   const engine = () => mergeModule ||= import('./armor-engine.mjs');
   const active = () => !controller.signal.aborted && inventoryBatch === controller;
-  const metadata = (running, result = null) => ({schemaVersion: 1, operation: 'solveInventory',
-    generation: batch, profile: payload.searchProfile || 'balanced', running,
-    elapsedMs: performance.now() - started,
-    nodes: searches.reduce((sum, search) => sum + (search?.nodes || 0), 0),
-    firstExactMs, firstFeasibleMs,
-    termination: running ? null : searches.some(search => search?.termination === 'budget') ? 'budget' : 'completed',
-    coverage: {...result?.searchStats, complete: false},
-  });
-  const progress = (result, search, shardIndex) => {
+  // `nodes` is the aggregate across shards; each shard owns the FULL profile
+  // budget (maxNodes / maxEvaluations / maxStates / maxTimeMs). The search
+  // budget is therefore per-shard, not global, and a 4-worker Balanced batch
+  // can spend up to 4x the single-thread effort. `shards` exposes the
+  // per-shard truth so this is measurable instead of implied.
+  const metadata = (running, result = null) => {
+    const aggregateNodes = searches.reduce((sum, search) => sum + (search?.nodes || 0), 0);
+    return {
+      schemaVersion: 1, operation: 'solveInventory',
+      generation: batch, profile: payload.searchProfile || 'balanced', running,
+      elapsedMs: performance.now() - started,
+      // Kept as an alias: the command bar reads `nodes`.
+      nodes: aggregateNodes,
+      aggregateNodes,
+      firstExactMs, firstFeasibleMs,
+      termination: running ? null : searches.some(search => search?.termination === 'budget') ? 'budget' : 'completed',
+      parallelism,
+      workerCount: parallelism,
+      budgetScope: 'per-shard',
+      shards: searches.map((search, index) => ({
+        index,
+        running: search?.running === true,
+        // Session termination is "budget" whenever *any* budget was reached,
+        // including during the post-frontier refinement pass. The frontier's own
+        // reason (`exact-witness-quota`, `time-limit`, `exhausted`, …) is what
+        // tells a reader whether the search stopped early or ran out of room.
+        termination: search?.termination ?? null,
+        frontierTermination: search?.frontierTermination ?? null,
+        frontierComplete: search?.frontierComplete ?? null,
+        nodes: search?.nodes || 0,
+        statesExamined: search?.coverage?.statesExamined ?? null,
+      })),
+      coverage: {...result?.searchStats, complete: false},
+    };
+  };
+  const publishMerge = () => {
     if (!active()) return;
-    searches[shardIndex] = {...search, nodes: Math.max(search?.nodes || 0, searches[shardIndex]?.nodes || 0)};
-    if (!result?.results?.length) { options.onProgress?.(null, metadata(true)); return; }
-    partials[shardIndex] = result;
-    if (!options.onProgress) return;
+    lastMergeAt = performance.now();
     const revision = ++progressRevision;
     // Reconstruct positive witnesses against the full inventory. Local
     // coverage/negative certificates never become a global proof.
@@ -167,6 +203,37 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
       merged.search = metadata(true, merged);
       options.onProgress(merged, merged.search);
     }).catch(() => { if (active()) controller.abort(); });
+  };
+  let scheduledMerge = null;
+  let lastMergeAt = 0;
+  const scheduleMerge = () => {
+    if (!active() || scheduledMerge !== null) return;
+    const elapsed = performance.now() - lastMergeAt;
+    if (lastMergeAt === 0 || elapsed >= PROGRESS_MERGE_INTERVAL_MS) { publishMerge(); return; }
+    scheduledMerge = setTimeout(() => {
+      scheduledMerge = null;
+      publishMerge();
+    }, PROGRESS_MERGE_INTERVAL_MS - elapsed);
+  };
+  const progress = (result, search, shardIndex) => {
+    if (!active()) return;
+    const budgetBound = search?.termination === 'budget';
+    searches[shardIndex] = {
+      ...search,
+      nodes: Math.max(search?.nodes || 0, searches[shardIndex]?.nodes || 0),
+      // A budget-truncated shard reports a *published snapshot*, whose frontier
+      // termination predates the stop and would read as "exhausted" even though
+      // the frontier never finished. Report "not resolved" instead of a stale
+      // reason; the session's own `termination` already says "budget".
+      frontierTermination: budgetBound
+        ? null
+        : result?.searchStats?.termination ?? searches[shardIndex]?.frontierTermination ?? null,
+      frontierComplete: result?.searchStats?.frontierComplete ?? null,
+    };
+    if (!result?.results?.length) { options.onProgress?.(null, metadata(true)); return; }
+    partials[shardIndex] = result;
+    if (!options.onProgress) return;
+    scheduleMerge();
   };
   const abort = () => controller.abort();
   options.signal?.addEventListener("abort", abort, {once: true});
@@ -187,6 +254,10 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
     result.search = metadata(false, result);
     return result;
   } finally {
+    if (scheduledMerge !== null) {
+      clearTimeout(scheduledMerge);
+      scheduledMerge = null;
+    }
     if (inventoryBatch === controller) inventoryBatch = null;
     controller.abort();
     options.signal?.removeEventListener("abort", abort);
