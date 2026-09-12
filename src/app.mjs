@@ -84,6 +84,29 @@ function searchProofLabel(result, search = result?.search) {
   };
   return l(...labels[proofPresentation(result, search).key]);
 }
+// Inventory existence is a different proposition from theoretical feasibility.
+// Its proof and termination stay local to the owned-armor message/results.
+function inventoryProofLabel(result, search = result?.search) {
+  const proof = proofPresentation(result, search);
+  const labels = {
+    EXACT_TARGET_PROVEN: ['已有护甲：找到无需刷取的精确组合 · 已证明','已有防具：找到無需取得新防具的精確組合 · 已證明','Owned armor: exact no-farming loadout found · proven'],
+    RULE_FEASIBLE_PROVEN: ['已有护甲：找到无需刷取的达标组合 · 已证明','已有防具：找到無需取得新防具的達標組合 · 已證明','Owned armor: qualifying no-farming loadout found · proven'],
+    INFEASIBLE_PROVEN: ['已有护甲：已证明不存在无需刷取的达标组合','已有防具：已證明不存在無需取得新防具的達標組合','Owned armor: no qualifying no-farming loadout exists · proven'],
+    SEARCH_LIMIT_REACHED: ['已有护甲：暂未找到无需刷取的达标组合','已有防具：暫未找到無需取得新防具的達標組合','Owned armor: no qualifying no-farming loadout found yet'],
+    INVALID_INPUT: ['已有护甲：输入无效 · 请检查条件','已有防具：輸入無效 · 請檢查條件','Owned armor: invalid input · check the constraints'],
+  };
+  const label = l(...(labels[proof.status] ||
+    ['已有护甲：尚未验证','已有防具：尚未驗證','Owned armor: not verified']));
+  const termination = proof.running ? 'running' : proof.termination;
+  const endings = {
+    running: ['库存搜索进行中','庫存搜尋進行中','Inventory search running'],
+    completed: ['库存搜索已完成','庫存搜尋已完成','Inventory search completed'],
+    budget: ['库存搜索已达到上限','庫存搜尋已達到上限','Inventory search limit reached'],
+    cancelled: ['库存搜索已取消','庫存搜尋已取消','Inventory search cancelled'],
+  };
+  return endings[termination] ? `${label} · ${l(...endings[termination])}` : label;
+}
+// Command Bar is owned exclusively by the global/theory search.
 function renderSearchStatus(result, search = result?.search) {
   if (result) lastSearchResult = result;
   const status = document.getElementById('searchStatus');
@@ -5130,9 +5153,8 @@ async function solveInventoryRequirement({
       userConstraints: constraints,
     };
     const result = await solveInventoryParallelAsync(inventoryRequest, {parallelism: Math.min(4,
-      Math.max(1, Number(globalThis.navigator?.hardwareConcurrency) || 2)), onProgress: (partial, search) => {
+      Math.max(1, Number(globalThis.navigator?.hardwareConcurrency) || 2)), onProgress: (partial) => {
       if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision) return;
-      renderSearchStatus(partial, search);
       if (partial?.results?.length) {
         lastInventoryTargets = targets; lastInventoryRequiredStats = requiredStats;
         renderInventoryResults(partial);
@@ -5145,10 +5167,9 @@ async function solveInventoryRequirement({
     lastInventoryTargets = targets;
     lastInventoryRequiredStats = requiredStats;
     renderInventoryResults(result);
-    renderSearchStatus(result);
     const qualifyingCount = result?.results?.filter(certifiedFeasible).length || 0;
     if (qualifyingCount) {
-      const proofLabel = searchProofLabel(result);
+      const proofLabel = inventoryProofLabel(result);
       const executionLabel = result.executionStatus === 'VERIFIED'
         ? l('执行预检已验证', '執行預檢已驗證', 'Execution preflight verified')
         : result.executionStatus === 'BLOCKED'
@@ -5166,7 +5187,7 @@ async function solveInventoryRequirement({
           `Found ${qualifyingCount} owned loadouts meeting both stat rules and ${formatSetRequirementLabel(requirementSnapshot)}. No new armor needed.`
         )}</div>`;
     }
-    return `<div class="msg warn">${escapeHtml(searchProofLabel(result))}</div>`;
+    return `<div class="msg warn">${escapeHtml(inventoryProofLabel(result))}</div>`;
   } catch (error) {
     if (error.name === 'AbortError') return null;
     console.error("Inventory solve failed", error);

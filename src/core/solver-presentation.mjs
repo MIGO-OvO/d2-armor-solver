@@ -16,5 +16,6 @@ export function proofPresentation(result, search = result?.search) {
   else if (status === "INVALID_INPUT") key = "invalid";
   else if (status === "SEARCH_LIMIT_REACHED") key = running ? "searching" : "limited";
   return {key, status: status || null, feasible: certifiedFeasible(result), running, complete,
+    termination: search?.termination || null,
     stats: certificate?.statResults || {}, executionStatus: certificate?.executionStatus || "UNVERIFIED"};
 }
