@@ -30,7 +30,7 @@ Solver: [https://migo-ovo.github.io/d2-armor-solver/app/](https://migo-ovo.githu
 
 Development build: [https://migo-ovo.github.io/d2-armor-solver/dev/app/](https://migo-ovo.github.io/d2-armor-solver/dev/app/)
 
-> `main` is the stable channel, `develop` is the development channel. The two online versions share the language preference, but drafts, saved builds, and Bungie login state use separate storage keys so they don't overwrite each other. Browser data isn't migrated automatically between other deployments either.
+> `main` is the stable channel, `develop` is the development channel. The two online versions share the language preference and saved builds, but drafts and Bungie login state use separate storage keys so they don't overwrite each other. Browser data isn't migrated automatically between other deployments either.
 
 ![Destiny 2 Armor Solver workbench](./asset/web-input.png)
 
@@ -62,7 +62,21 @@ The offline build runs on the main thread (it doesn't start a Web Worker under `
 
 ## Changelog
 
-### v3.0.1 (latest)
+### v3.1.0 (latest)
+
+- Solver V3.1: exact-target preimage queries now reach the rule-interval Oracle directly with six-dimensional armor intervals; mixed-mode exact search prefilters Balanced selections by target residue before the Cartesian product; the adjustment DP uses integer keys and reuses the bounded dense cache; and Fast / Balanced search profiles are no longer overridden by wrappers. On a 1300-item synthetic inventory the median "hard rules, first feasible" case drops from 1610.8 ms to 145.3 ms, and the Scratch exact Oracle medians drop from 593.0 / 539.7 ms to 66.1 / 39.1 ms, with unchanged witnesses.
+- Inventory proof is now independent of global search status: it no longer depends on completion, the search limit, or cancellation, and a cancelled reachability probe is no longer reported as a failure.
+- Three separate totals: the main six-stat bar shows only the mathematical total, the projected total is the single consistency bridge between execution and the solver, and the installable total appears only in advanced diagnostics and execution hints instead of overwriting the main bar. When a planned write is proven blocked, the piece keeps its installed modifier.
+- New real-DIM regression: one reported inventory recovers both physical exact builds without altering installed mods; automatic inventory stat mods are decoupled from the CSV-installed count; explicit budgets take precedence; and a large zero-installed-mod inventory is not pruned by installed-budget bounds. Parallel inventory solving shards by physical candidate, and unfinished shards stay marked incomplete.
+- Unified Plan and the results workspace: both solving paths feed one list ranked by "qualifying first, then ownership", the result page is rebuilt as plan list + plan detail, the Plan Browser becomes a bounded content-adaptive sticky workspace, and the command bar height is measured instead of assumed.
+- Information architecture and responsiveness: one app-wide width (pixel-identical before and after solving), six-column stat inputs, five-column piece summary, two-column owned-armor and constraint panels, and three replacement lanes on wide screens, collapsing step by step on narrow ones; armor tables, acquisition plans and stat grids switch to container queries.
+- Owned armor and replacement paths: advanced constraints collapse by default, the five-piece editor expands one piece at a time, each replacement step shows current / target / execute lanes, and the acquisition plan counts only real farm requirements.
+- Saved Builds: saved plans are shared across channels while drafts, calculator mode and Bungie login state stay channel-scoped; a new saved-builds drawer supports search, load, rename and delete with undo; an invalidated snapshot only prompts a re-solve and never deletes a build.
+- New standalone trilingual user guide (`/guide/`, Simplified Chinese / Traditional Chinese / English) with shared stable anchors, covering everything from importing inventory and setting rules to reading each results column and saving builds; it replaces the old help drawer.
+- Web, offline and Windows desktop follow this release; the Windows installer is still built on Release and attached to it, and the browser ZIP remains an Actions artifact only.
+- Release validation: the full Node suite, lint, upgrade plan verification, `benchmark:v3`, browser smoke (including 1920/1440/1280 geometry regression), `file://` offline verification and the desktop frontend contract all pass. Full notes: [v3.1.0 Release Notes](./docs/release-notes-v3.1.0.md).
+
+### v3.0.1
 
 - Fixed Upgrade Search missing feasible exact plans at the visible 0/200 boundaries: exact visible rules clamped to "at most 0" / "at least 200" are now treated as exact visible targets using the same clamp preimages as Build from Scratch, instead of falling back to the bounded heuristic sweep.
 - Fixed feasible plans being hidden by the search budget: a verified feasible replacement plan is established and published first, then replacement count is minimized within the remaining budget; when the budget runs out the proof is reported honestly as a feasible upper bound.

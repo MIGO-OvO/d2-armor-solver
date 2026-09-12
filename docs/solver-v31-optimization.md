@@ -1,9 +1,9 @@
 # V3.1 search optimization
 
 Base: `develop@f2fcf55793de1cc5ffe43378be833a45dc94e62d`.
-This is an incremental algorithm upgrade; the package/release version remains
-3.0.1. No schema migration, account mutation or deployment to main is included.
-Upgrade retains installed +5/+10 budgets. Inventory supports automatic stat
+This is an incremental algorithm upgrade; it ships as the package/release version
+3.1.0. No schema migration or account mutation is included. Upgrade retains
+installed +5/+10 budgets. Inventory supports automatic stat
 mods independently of installed counts; explicit budgets always take precedence.
 
 ## Implemented
@@ -119,5 +119,7 @@ and baseline publication before cold cancellation. Existing independent randomiz
 witness/Inventory/Upgrade tests remain enabled. Browser account routes are mocked.
 
 Deployment uses the existing GitHub Pages workflow triggered by develop, serving
-the development channel at `/d2-armor-solver/dev/`. The stable branch is not merged
-or pushed. The later develop integration also includes the shared Windows desktop build.
+the development channel at `/d2-armor-solver/dev/`, and by main, serving the stable
+channel. This work landed on develop first and then fast-forwarded to main as the
+v3.1.0 release; the later develop integration also includes the shared Windows
+desktop build.
