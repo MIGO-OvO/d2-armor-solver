@@ -3155,7 +3155,8 @@ function bungiePlanErrorMessage(error) {
   if (code === "equippedElsewhereNoReplacement") {
     return l("其他角色正穿着方案护甲，且没有同槽位备用件可先替换。", "其他角色正穿著方案防具，且沒有同欄位備用件可先替換。", "Another character is wearing a required piece and has no spare for that slot.");
   }
-  if (code === "statSocketUnknown" || code === "tuningSocketUnknown" || code === "invalidTuning") {
+  if (code === "statSocketMissing" || code === "tuningSocketMissing"
+      || code === "statSocketUnknown" || code === "tuningSocketUnknown" || code === "invalidTuning") {
     return l("无法从当前库存快照安全定位一个护甲模组插槽，请刷新库存或改用 DIM。", "無法從目前庫存快照安全定位一個防具模組插槽，請重新整理庫存或改用 DIM。", "A required armor socket cannot be located safely. Refresh the inventory or use DIM.");
   }
   if (code === "classMismatch") {
@@ -5396,14 +5397,18 @@ function syncCommandBarActions() {
 
 // Three totals answer three different questions, and the result page must not
 // conflate them (handoff 3.7 / Phase D):
-//   mathematicalTotals — what the Solver proved, assuming every planned
-//     Tuning/mod is in place and the armor is masterworked. This is the number
-//     the certificate is about; it is never edited by execution reality.
+//   mathematicalTotals — what the Solver proved and the certificate is about:
+//     every planned Tuning/armor mod in place, the armor masterworked, plus
+//     fragments. It is rebuilt from the sealed witness, never from execution
+//     reality, and it is the number the six-stat bars show.
 //   projectedTotals — the same plan with the armor upgraded to Tier 5; equals
-//     the mathematical result when the instances are already masterworked.
+//     the mathematical result when the instances are already masterworked. It is
+//     the bridge the execution layer is validated against.
 //   installableTotals — only the socket operations the current instances can
 //     actually accept right now (energy, socket compatibility, plug
-//     availability). A mod blocked by preflight contributes nothing.
+//     availability). A mod *proven* blocked contributes nothing; a mod whose
+//     capability is merely unknown still counts, because absent metadata must
+//     never lower the plan's value.
 // Fragments are added to the armor-domain totals exactly once, here, so all
 // three are directly comparable with the user's targets.
 //
@@ -5421,6 +5426,47 @@ function addFragmentTotals(totals, fragments) {
 
 function differingStats(left, right) {
   return STATS.filter(stat => Number(left?.[stat] || 0) !== Number(right?.[stat] || 0));
+}
+
+// Every preflight reason is classified by *evidence*, not by severity:
+//   blocked.*    — known metadata proves the write cannot happen.
+//   unverified.* — the metadata needed to judge the write is missing.
+//   masterwork   — nothing is wrong, the armor simply is not upgraded yet.
+// The distinction is what keeps "unknown" from being worded as "blocked".
+function classifyPreflight(entry, execution, { mathematical, installable, projected }) {
+  const unassigned = execution?.unassignedMods || [];
+  const unverifiedMods = execution?.unverifiedMods || [];
+  const isSocketBlocked = reason => reason === "plugUnavailable" || reason === "cannotClear"
+    || String(reason).endsWith("SocketMissing");
+  const blocked = {
+    energy: unassigned.filter(mod => mod.reason === "energy").length,
+    socket: unassigned.filter(mod => isSocketBlocked(mod.reason)).length,
+    mismatch: unassigned.filter(mod => mod.reason === "tuningMismatch" || mod.reason === "invalidAssignment").length,
+  };
+  blocked.total = blocked.energy + blocked.socket + blocked.mismatch;
+  const unverified = {
+    // DIM CSV exports carry the exact roll but no socket capability at all.
+    socket: unverifiedMods.filter(mod => mod.kind === "item" && mod.reason === "socketCapabilityUnknown").length,
+    socketWrite: unverifiedMods.filter(mod => String(mod.reason).endsWith("SocketUnverified")
+      || mod.reason === "candidateAvailabilityUnknown").length,
+    energy: unverifiedMods.filter(mod => mod.reason === "energyUnknown").length,
+    tuning: unverifiedMods.filter(mod => mod.reason === "tuningCapabilityUnknown").length,
+  };
+  unverified.total = unverified.socket + unverified.socketWrite + unverified.energy + unverified.tuning;
+  const installableBelowMath = differingStats(mathematical, installable);
+  // "The armor is not upgraded yet" is a witness fact, not a preflight verdict:
+  // it stays true even when the same plan also carries unverified socket data.
+  const pieces = entry?.witness?.pieces || entry?.pieces || [];
+  return {
+    status: execution?.executionStatus || null,
+    blocked,
+    unverified,
+    installableBelowMath,
+    mathematicalVsInstallable: installableBelowMath,
+    mathematicalVsProjected: differingStats(mathematical, projected),
+    masterworkPending: installableBelowMath.length > 0
+      && pieces.some(piece => piece?.requiresMasterwork === true),
+  };
 }
 
 function getEntryTotalsModel(entry) {
@@ -5446,22 +5492,25 @@ function getEntryTotalsModel(entry) {
   const projected = usableExecution && execution.projectedTotals
     ? addFragmentTotals(execution.projectedTotals, fragments)
     : mathematical;
-  const blockedMods = (execution?.unassignedMods || [])
-    .filter(mod => mod.kind === "stat" || mod.kind === "tuning");
-  return {
+  const model = {
     mathematical,
     projected,
     installable,
-    blockedMods,
+    // Raw preflight evidence; the *classified* view lives in classifyPreflight
+    // (blocked / unverified / masterwork). There is deliberately no
+    // `blockedMods` field any more: the previous one was read as "everything
+    // preflight complained about, including unknown metadata", which is exactly
+    // how a missing DIM socket ended up worded as a blocked mod.
     unverifiedMods: execution?.unverifiedMods || [],
-    mathematicalVsInstallable: differingStats(mathematical, installable),
-    mathematicalVsProjected: differingStats(mathematical, projected),
   };
+  return { ...model, ...classifyPreflight(entry, execution, model) };
 }
 
-// What the six stat bars show: the values the loadout can carry *now*. When
-// execution evidence proves a planned mod cannot be installed, the bar must
-// drop to the installable value instead of advertising the arithmetic.
+// The six-stat bars show the Solver's mathematical result, never the
+// installable subset: the "✓ 达标" marker comes from the certificate's
+// statResults, so the number beside it must come from the same mathematical
+// domain. Rendering `installable` here is what produced "10 / 20 ✓达标" for an
+// exact plan whose certificate said 20.
 function getUnifiedTotalsModel(entry) {
   return getEntryTotalsModel(entry);
 }
@@ -6130,9 +6179,15 @@ function renderAdvancedDetails(entry, totals = null) {
     const projected = Number(totalsModel.projected[stat] || 0);
     return `<span class="advanced-totals-row"><em style="color:${STAT_COLORS[stat]}">${STAT_LABELS[stat]}</em>`
       + `<span>${l("数学", "數學", "math")} ${mathematical}</span>`
-      + `<span>${l("升级后", "升級後", "projected")} ${projected}</span>`
+      + `<span class="${projected === mathematical ? "" : "is-blocked"}">${l("升级后", "升級後", "projected")} ${projected}</span>`
       + `<span class="${installable === mathematical ? "" : "is-blocked"}">${l("可装", "可裝", "installable")} ${installable}</span></span>`;
   }).join("");
+  // Evidence counts, so the panel shows *why* the preflight is not VERIFIED
+  // instead of a bare status word.
+  const detailParts = [
+    totalsModel.blocked?.total ? l(`已确认不可安装 ${totalsModel.blocked.total}`, `已確認無法安裝 ${totalsModel.blocked.total}`, `${totalsModel.blocked.total} confirmed blocked`) : "",
+    totalsModel.unverified?.total ? l(`尚未验证 ${totalsModel.unverified.total}`, `尚未驗證 ${totalsModel.unverified.total}`, `${totalsModel.unverified.total} unverified`) : "",
+  ].filter(Boolean);
   return `<details class="advanced-details" data-disclosure-key="advanced">
     <summary>${l("高级信息", "進階資訊", "Advanced")}</summary>
     <div class="advanced-list">
@@ -6151,7 +6206,7 @@ function renderAdvancedDetails(entry, totals = null) {
       </div>
       <div class="advanced-row">
         <span class="advanced-label">${l("执行预检", "執行預檢", "Execution preflight")}</span>
-        <span>${escapeHtml(String(preflight))}</span>
+        <span>${escapeHtml(String(preflight))}${detailParts.length ? ` · ${escapeHtml(detailParts.join(" · "))}` : ""}</span>
       </div>
       <div class="advanced-row advanced-totals">
         <span class="advanced-label">${l("数学 / 升级后 / 可装", "數學 / 升級後 / 可裝", "Math / projected / installable")}</span>
@@ -6166,6 +6221,82 @@ function renderAdvancedDetails(entry, totals = null) {
   </details>`;
 }
 
+// The selected-plan note explains how execution reality relates to the
+// mathematical result — and nothing else. Wording is evidence-gated so a data
+// gap is never described as a refusal:
+//   已确认…无法安装        — only for metadata-proven negatives (energy/socket/plug).
+//   尚未验证…              — for missing capability data (DIM CSV exports).
+//   部分护甲尚未完成大师杰作 — when the only gap is the armor's upgrade tier.
+function renderExecutionNote(totalsModel) {
+  const { status, blocked, unverified, mathematicalVsInstallable, masterworkPending } = totalsModel;
+  if (!status && blocked.total === 0 && unverified.total === 0) return "";
+  const formatTotals = source => mathematicalVsInstallable
+    .map(stat => `${STAT_LABELS[stat]} ${Number(source[stat] || 0)}`).join(" / ");
+  const sentences = [];
+  if (mathematicalVsInstallable.length > 0) {
+    sentences.push(l(
+      `数学结果 ${formatTotals(totalsModel.mathematical)}；当前可实际装备 ${formatTotals(totalsModel.installable)}。`,
+      `數學結果 ${formatTotals(totalsModel.mathematical)}；目前可實際裝備 ${formatTotals(totalsModel.installable)}。`,
+      `Mathematical ${formatTotals(totalsModel.mathematical)}; installable right now ${formatTotals(totalsModel.installable)}.`,
+    ));
+  }
+  const confirmed = [];
+  if (blocked.energy) confirmed.push(l(
+    `${blocked.energy} 个属性模组因能量不足无法安装`,
+    `${blocked.energy} 個數值模組因能量不足無法安裝`,
+    `${blocked.energy} stat mod(s) cannot be installed for lack of energy`,
+  ));
+  if (blocked.socket) confirmed.push(l(
+    `${blocked.socket} 个模组因插槽或模组不可用无法安装`,
+    `${blocked.socket} 個模組因插槽或模組不可用無法安裝`,
+    `${blocked.socket} mod(s) cannot be installed because the socket or plug is unavailable`,
+  ));
+  if (blocked.mismatch) confirmed.push(l(
+    `${blocked.mismatch} 个调整模组与该护甲的固定调整属性不符`,
+    `${blocked.mismatch} 個調校模組與該防具的固定調校數值不符`,
+    `${blocked.mismatch} tuning mod(s) do not match the armor's fixed Tuning Stat`,
+  ));
+  if (confirmed.length) sentences.push(l(
+    `已确认：${confirmed.join("，")}。`,
+    `已確認：${confirmed.join("，")}。`,
+    `Confirmed: ${confirmed.join("; ")}.`,
+  ));
+  const unknown = [];
+  if (unverified.socket) unknown.push(l(
+    `${unverified.socket} 件护甲的插槽信息缺失（DIM 导出不含完整插槽数据）`,
+    `${unverified.socket} 件防具的插槽資訊缺失（DIM 匯出不含完整插槽資料）`,
+    `${unverified.socket} piece(s) carry no socket metadata (the DIM export omits it)`,
+  ));
+  if (unverified.socketWrite) unknown.push(l(
+    `${unverified.socketWrite} 个模组的插槽可用性未知`,
+    `${unverified.socketWrite} 個模組的插槽可用性未知`,
+    `${unverified.socketWrite} mod(s) have unknown socket availability`,
+  ));
+  if (unverified.energy) unknown.push(l(
+    `${unverified.energy} 件护甲的能量数据缺失`,
+    `${unverified.energy} 件防具的能量資料缺失`,
+    `${unverified.energy} piece(s) have no energy metadata`,
+  ));
+  if (unverified.tuning) unknown.push(l(
+    `${unverified.tuning} 件护甲的调整能力未知`,
+    `${unverified.tuning} 件防具的調校能力未知`,
+    `${unverified.tuning} piece(s) have unknown tuning capability`,
+  ));
+  if (unknown.length) sentences.push(l(
+    `尚未验证：${unknown.join("，")}；执行能力尚未完全验证，数值按完整方案给出。`,
+    `尚未驗證：${unknown.join("，")}；執行能力尚未完全驗證，數值按完整方案給出。`,
+    `Unverified: ${unknown.join("; ")}. Execution capability is not fully verified; values are shown for the complete plan.`,
+  ));
+  if (masterworkPending) sentences.push(l(
+    "部分护甲尚未完成大师杰作，升级后的数值见下方。",
+    "部分防具尚未完成大師之作，升級後的數值見下方。",
+    "Some armor is not fully masterworked yet; the upgraded values are listed below.",
+  ));
+  if (sentences.length === 0) return "";
+  const tone = confirmed.length ? "" : " is-unverified";
+  return `<p class="inventory-projection-note${tone}">${sentences.join("")}</p>`;
+}
+
 function renderSelectedLoadout(entry, index) {
   if (!entry) return "";
   // One normalization, consumed by both the five-piece table and the
@@ -6174,30 +6305,11 @@ function renderSelectedLoadout(entry, index) {
   const rows = createEntryPieceRows(entry);
   const { metCount, feasible } = getUnifiedEntrySummary(entry);
   const totalsModel = getUnifiedTotalsModel(entry);
-  const finalTotals = totalsModel.installable;
-  // A plan whose requested mods cannot all be installed shows lower actual
-  // totals than the Solver's arithmetic; say exactly which numbers differ and
-  // why, instead of claiming the projection is reachable right now.
-  const blockedByEnergy = totalsModel.blockedMods.filter(mod => mod.reason === "energy").length;
-  const blockedByOther = totalsModel.blockedMods.length - blockedByEnergy;
-  const projectionNote = totalsModel.mathematicalVsInstallable.length > 0
-    ? `<p class="inventory-projection-note">${l(
-      `数学结果 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.mathematical[stat]}`).join(" / ")}；当前可实际装备 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.installable[stat]}`).join(" / ")}。`
-        + (totalsModel.blockedMods.length
-          ? `原因：${blockedByEnergy ? `${blockedByEnergy} 个属性模组因能量不足无法安装` : ""}${blockedByEnergy && blockedByOther ? "，" : ""}${blockedByOther ? `${blockedByOther} 个调整模组因插槽或模组不可用被阻止` : ""}。`
-          : "原因：护甲尚未完成大师杰作，升级后的数值见下。")
-        + "未安装的模组不计入六维。",
-      `數學結果 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.mathematical[stat]}`).join(" / ")}；目前可實際裝備 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.installable[stat]}`).join(" / ")}。`
-        + (totalsModel.blockedMods.length
-          ? `原因：${blockedByEnergy ? `${blockedByEnergy} 個數值模組因能量不足無法安裝` : ""}${blockedByEnergy && blockedByOther ? "，" : ""}${blockedByOther ? `${blockedByOther} 個調校模組因插槽或模組不可用被阻止` : ""}。`
-          : "原因：防具尚未完成大師之作，升級後的數值見下。")
-        + "未安裝的模組不計入六維。",
-      `Mathematical ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.mathematical[stat]}`).join(" / ")}; installable now ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.installable[stat]}`).join(" / ")}. `
-        + (totalsModel.blockedMods.length
-          ? `Reason: ${blockedByEnergy ? `${blockedByEnergy} stat mod(s) blocked by energy` : ""}${blockedByEnergy && blockedByOther ? ", " : ""}${blockedByOther ? `${blockedByOther} tuning mod(s) blocked by socket or plug availability` : ""}.`
-          : "Reason: the armor is not fully masterworked yet; the upgraded values are listed below.")
-        + " Mods that cannot be installed are not counted.",
-    )}</p>` : "";
+  // The main six-stat bars are the Solver's mathematical result, in the same
+  // domain as the certificate that decides 达标. `installable` is execution
+  // preflight only and lives in the advanced panel and the note below.
+  const finalTotals = totalsModel.mathematical;
+  const projectionNote = renderExecutionNote(totalsModel);
   const ownership = entry.farmCount > 0
     ? l(
       `已有 ${entry.ownedCount}/5 · 待刷 ${entry.farmCount}`,

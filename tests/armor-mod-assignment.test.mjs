@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assignArmorMods } from "../src/core/armor-mod-assignment.mjs";
+import { assignArmorMods, executionProjectionMismatch, socketCapabilityConfidence, SOCKET_CONFIDENCE } from "../src/core/armor-mod-assignment.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
@@ -313,7 +313,10 @@ test("no socket of a role means the write is blocked, not guessed at socket 0", 
   const tuningAssignments = SLOTS.map(() => ({ mode: "+5-5", to: "health", from: "weapons" }));
   const result = assignArmorMods({ pieces: makePieces(), inventory: items, tuningAssignments, modAssignments });
   assert.equal(result.valid, false);
-  assert.ok(result.unassignedMods.some(item => item.index === 0 && item.reason === "statSocketUnknown"));
+  assert.ok(result.unassignedMods.some(item => item.index === 0 && item.reason === "statSocketMissing"));
+  // Socket metadata IS known here (complete per-socket candidate states), so the
+  // missing role is a real negative and the preflight must stay BLOCKED.
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
 });
 
 test("actualTotals use the piece's real masterwork; projectedTotals assume full masterwork", () => {
@@ -447,4 +450,134 @@ test("preflight blocking and installable semantics stay consistent", () => {
   assert.ok(blocked.projectedTotals.weapons - blocked.actualTotals.weapons > 0);
   assert.equal(clean.unassignedMods.length, 0);
   assert.deepEqual(clean.actualTotals, clean.projectedTotals);
+});
+
+// --- Tri-state socket capability: unknown is not blocked --------------------
+// A DIM CSV export carries the exact roll but no socket objects at all. The
+// absence of a socket is an absence of *evidence*, not proof of unavailability:
+// it must downgrade the preflight to UNVERIFIED and leave the plan's math
+// intact, instead of reporting every planned mod as blocked.
+
+// The DIM CSV normalized-item shape: no `sockets` array, no energy block.
+function makeUnknownSocketItem({index, fixedTuningStat = "health", masterworkTier = 5}) {
+  const rest = {...makeItem({index, fixedTuningStat, masterworkTier})};
+  delete rest.sockets;
+  delete rest.energy;
+  return {
+    ...rest,
+    dataConfidence: {
+      stats: "exact",
+      tuning: "exact",
+      sockets: "unknown",
+      assignment: "exact",
+    },
+  };
+}
+
+test("missing socket objects are UNVERIFIED, never blocked", () => {
+  const items = Array.from({length: 5}, (_, index) => makeUnknownSocketItem({index}));
+  const modAssignments = SLOTS.map(() => ({size: 10, stat: "weapons"}));
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const result = assignArmorMods({pieces: makePieces(), inventory: items, tuningAssignments, modAssignments});
+
+  assert.equal(result.valid, true, "an unknown socket must not invalidate the plan");
+  assert.equal(result.executionStatus, EXECUTION_STATUS.UNVERIFIED);
+  assert.deepEqual(result.unassignedMods, [], "nothing is proven uninstallable");
+  assert.ok(result.unverifiedMods.some(mod => mod.kind === "stat" && mod.reason === "statSocketUnverified"));
+  assert.ok(result.unverifiedMods.some(mod => mod.kind === "tuning" && mod.reason === "tuningSocketUnverified"));
+  assert.ok(result.unverifiedMods.some(mod => mod.kind === "item" && mod.reason === "socketCapabilityUnknown"),
+    "the export gap itself must be reported once per piece");
+  // No socket index is known, so no write can be named — but the planned mods
+  // still count, because absent metadata must not reduce the plan's value.
+  assert.deepEqual(result.plugOperations, []);
+  assert.deepEqual(result.actualTotals, result.projectedTotals,
+    "unknown capability must not deduct the planned stat/tuning contribution");
+});
+
+test("the same absent stat socket flips between UNVERIFIED and BLOCKED on metadata confidence alone", () => {
+  // Identical physical situation — only the tuning socket is exposed — but one
+  // instance declares a complete socket capability and the other does not.
+  const build = socketsConfidence => Array.from({length: 5}, (_, index) => {
+    const item = makeItem({index, fixedTuningStat: "health", masterworkTier: 5});
+    return {
+      ...item,
+      sockets: [item.sockets[1]], // the stat socket is gone
+      dataConfidence: {...item.dataConfidence, sockets: socketsConfidence},
+    };
+  });
+  const modAssignments = SLOTS.map(() => ({size: 10, stat: "weapons"}));
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const assignment = socketsConfidence => assignArmorMods({
+    pieces: makePieces(), inventory: build(socketsConfidence), tuningAssignments, modAssignments,
+  });
+
+  const known = assignment("exact");
+  assert.equal(known.executionStatus, EXECUTION_STATUS.BLOCKED);
+  assert.ok(known.unassignedMods.some(mod => mod.kind === "stat" && mod.reason === "statSocketMissing"));
+
+  const unknown = assignment("unknown");
+  assert.equal(unknown.executionStatus, EXECUTION_STATUS.UNVERIFIED,
+    "the identical missing socket is not a negative without complete metadata");
+  assert.deepEqual(unknown.unassignedMods, []);
+  assert.ok(unknown.unverifiedMods.some(mod => mod.kind === "stat" && mod.reason === "statSocketUnverified"));
+});
+
+test("socket capability confidence distinguishes absent from incomplete metadata", () => {
+  assert.equal(socketCapabilityConfidence({}), SOCKET_CONFIDENCE.UNKNOWN);
+  assert.equal(socketCapabilityConfidence({sockets: []}), SOCKET_CONFIDENCE.UNKNOWN);
+  assert.equal(socketCapabilityConfidence({sockets: [{}], dataConfidence: {sockets: "exact"}}),
+    SOCKET_CONFIDENCE.UNKNOWN, "a socket without a settled candidate state proves nothing");
+  assert.equal(socketCapabilityConfidence({
+    sockets: [{candidateState: CANDIDATE_STATE.KNOWN}], dataConfidence: {sockets: "exact"},
+  }), SOCKET_CONFIDENCE.KNOWN);
+  assert.equal(socketCapabilityConfidence({
+    sockets: [{candidateState: CANDIDATE_STATE.KNOWN}], dataConfidence: {sockets: "unknown"},
+  }), SOCKET_CONFIDENCE.UNKNOWN);
+});
+
+// --- Totals consistency contract --------------------------------------------
+// The execution layer may compare the solver's mathematical armor totals only
+// against `projectedTotals`. Comparing against `actualTotals`/installable is
+// what turned legitimate execution shortfalls into witness failures.
+
+test("installable may differ from mathematical without being a consistency error", () => {
+  const items = Array.from({length: 5}, (_, index) =>
+    makeItem({index, fixedTuningStat: "health", masterworkTier: 5, capacity: 1, used: 0}));
+  const modAssignments = SLOTS.map(() => ({size: 10, stat: "weapons"}));
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const result = assignArmorMods({pieces: makePieces(), inventory: items, tuningAssignments, modAssignments});
+
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
+  // mathematical/projected agree: the plan is arithmetically intact.
+  assert.deepEqual(executionProjectionMismatch(result.projectedTotals, result.projectedTotals), []);
+  // installable is lower, and that is explicitly allowed.
+  assert.notDeepEqual(result.actualTotals, result.projectedTotals);
+  assert.deepEqual(executionProjectionMismatch(result.actualTotals, result.projectedTotals).sort(),
+    ["weapons"], "only the energy-blocked stat differs");
+});
+
+test("mathematical != projected is the real consistency error", () => {
+  const items = Array.from({length: 5}, (_, index) =>
+    makeItem({index, fixedTuningStat: "health", masterworkTier: 5}));
+  const modAssignments = SLOTS.map(() => ({size: 10, stat: "weapons"}));
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const result = assignArmorMods({pieces: makePieces(), inventory: items, tuningAssignments, modAssignments});
+
+  const mathematical = {...result.projectedTotals};
+  assert.deepEqual(executionProjectionMismatch(mathematical, result.projectedTotals), []);
+  const drifted = {...mathematical, weapons: mathematical.weapons + 10};
+  assert.deepEqual(executionProjectionMismatch(drifted, result.projectedTotals), ["weapons"],
+    "a projected rebuild that does not reproduce the solver's arithmetic is the only witness failure");
+  assert.deepEqual(executionProjectionMismatch(null, result.projectedTotals), []);
+});
+
+test("full masterwork with no limits makes mathematical, projected and installable one number", () => {
+  const items = Array.from({length: 5}, (_, index) =>
+    makeItem({index, fixedTuningStat: "health", masterworkTier: 5}));
+  const modAssignments = SLOTS.map(() => ({size: 10, stat: "weapons"}));
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const result = assignArmorMods({pieces: makePieces(), inventory: items, tuningAssignments, modAssignments});
+  assert.equal(result.executionStatus, EXECUTION_STATUS.VERIFIED);
+  assert.deepEqual(executionProjectionMismatch(result.actualTotals, result.projectedTotals), []);
+  assert.deepEqual(result.actualTotals, result.projectedTotals);
 });

@@ -21,7 +21,7 @@ import {
   CLASS_ABILITY_STAT_BY_CLASS,
   FRAGMENT_STAT_CHANGES,
 } from "./fragment-data.data.mjs";
-import { assignArmorMods } from "./armor-mod-assignment.mjs";
+import { assignArmorMods, executionProjectionMismatch } from "./armor-mod-assignment.mjs";
 import { buildSocketCapabilities } from "./armor-sockets.mjs";
 import { assertSolutionConsistency, createCanonicalId, createPieceCapability } from "./solver-v3-contract.mjs";
 import { STATS } from "./armor-model.mjs";
@@ -426,8 +426,8 @@ export function buildBungieArmorItemActionPlan({
 }
 
 const MISS_REASON_TO_ERROR_CODE = {
-  statSocketUnknown: "statSocketUnknown",
-  tuningSocketUnknown: "tuningSocketUnknown",
+  statSocketMissing: "statSocketMissing",
+  tuningSocketMissing: "tuningSocketMissing",
   plugUnavailable: "plugUnavailable",
   energy: "energy",
   tuningMismatch: "tuningMismatch",
@@ -532,8 +532,13 @@ export function buildCustomLoadoutPlan({
       const checked = assertSolutionConsistency(verifiedWitness.problemSpec, verifiedWitness);
       assertSolutionConsistency({...verifiedWitness.problemSpec,
         pieceCapabilities: resolvedItems.map(createPieceCapability)}, verifiedWitness);
+      // The witness's `armorTotals` are the solver's mathematical result. The
+      // execution rebuild must be compared against `projectedTotals` (the plan
+      // on Tier-5 armor), never against `actualTotals`/installable: a
+      // not-yet-masterworked instance or a plug write that has not run yet is a
+      // legitimate shortfall, not evidence that the witness is wrong.
       if (createCanonicalId({...checked, pieces, config: undefined, tuningAssignments, modAssignments}) !== checked.canonicalId
-          || STATS.some(stat => checked.armorTotals[stat] !== assignment.actualTotals[stat])) {
+          || executionProjectionMismatch(checked.armorTotals, assignment.projectedTotals).length > 0) {
         errors.push({code: "witnessTotalsMismatch"});
       }
     } catch { errors.push({code: "unverifiedWitness"}); }

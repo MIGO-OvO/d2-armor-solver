@@ -2,7 +2,7 @@ import {
   calculateReachableRanges,
   findReachabilityWitness,
 } from "./reachability.mjs";
-import { assignArmorMods } from "./armor-mod-assignment.mjs";
+import { assignArmorMods, executionProjectionMismatch } from "./armor-mod-assignment.mjs";
 import { solveInventoryLoadout, compareInventoryResults } from "./inventory-solver.mjs";
 import { runSolver } from "./solver.mjs";
 import {
@@ -92,6 +92,16 @@ function annotateWitnesses(witnesses, problemSpec) {
   return verified;
 }
 
+// The execution preflight is checked against the *projected* totals only.
+//
+// After the mathematical/projected/installable split these three are no longer
+// interchangeable: `installableTotals` is deliberately allowed to fall short of
+// the solver's arithmetic (energy, a known socket incompatibility, a
+// not-yet-masterworked instance, a plug write that has not run yet). Comparing
+// the witness against it would turn every legitimate execution shortfall into a
+// false "witnessTotalsMismatch", which is how an exact plan ended up reported as
+// BLOCKED. `projectedTotals` is the same plan on Tier-5 armor, so it is the only
+// field that must reproduce the solver's mathematical armor totals exactly.
 function assessExecution(pieces, inventory, evaluation, availablePlugHashes = null) {
   if (!Array.isArray(pieces) || pieces.length !== 5 || !evaluation) return null;
   const result = assignArmorMods({
@@ -102,7 +112,7 @@ function assessExecution(pieces, inventory, evaluation, availablePlugHashes = nu
     availablePlugHashes,
   });
   const armor = evaluation.armorTotals || evaluation.totals;
-  if (armor && Object.keys(armor).some(stat => armor[stat] !== result.actualTotals[stat])) {
+  if (executionProjectionMismatch(armor, result.projectedTotals).length > 0) {
     result.executionStatus = EXECUTION_STATUS.BLOCKED;
     result.valid = false;
     result.unassignedMods.push({ kind: "item", reason: "witnessTotalsMismatch" });

@@ -14,8 +14,16 @@ import {
   TUNING_MOD_HASH_BY_TUNING,
 } from "../src/core/armor-mods.data.mjs";
 import { channelStorageKey } from "../src/core/build-channel.mjs";
-import { BASE_CONFIGS } from "../src/core/armor-model.mjs";
+import { BASE_CONFIGS, STATS } from "../src/core/armor-model.mjs";
+import { normalizeDimItem } from "../src/core/dim-csv.mjs";
 import { rebuildReference } from "../tests/helpers/reference-witness.mjs";
+
+// The reported DIM CSV fixture, normalized through the production importer so
+// the browser regression exercises the same item shape the app really sees.
+const DIM_FIXTURE = JSON.parse(
+  readFileSync(new URL("../tests/fixtures/dim-mask-of-fealty.json", import.meta.url), "utf8"),
+);
+const DIM_ITEMS = DIM_FIXTURE.records.map(normalizeDimItem);
 
 async function checkWitnessDomRoundTrip(page) {
   const models = await page.locator('.witness-breakdown').evaluateAll(elements => elements.map(element => {
@@ -57,6 +65,61 @@ async function countUnifiedOwnedRows(page, slotLabel = null) {
 // Reads the selected loadout's five rows in rendered order. `assignmentIndex`
 // is the Solver's own config index, which is what must line up with
 // tuningAssignments / modAssignments — never the row's display position.
+// The six main bars and the top target strip must be read back as numbers so a
+// test can compare them with the Solver's own arithmetic instead of with a
+// hard-coded expectation. `.is-met` is a separate field on purpose: the failure
+// mode this guards against is "bar shows 10 while the certificate says 20, and
+// both claim 达标".
+async function readStatBars(page) {
+  return page.locator("#loadoutDetail .inventory-result-stats .inventory-result-stat").evaluateAll(elements =>
+    elements.map(element => {
+      const strong = (element.querySelector("strong")?.textContent || "").trim();
+      const [actual, target] = strong.split("/").map(part => Number(String(part).replace(/\D/g, "")));
+      return {
+        actual: Number.isFinite(actual) ? actual : null,
+        target: Number.isFinite(target) ? target : null,
+        met: element.classList.contains("is-met"),
+        required: element.classList.contains("is-required"),
+        short: (element.querySelector("small")?.textContent || "").trim(),
+      };
+    }));
+}
+
+async function readComparisonGrid(page) {
+  return page.locator("#comparisonGrid .comp-item").evaluateAll(elements =>
+    elements.map(element => {
+      const values = (element.querySelector(".stat-values")?.textContent || "").trim();
+      const [actual, target] = values.split("/").map(part => Number(String(part).replace(/\D/g, "")));
+      return {
+        actual: Number.isFinite(actual) ? actual : null,
+        target: Number.isFinite(target) ? target : null,
+        diff: (element.querySelector(".diff")?.textContent || "").trim(),
+      };
+    }));
+}
+
+// The selected entry's own account of itself: what the certificate proved, and
+// which execution state the preflight reached.
+async function readSelectedAudit(page) {
+  return page.evaluate(() => {
+    const witness = window.getSelectedUnifiedWitness();
+    const certificate = witness?.certificate || {};
+    return {
+      status: certificate.status || null,
+      executionStatus: certificate.executionStatus || null,
+      witnessExecutionStatus: witness?.executionStatus || null,
+      statResults: certificate.statResults || {},
+      visibleTotals: witness?.visibleTotals || null,
+      finalTotals: witness?.finalTotals || null,
+      armorTotals: witness?.armorTotals || null,
+      projectedTotals: witness?.execution?.projectedTotals || null,
+      actualTotals: witness?.execution?.actualTotals || null,
+      unassignedMods: witness?.execution?.unassignedMods || [],
+      unverifiedMods: witness?.execution?.unverifiedMods || [],
+    };
+  });
+}
+
 async function readLoadoutRows(page) {
   return page.locator("#loadoutDetail .inventory-result-piece").evaluateAll(elements => elements.map(row => ({
     slot: row.dataset.pieceSlot,
@@ -1661,6 +1724,69 @@ async function checkResultWorkspace(browser) {
       "switching plans must keep the plan browser scroll position",
     );
 
+    // (11) Cross-domain invariant: the six bars, their 达标 markers and the top
+    // target strip must all come from the selected entry's own certificate. The
+    // failure this pins down is a bar reading the *installable* subset while the
+    // marker reads the mathematical certificate ("10 / 20 ✓ 达标").
+    const auditedPlans = Math.min(
+      await page.locator("#planList .inventory-result-option").count(),
+      6,
+    );
+    for (let planIndex = 0; planIndex < auditedPlans; planIndex++) {
+      await page.locator("#planList .inventory-result-option").nth(planIndex).click();
+      const [bars, grid, audit] = await Promise.all([
+        readStatBars(page),
+        readComparisonGrid(page),
+        readSelectedAudit(page),
+      ]);
+      assert.equal(bars.length, STATS.length, "the selected loadout must show six stat bars");
+      assert.equal(grid.length, STATS.length, "the target strip must show six stats");
+      for (const [statIndex, stat] of STATS.entries()) {
+        const bar = bars[statIndex];
+        const result = audit.statResults[stat];
+        assert.ok(result, `plan ${planIndex} has no certificate statResult for ${stat}`);
+        assert.equal(
+          bar.actual,
+          result.actual,
+          `plan ${planIndex} ${stat}: the bar must show the certificate's arithmetic (${result.actual}), `
+            + `not an execution subset — bar=${JSON.stringify(bar)} installable=${JSON.stringify(audit.actualTotals)}`,
+        );
+        assert.equal(
+          bar.met,
+          result.met === true,
+          `plan ${planIndex} ${stat}: the 达标 marker must agree with the certificate`,
+        );
+        assert.equal(
+          bar.target,
+          result.target,
+          `plan ${planIndex} ${stat}: the bar's target must be the solved target`,
+        );
+        if (audit.status === "EXACT_TARGET_PROVEN") {
+          assert.equal(
+            bar.actual,
+            bar.target,
+            `plan ${planIndex} ${stat}: an exact plan must show its exact value, never ${bar.actual}/${bar.target}`,
+          );
+        }
+        assert.ok(
+          !(bar.met && typeof result.below === "number" && result.below > 0),
+          `plan ${planIndex} ${stat}: 达标 while the certificate reports a shortfall`,
+        );
+      }
+      // The top strip is the *same* selected entry, so switching plans can never
+      // leave the old plan's numbers above a new plan's detail column.
+      const visible = audit.visibleTotals || audit.finalTotals || {};
+      for (const [statIndex, stat] of STATS.entries()) {
+        assert.equal(
+          grid[statIndex].actual,
+          Number(visible[stat] || 0),
+          `plan ${planIndex} ${stat}: the target strip is stale relative to the selected entry`,
+        );
+        assert.equal(grid[statIndex].target, bars[statIndex].target, "the strip and the bars must share one target");
+      }
+    }
+    await page.locator("#planList .inventory-result-option").nth(0).click();
+
     // (2) every qualifying plan outranks every non-qualifying one, and a
     // qualifying row always carries the verified wording.
     const rows = await page.locator("#planList .inventory-result-option").evaluateAll(elements =>
@@ -2364,6 +2490,125 @@ delete envWithoutBungie.BUNGIE_API_KEY;
 runBuild(envWithoutBungie);
 await startPreview();
 
+// The reported DIM CSV: exact arithmetic, no socket capability. The page must
+// present the certificate's numbers, stay UNVERIFIED (never BLOCKED) and never
+// word a data gap as a refusal.
+async function checkExactInventoryTotals(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    const injected = await page.evaluate(({ storageKeys, inventory, fixture }) => {
+      const exotic = inventory.find(item => item.exotic);
+      localStorage.setItem(storageKeys.upgradeDraft, JSON.stringify({
+        schemaVersion: 1,
+        pieces: [],
+        inventory,
+        setRequirement: fixture.setRequirement,
+        manualLocked: [],
+        importClassFilter: "hunter",
+        importTier5Only: true,
+        reassignModifiers: true,
+        onlyPlus5Tuning: true,
+        exoticSlotFilter: exotic ? exotic.slot : "",
+        fixedExoticKey: exotic ? `name:${String(exotic.name).trim().toLocaleLowerCase()}` : "",
+      }));
+      localStorage.setItem(storageKeys.calculatorMode, "solve");
+      return { count: inventory.length, exotic: exotic?.name || null };
+    }, { storageKeys: TEST_STORAGE_KEYS, inventory: DIM_ITEMS, fixture: DIM_FIXTURE });
+    assert.ok(injected.count > 0, "the DIM fixture must normalize into an inventory");
+
+    await page.reload({ waitUntil: "networkidle" });
+    // Targets are plain inputs; fragments are stepped readouts, so they move
+    // through the app's own adjuster to keep the budget summary consistent.
+    await page.evaluate(({ targets, fragments }) => {
+      for (const [stat, value] of Object.entries(targets)) {
+        const input = document.getElementById(`target_${stat}`);
+        if (!input) continue;
+        input.value = String(value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      for (const [stat, value] of Object.entries(fragments)) {
+        const current = parseInt(document.getElementById(`fragVal_${stat}`)?.textContent) || 0;
+        if (value !== current) window.adjFragment(stat, value - current);
+      }
+    }, { targets: DIM_FIXTURE.targets, fragments: DIM_FIXTURE.fragments });
+    const appliedFragments = await page.evaluate(() => Object.fromEntries(
+      ["health", "melee", "grenade", "super", "class", "weapons"]
+        .map(stat => [stat, parseInt(document.getElementById(`fragVal_${stat}`)?.textContent) || 0])));
+    assert.deepEqual(appliedFragments, DIM_FIXTURE.fragments, "the fixture fragments must be applied before solving");
+    await page.evaluate(() => window.solve());
+    await page.locator("#inventoryResults:not([hidden])").waitFor();
+
+    // The fixture's two known builds must be listed as exact, and 精确 is the
+    // first ranking axis, so they occupy the head of the plan browser.
+    assert.ok(
+      await page.locator("#planList .inventory-result-option").count() >= DIM_FIXTURE.builds.length,
+      "the DIM fixture must produce at least the two reported plans",
+    );
+
+    for (let planIndex = 0; planIndex < DIM_FIXTURE.builds.length; planIndex++) {
+      await page.locator("#planList .inventory-result-option").nth(planIndex).click();
+      const [bars, grid, audit] = await Promise.all([
+        readStatBars(page),
+        readComparisonGrid(page),
+        readSelectedAudit(page),
+      ]);
+      assert.equal(audit.status, "EXACT_TARGET_PROVEN",
+        `plan ${planIndex} must carry an exact certificate, got ${audit.status}`);
+      assert.deepEqual(audit.finalTotals, DIM_FIXTURE.targets, `plan ${planIndex} final totals`);
+      for (const [statIndex, stat] of STATS.entries()) {
+        // The exact number, and 精确/达标 on the same bar — never 10/20 with ✓.
+        assert.equal(bars[statIndex].actual, DIM_FIXTURE.targets[stat],
+          `plan ${planIndex} ${stat}: the bar must show the proven ${DIM_FIXTURE.targets[stat]}`);
+        assert.equal(bars[statIndex].met, true, `plan ${planIndex} ${stat} must read 达标`);
+        assert.equal(grid[statIndex].actual, DIM_FIXTURE.targets[stat],
+          `plan ${planIndex} ${stat}: the target strip must follow the selected plan`);
+        assert.match(grid[statIndex].diff, /精确|精確|Exact/, `plan ${planIndex} ${stat} must read 精确`);
+        assert.ok(!(bars[statIndex].met && bars[statIndex].actual < bars[statIndex].target),
+          `plan ${planIndex} ${stat}: 达标 while showing ${bars[statIndex].actual}/${bars[statIndex].target}`);
+      }
+      // No socket objects were imported, so the preflight cannot be BLOCKED and
+      // no mod may be reported as uninstallable.
+      assert.equal(audit.executionStatus, "UNVERIFIED",
+        `plan ${planIndex}: a math-only import is UNVERIFIED, never ${audit.executionStatus}`);
+      assert.deepEqual(audit.unassignedMods, [],
+        `plan ${planIndex}: no mod may be reported blocked without socket evidence`);
+      assert.ok(audit.unverifiedMods.some(mod => mod.reason === "socketCapabilityUnknown"),
+        `plan ${planIndex}: the DIM socket gap must be surfaced as unverified`);
+      assert.deepEqual(audit.projectedTotals, audit.armorTotals,
+        `plan ${planIndex}: projected totals are the bridge back to the solver arithmetic`);
+      const note = await page.locator("#loadoutDetail .inventory-projection-note").allInnerTexts();
+      for (const text of note) {
+        assert.doesNotMatch(text, /被阻止|被阻擋|无法安装|無法安裝|blocked/i,
+          `plan ${planIndex}: missing socket data must not be worded as a refusal: ${text}`);
+        assert.match(text, /尚未验证|尚未驗證|Unverified/, `plan ${planIndex}: the note must say 尚未验证: ${text}`);
+      }
+      // The advanced panel keeps all three totals side by side. It is collapsed
+      // by default, so read textContent rather than the rendered innerText.
+      const advanced = await page.locator('#loadoutDetail details[data-disclosure-key="advanced"] .advanced-totals-grid')
+        .first().evaluate(element => ({ text: element.textContent || "", rows: element.children.length }));
+      assert.equal(advanced.rows, STATS.length, "the advanced panel must keep one row per stat");
+      assert.match(advanced.text, /数学|數學|math/, "the advanced panel must keep the mathematical totals");
+      assert.match(advanced.text, /升级后|升級後|projected/, "the advanced panel must keep the projected totals");
+      assert.match(advanced.text, /可装|可裝|installable/, "the advanced panel must keep the installable totals");
+      const preflight = await page.locator('#loadoutDetail details[data-disclosure-key="advanced"] .advanced-row')
+        .evaluateAll(elements => elements.map(element => element.textContent || "").join(" "));
+      assert.match(preflight, /UNVERIFIED/, "the advanced panel must report the unverified preflight");
+      assert.doesNotMatch(preflight, /witnessTotalsMismatch/, "a math-only import must not fabricate a witness mismatch");
+    }
+    assert.deepEqual(browserErrors, []);
+    console.log("browser smoke: exact DIM inventory totals / execution tri-state OK");
+  } finally {
+    await context.close();
+  }
+}
+
 let browser;
 try {
   browser = await chromium.launch({
@@ -2377,6 +2622,7 @@ try {
   await checkBungieLoginHidden(browser);
   await checkResultWorkspace(browser);
   await checkLoadoutPresentation(browser);
+  await checkExactInventoryTotals(browser);
   if (process.argv.includes("--target-sync-only")) {
     console.log("upgrade target sync and set requirement browser regressions OK");
   } else {

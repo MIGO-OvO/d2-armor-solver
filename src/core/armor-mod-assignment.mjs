@@ -3,10 +3,28 @@
 // The solver already pins one stat mod and one tuning direction per piece; this
 // module makes that plan EXECUTABLE: it resolves the exact socket on each
 // piece, checks insertability (tri-state availability), energy feasibility, and
-// fixed-tuning compatibility, and produces an ordered plug write strategy. It
-// never silently skips: any requested mod that cannot be placed lands in
-// unassignedMods and invalidates the plan (handoff 3.6 / Phase C).
+// fixed-tuning compatibility, and produces an ordered plug write strategy.
 //
+// Execution evidence is TRI-STATE, and the three states are not interchangeable:
+//   VERIFIED    — known metadata proves the write can happen.
+//   UNVERIFIED  — the metadata needed to judge the write is absent (DIM CSV
+//                 imports carry the mathematical roll but no socket objects).
+//                 The write is presumed possible; the plan's math is untouched
+//                 and the preflight only reports that capability is unproven.
+//   BLOCKED     — known metadata proves the write cannot happen (energy,
+//                 socket missing from a complete socket list, plug absent from
+//                 a complete candidate/unlock set).
+// `unknown !== blocked`: a missing socket object is only a negative verdict
+// when the instance's socket capability is known complete. Anything a caller
+// cannot disprove lands in unverifiedMods, never in unassignedMods.
+//
+// Totals carried back to the caller:
+//   projectedTotals  — the plan with every piece upgraded to Tier 5 and every
+//                      requested modifier applied. At full masterwork this IS
+//                      the solver's mathematical result, which is why the
+//                      execution/solver consistency check compares against it.
+//   actualTotals     — the installable subset: known-blocked writes contribute
+//                      nothing. Unverified writes DO contribute (see above).
 // Pure functions: no DOM, no fetch, no browser storage.
 
 import {
@@ -20,6 +38,41 @@ import { SOCKET_ROLE, CANDIDATE_STATE } from "./armor-sockets.mjs";
 import { EXECUTION_STATUS } from "./solver-v3-contract.mjs";
 
 export const STAT_MOD_ENERGY_COST = { 5: 1, 10: 3 };
+
+// How much this instance's socket metadata can prove.
+//   KNOWN   — per-socket candidate data is settled for every socket, so the
+//             absence of a socket role (or of a plug) is a real negative.
+//   UNKNOWN — no socket objects at all (DIM CSV: math only), an explicit
+//             "unknown" confidence, or per-socket candidate data that is not
+//             settled. A missing socket proves nothing here.
+export const SOCKET_CONFIDENCE = Object.freeze({
+  KNOWN: "known",
+  UNKNOWN: "unknown",
+});
+
+export function socketCapabilityConfidence(item) {
+  const sockets = item?.sockets;
+  if (!Array.isArray(sockets) || sockets.length === 0) return SOCKET_CONFIDENCE.UNKNOWN;
+  if (item?.dataConfidence?.sockets === "unknown") return SOCKET_CONFIDENCE.UNKNOWN;
+  // "partial" means the socket objects exist but their reusable-plug sets do
+  // not, which is exactly the state where a role classification can be wrong.
+  return sockets.every(socket => socket?.candidateState === CANDIDATE_STATE.KNOWN)
+    ? SOCKET_CONFIDENCE.KNOWN
+    : SOCKET_CONFIDENCE.UNKNOWN;
+}
+
+// The single invariant that ties the execution rebuild back to the solver.
+// `projectedTotals` (the plan on Tier-5 armor) must reproduce the solver's
+// mathematical armor totals exactly; `actualTotals`/installable is explicitly
+// allowed to fall short of them (energy, a known socket incompatibility, armor
+// that is not masterworked yet, a plug write that has not run). Callers that
+// compare against the installable subset turn every legitimate execution
+// shortfall into a bogus "the witness is wrong" verdict.
+export function executionProjectionMismatch(mathematicalTotals, projectedTotals) {
+  if (!mathematicalTotals || !projectedTotals) return [];
+  return STATS.filter(stat =>
+    Number(mathematicalTotals[stat] || 0) !== Number(projectedTotals[stat] || 0));
+}
 
 function statModHashFor(assignment) {
   if (!assignment?.stat || !assignment?.size) return null;
@@ -107,10 +160,15 @@ function assignPiece({
   desiredStatHash, desiredStatAssignment,
   desiredTuningHash, desiredTuningAssignment,
   availablePlugHashes,
+  socketConfidence = SOCKET_CONFIDENCE.UNKNOWN,
 }) {
   const unassigned = [];
   const unverified = [];
   const operations = [];
+  // Set when a write had to be presumed possible because the socket metadata
+  // cannot judge it. Such a write stays in the installable totals: absent
+  // metadata must never silently deduct the plan's mathematical contribution.
+  const presumed = { stat: false, tuning: false };
   const compatibility = tuningCompatibility(item, desiredTuningAssignment);
   if (!compatibility.ok) {
     // Nothing is written, so the instance keeps whatever it already carries.
@@ -148,6 +206,19 @@ function assignPiece({
     return { ok: true, unverified: true };
   };
 
+  // A role socket the plan needs but the instance does not expose is a proven
+  // negative ONLY when the socket metadata is known complete. Under unknown
+  // capability the socket object is simply absent from the data (DIM CSV), so
+  // the write cannot be disproved: it is reported as unverified and counted.
+  const missingSocket = (kind, plugHash) => {
+    if (socketConfidence === SOCKET_CONFIDENCE.KNOWN) {
+      unassigned.push({ index, slot, kind, plugHash, reason: `${kind}SocketMissing` });
+      return;
+    }
+    presumed[kind] = true;
+    unverified.push({ index, slot, kind, plugHash, reason: `${kind}SocketUnverified` });
+  };
+
   // Clear path: the plan wants no stat mod (or no tuning) but the instance
   // currently has one installed. The socket's empty/default plug is the only
   // legal way to remove it; when the socket contract is unknown there is no
@@ -155,7 +226,7 @@ function assignPiece({
   // silent skip.
   const clearOperation = (socket, kind, plugHashLabel) => {
     if (!socket) {
-      unassigned.push({ index, slot, kind, plugHash: 0, reason: `${kind}SocketUnknown` });
+      missingSocket(kind, 0);
       return;
     }
     if (socket.emptyPlugHash) {
@@ -172,7 +243,7 @@ function assignPiece({
 
   if (desiredStatHash) {
     if (!statSocket) {
-      unassigned.push({ index, slot, kind: "stat", plugHash: desiredStatHash, reason: "statSocketUnknown" });
+      missingSocket("stat", desiredStatHash);
     } else if (desiredStatHash !== currentStatHash) {
       const insert = canInsert(statSocket, desiredStatHash);
       if (!insert.ok) {
@@ -205,7 +276,7 @@ function assignPiece({
 
   if (desiredTuningHash) {
     if (!tuningSocket) {
-      unassigned.push({ index, slot, kind: "tuning", plugHash: desiredTuningHash, reason: "tuningSocketUnknown" });
+      missingSocket("tuning", desiredTuningHash);
     } else if (desiredTuningHash !== currentTuning) {
       const compatible = tuningCompatibility(item, desiredTuningAssignment);
       if (!compatible.ok) {
@@ -241,16 +312,19 @@ function assignPiece({
 
   // `settled` answers "is the requested state in effect once this plan runs":
   // either a write was queued, or the instance already carries exactly that
-  // plug. Anything else (energy, socket, availability, mismatch) is excluded
+  // plug, or the capability data cannot disprove the write. Anything proven
+  // impossible (energy, known socket, known availability, mismatch) is excluded
   // from the installable totals instead of being counted from the request.
   const statSettled = desiredStatHash
     ? desiredStatHash === currentStatHash
       || operations.some(op => op.kind === "stat" && op.plugItemHash === desiredStatHash)
-    : !currentStatHash || operations.some(op => op.kind === "stat");
+      || presumed.stat
+    : !currentStatHash || operations.some(op => op.kind === "stat") || presumed.stat;
   const tuningSettled = desiredTuningHash
     ? desiredTuningHash === currentTuning
       || operations.some(op => op.kind === "tuning" && op.plugItemHash === desiredTuningHash)
-    : !currentTuning || operations.some(op => op.kind === "tuning");
+      || presumed.tuning
+    : !currentTuning || operations.some(op => op.kind === "tuning") || presumed.tuning;
   return { operations, unassigned, unverified, statSettled, tuningSettled };
 }
 
@@ -335,6 +409,14 @@ export function assignArmorMods({
     if (item.dataConfidence?.stats !== "exact" || item.dataConfidence?.tuning === "unknown") {
       unverifiedMods.push({ index, kind: "item", reason: "physicalEvidenceUnknown" });
     }
+    const socketConfidence = socketCapabilityConfidence(item);
+    if (socketConfidence === SOCKET_CONFIDENCE.UNKNOWN
+        && !(Array.isArray(item.sockets) && item.sockets.length > 0)) {
+      // DIM CSV: the roll is exact but no socket capability was exported. This
+      // is why the preflight below reports UNVERIFIED instead of inventing a
+      // BLOCKED verdict for every planned mod.
+      unverifiedMods.push({ index, kind: "item", reason: "socketCapabilityUnknown" });
+    }
     const result = assignPiece({
       item,
       index,
@@ -344,6 +426,7 @@ export function assignArmorMods({
       desiredTuningHash: tuningHashFor(tuningAssignment),
       desiredTuningAssignment: tuningAssignment,
       availablePlugHashes,
+      socketConfidence,
     });
     operationsByPiece.push(result.operations);
     for (const [kind, hash] of [[SOCKET_ROLE.STAT, statModHashFor(statAssignment)], [SOCKET_ROLE.TUNING, tuningHashFor(tuningAssignment)]]) {
@@ -357,14 +440,17 @@ export function assignArmorMods({
     if (tuningAssignment) resolvedCounts.tuning++;
 
     // installableTotals: only the requested mods this instance can actually
-    // accept right now. A blocked stat/tuning write contributes nothing — the
-    // math still knows the plan, but the character does not carry it.
+    // accept right now, i.e. everything that is not a *proven* negative. An
+    // unverified write (missing socket metadata) is counted, because the plan's
+    // math must not be reduced by data the export never carried.
     const actual = pieceTotals(item, {
       tuningAssignment: result.tuningSettled ? tuningAssignment : null,
       statAssignment: result.statSettled ? statAssignment : null,
       projected: false,
     });
-    // projectedTotals: the same plan with this piece upgraded to Tier 5.
+    // projectedTotals: the same plan with this piece upgraded to Tier 5. At full
+    // masterwork this equals the solver's mathematical result, which is the
+    // bridge the execution layer is checked against.
     const projected = pieceTotals(item, {
       tuningAssignment, statAssignment, projected: true,
     });
@@ -375,6 +461,9 @@ export function assignArmorMods({
   }
 
   return {
+    // `valid` means every requested write is affirmatively placeable. An
+    // unverified write keeps the plan valid — it is a missing-evidence state,
+    // not a failure — and is reported through executionStatus/unverifiedMods.
     valid: unassignedMods.length === 0,
     unassignedMods,
     unverifiedMods,

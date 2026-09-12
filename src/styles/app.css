@@ -1574,6 +1574,9 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 .loadout-subline { margin: 0; color: var(--text-dim); font-size: .8125rem; }
 .loadout-note { margin: 4px 0 0; color: var(--accent-strong); font-size: .75rem; }
 .inventory-projection-note { margin: 4px 0 0; color: var(--warning); font-size: .75rem; }
+/* A missing-evidence state is informational, not a refusal: it must not read as
+   the same alarm colour as a proven preflight block. */
+.inventory-projection-note.is-unverified { color: var(--text-dim); }
 .inventory-result-actions {
   display: flex;
   flex: 0 0 auto;
