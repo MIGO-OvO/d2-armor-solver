@@ -36,6 +36,12 @@ try {
   });
   await page.goto("http://127.0.0.1:5179/");
   await page.locator(".desktop-nav button:not([disabled])").first().waitFor();
+  await page.getByRole('navigation').getByRole('button', { name: '使用说明', exact: true }).click();
+  await page.locator('#guideTitle').waitFor();
+  assert.equal(new URL(page.url()).pathname, '/guide/index.html');
+  assert.equal(await page.locator('#dim-import').count(), 1);
+  await page.locator('#backLink').click();
+  await page.locator('.desktop-nav button:not([disabled])').first().waitFor();
   assert.equal(await page.locator("#headerBungieAuth").innerText(), "");
   assert.equal(await page.locator(".desktop-nav #pageLanguage").count(), 1);
   assert.equal(await page.locator("#pageTitle").isVisible(), false);

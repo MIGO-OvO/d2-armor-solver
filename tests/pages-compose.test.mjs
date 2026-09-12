@@ -22,6 +22,8 @@ const DEVELOPMENT_PORTAL = PORTAL.replace(
 
 async function createDistribution(directory, portal, marker) {
   await mkdir(path.join(directory, "app"), { recursive: true });
+  await mkdir(path.join(directory, "guide"), { recursive: true });
+  await writeFile(path.join(directory, "guide", "index.html"), `guide-${marker}`);
   await mkdir(path.join(directory, "assets"), { recursive: true });
   await writeFile(path.join(directory, "index.html"), portal);
   await writeFile(
@@ -59,6 +61,8 @@ test("Pages composition keeps main at root and develop under /dev", async () => 
     );
     assert.match(developmentApp, /<body>development<\/body>/);
     assert.doesNotMatch(developmentApp, /data-development-oauth-relay/);
+    assert.equal(await readFile(path.join(output, 'guide', 'index.html'), 'utf8'), 'guide-stable');
+    assert.equal(await readFile(path.join(output, 'dev', 'guide', 'index.html'), 'utf8'), 'guide-development');
 
     const rootPortal = await readFile(path.join(output, "index.html"), "utf8");
     const developmentPortal = await readFile(path.join(output, "dev", "index.html"), "utf8");

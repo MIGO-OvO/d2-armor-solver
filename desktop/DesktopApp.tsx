@@ -38,6 +38,11 @@ export function DesktopApp() {
     };
     const onLink = (event: MouseEvent) => {
       const anchor = (event.target as Element).closest?.("a[href]") as HTMLAnchorElement | null;
+      if (anchor?.getAttribute('href')?.startsWith('../guide/')) {
+        event.preventDefault();
+        location.assign(new URL(`./guide/index.html${anchor.hash}`, location.href).href);
+        return;
+      }
       if (!anchor || !isTauri() || !/^https?:/.test(anchor.href)) return;
       event.preventDefault();
       // The Rust capability independently restricts allowed HTTPS destinations.
@@ -79,7 +84,7 @@ export function DesktopApp() {
         <button disabled={!ready} aria-pressed={mode === "solve"} onClick={() => clickSolver("modeSolveButton")}>{t.solve}</button>
         <button disabled={!ready} aria-pressed={mode === "upgrade"} onClick={() => clickSolver("modeUpgradeButton")}>{t.upgrade}</button>
         <div className="desktop-nav-divider" />
-        <button disabled={!ready} onClick={() => clickSolver("openProgramIntro")}>{t.help}</button>
+        <button disabled={!ready} onClick={() => clickSolver("userGuideLink")}>{t.help}</button>
         <button disabled={!ready} onClick={() => clickSolver("openSavedBuilds")}>{t.saved}</button>
         <div className="desktop-nav-divider" />
         <button disabled={!ready} onClick={() => clickSolver("dimCsvFile")}>{t.import}</button>

@@ -116,10 +116,10 @@
   <div class="header">
     <div class="header-tools">
       <div class="header-actions">
-        <button type="button" class="header-action" id="openProgramIntro" onclick="openProgramIntro()" aria-haspopup="dialog" aria-controls="programIntroDrawer">
+        <a class="header-action" id="userGuideLink" href="../guide/" target="_blank" rel="noopener noreferrer">
           <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-hint"/></svg>
           <span data-i18n="helpOpenLabel">使用说明</span>
-        </button>
+        </a>
         <button type="button" class="header-action" id="openSavedBuilds" onclick="openSavedBuildsDrawer()" aria-haspopup="dialog" aria-controls="savedBuildsDrawer">
           <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>
           <span data-i18n="savedBuildsOpenLabel">已保存方案</span>
@@ -150,10 +150,10 @@
       <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warn"/></svg>
       <span data-i18n="fraudNotice">如果你是付费购买的，说明你被骗了！</span>
     </span>
-    <button type="button" class="notice-free-more" onclick="openProgramIntro()" aria-haspopup="dialog" aria-controls="programIntroDrawer">
+    <a class="notice-free-more" href="../guide/#disclaimer" target="_blank" rel="noopener noreferrer">
       <span data-i18n="helpDisclaimerTitle">免责声明</span>
       <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg>
-    </button>
+    </a>
   </div>
 
   <div class="solver-mode-switch" role="group" aria-label="计算模式" data-i18n-aria="calculatorModeLabel">
@@ -373,32 +373,11 @@
   </div>
 
   <!-- ============================================================
-       Global overlays — help, the saved-plan manager and the save dialog.
+       Global overlays — the saved-plan manager and the save dialog.
        They live outside the result workspace so a saved plan is reachable
        from the input state too, and they never occupy document flow height.
        ============================================================ -->
   <div class="overlay-scrim" id="overlayScrim" hidden onclick="closeOverlays()"></div>
-
-  <aside class="side-drawer" id="programIntroDrawer" role="dialog" aria-modal="true" aria-labelledby="programIntroTitle" hidden>
-    <header class="side-drawer-head">
-      <h2 id="programIntroTitle" data-i18n="helpDrawerTitle">使用说明</h2>
-      <button type="button" class="icon-btn" onclick="closeOverlays()" aria-label="关闭窗口" data-i18n-aria="closeLabel"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
-    </header>
-    <div class="side-drawer-body">
-      <section class="drawer-section">
-        <h3 data-i18n="introSummary">程序介绍</h3>
-        <div class="drawer-prose" data-i18n-html="introContent"></div>
-      </section>
-      <section class="drawer-section">
-        <h3 data-i18n="helpHowToTitle">使用方式</h3>
-        <div class="drawer-prose" data-i18n-html="introUsage"></div>
-      </section>
-      <section class="drawer-section">
-        <h3 data-i18n="helpDisclaimerTitle">免责声明</h3>
-        <div class="drawer-prose" data-i18n-html="helpDisclaimerBody"></div>
-      </section>
-    </div>
-  </aside>
 
   <aside class="side-drawer side-drawer--saved" id="savedBuildsDrawer" role="dialog" aria-modal="true" aria-labelledby="savedBuildsTitle" hidden>
     <header class="side-drawer-head">

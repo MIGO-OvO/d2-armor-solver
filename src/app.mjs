@@ -2397,14 +2397,9 @@ function renderUpgradeImportPanel() {
         </label>
         ${isScratchMode ? "" : `<button type="button" class="btn" data-import-dependent onclick="applyEquippedLoadout()">${icon("refresh")}${l("填入当前穿戴", "填入目前穿戴", "Fill equipped loadout")}</button>`}
         <button type="button" class="btn upgrade-import-toggle" id="toggleInventoryImportButton" aria-expanded="${inventoryImportExpanded}" aria-controls="upgradeImportBody" onclick="toggleInventoryImportPanel()">${icon(inventoryImportExpanded ? 'up' : 'down')}<span>${toggleLabel}</span></button>
-        <button type="button" class="btn-link armor-source-help-toggle" id="dimImportHelpToggle" aria-expanded="false" aria-controls="dimImportHelp" onclick="toggleDimImportHelp(this)">${icon('hint')}<span>${t('dimImportHelpToggle')}</span></button>
+        <a class="btn-link armor-source-help-toggle" id="dimImportGuideLink" href="../guide/#dim-import" target="_blank" rel="noopener noreferrer">${icon('hint')}<span>${t('dimImportHelpToggle')}</span></a>
       </div>
     </div>
-    <p class="armor-source-help" id="dimImportHelp" hidden>${l(
-      "在 DIM 中打开设置 → 电子表格 → 防具，点击 Export CSV，再选择导出的文件；文件只在浏览器本地处理。",
-      "在 DIM 中開啟設定 → 試算表 → 防具，點擊 Export CSV，再選擇匯出的檔案；檔案只在瀏覽器本機處理。",
-      "In DIM open Settings → Spreadsheets → Armor and click Export CSV, then pick the exported file. The file is processed locally in your browser.",
-    )}</p>
     <div class="upgrade-import-body" id="upgradeImportBody" ${inventoryImportExpanded ? '' : 'hidden'}>
       <div class="armor-filter-toolbar" id="armorFilterToolbar" aria-label="${l("已有护甲筛选与操作", "已有防具篩選與操作", "Owned armor filters and actions")}">
         <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
@@ -2462,14 +2457,6 @@ function renderUpgradeImportPanel() {
   renderBungieAuthState();
   updateAdvancedConstraintsSummary();
   restoreDetails();
-}
-
-function toggleDimImportHelp(button) {
-  const help = document.getElementById('dimImportHelp');
-  if (!help) return;
-  const open = help.hidden;
-  help.hidden = !open;
-  button?.setAttribute('aria-expanded', String(open));
 }
 
 // One line that answers "is anything constrained right now?" without opening
@@ -6975,7 +6962,7 @@ function clearSavedBuildStatus() {
 }
 
 // ============================================================
-// OVERLAYS (help drawer, saved-plan drawer, save dialog, toasts)
+// OVERLAYS (saved-plan drawer, save dialog, toasts)
 // ============================================================
 // One scrim, one Escape handler, one state read: the overlays never stack, so
 // closing "everything" is always correct and no overlay can trap focus behind
@@ -6988,19 +6975,11 @@ function setOverlay(id, open) {
 }
 
 function closeOverlays() {
-  setOverlay('programIntroDrawer', false);
   setOverlay('savedBuildsDrawer', false);
   setOverlay('saveBuildDialog', false);
   const scrim = document.getElementById('overlayScrim');
   if (scrim) scrim.hidden = true;
   document.body.classList.remove('has-overlay');
-}
-
-function openProgramIntro() {
-  closeOverlays();
-  setOverlay('programIntroDrawer', true);
-  document.body.classList.add('has-overlay');
-  document.getElementById('programIntroDrawer')?.querySelector('.side-drawer-head h2')?.focus?.();
 }
 
 function openSavedBuildsDrawer() {
@@ -7668,9 +7647,7 @@ Object.assign(window, {
   toggleInventoryImportPanel,
   toggleOnlyPlus5Tuning,
   togglePlus3,
-  toggleDimImportHelp,
   setAllUpgradeLocked,
-  openProgramIntro,
   openSavedBuildsDrawer,
   closeOverlays,
   submitSaveBuild,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, cp, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -7,7 +8,8 @@ import process from "node:process";
 import { execSync } from "node:child_process";
 
 import { chromium } from "playwright-core";
-import { preview } from "vite";
+import { build, preview } from "vite";
+import { composePages } from './compose-pages.mjs';
 import {
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
@@ -17,6 +19,7 @@ import { channelStorageKey } from "../src/core/build-channel.mjs";
 import { BASE_CONFIGS, STATS } from "../src/core/armor-model.mjs";
 import { normalizeDimItem } from "../src/core/dim-csv.mjs";
 import { rebuildReference } from "../tests/helpers/reference-witness.mjs";
+import { GUIDE_CONTENT } from "../src/guide-content.mjs";
 
 // The reported DIM CSV fixture, normalized through the production importer so
 // the browser regression exercises the same item shape the app really sees.
@@ -2876,29 +2879,25 @@ async function checkInformationArchitecture(browser) {
     assert.ok(notice.height <= 46, `the free notice must stay compact: ${notice.height}px`);
     assert.match(notice.text, /完全免费/, "the free notice must keep the free claim");
 
-    // (2) Help opens from an explicit action.
-    assert.equal(await page.locator("#programIntroDrawer").isHidden(), true,
-      "the help drawer must start closed");
-    await page.locator("#openProgramIntro").click();
-    await page.locator("#programIntroDrawer:not([hidden])").waitFor();
-    const drawerText = await page.locator("#programIntroDrawer").innerText();
-    assert.match(drawerText, /程序介绍|程式介紹|About this tool/);
-    assert.match(drawerText, /使用方式|How to use/);
-    assert.match(drawerText, /免责声明|免責聲明|Disclaimer/);
-    assert.match(drawerText, /完全免费|完全免費|completely free/);
-    await page.keyboard.press("Escape");
-    await page.locator("#programIntroDrawer").waitFor({ state: "hidden" });
+    // (2) Help is a real link that leaves the current solve intact.
+    assert.equal(await page.locator('#programIntroDrawer').count(), 0);
+    assert.equal(await page.locator('#userGuideLink').getAttribute('href'), '../guide/');
+    assert.equal(await page.locator('#userGuideLink').getAttribute('aria-haspopup'), null);
+    assert.equal(await page.locator('.notice-free-more').getAttribute('href'), '../guide/#disclaimer');
+    const popupPromise = page.waitForEvent('popup');
+    await page.locator('#userGuideLink').click();
+    const guide = await popupPromise;
+    await guide.waitForLoadState('networkidle');
+    assert.equal(new URL(guide.url()).pathname, new URL('../guide/', baseUrl).pathname);
+    assert.equal(await guide.evaluate(() => window.opener === null), true);
+    await guide.close();
 
     // (3) Advanced constraints are one collapsed summary line by default, and
     // "how do I import" is a help affordance rather than a permanent paragraph.
     assert.equal(await page.locator("#advancedConstraints").getAttribute("open"), null,
       "advanced constraints must be collapsed by default");
     assert.match(await page.locator("#advancedConstraintsSummary").innerText(), /未设置|未設定|Not set/);
-    assert.equal(await page.locator("#dimImportHelp").isHidden(), true,
-      "the DIM import instructions must not occupy permanent space");
-    await page.locator("#dimImportHelpToggle").click();
-    await page.locator("#dimImportHelp").waitFor({ state: "visible" });
-    assert.match(await page.locator("#dimImportHelp").innerText(), /DIM/);
+    assert.equal(await page.locator('#dimImportGuideLink').getAttribute('href'), '../guide/#dim-import');
 
     // (4) One thin row per constraint once set: the summary names both.
     await page.evaluate(() => window.setCalculatorMode("upgrade"));
@@ -3325,6 +3324,86 @@ async function checkWorkspaceLayout(browser) {
   }
 }
 
+async function checkGuide(browser) {
+  await access(path.resolve('dist/guide/index.html'));
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.goto(new URL('../guide/#dim-import', baseUrl).href, { waitUntil: 'networkidle' });
+    for (const [language, copy] of Object.entries(GUIDE_CONTENT)) {
+      await page.locator('#guideLanguage').selectOption(language);
+      assert.equal(await page.locator('html').getAttribute('lang'), copy.lang);
+      assert.equal(await page.locator('#guideTitle').innerText(), copy.title);
+      for (const [id] of copy.sections) assert.equal(await page.locator(`section#${id}`).count(), 1);
+      for (const width of [1440, 760, 390, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.waitForFunction(open => document.getElementById('guideContents').open === open, width > 760);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${language} overflow at ${width}`);
+        assert.equal(await page.locator('#guideContents').getAttribute('open') !== null, width > 760);
+      }
+    }
+    await page.locator('#guideContents summary').click();
+    await page.locator('#guideNav a[href="#disclaimer"]').click();
+    assert.equal(await page.locator('#guideContents').getAttribute('open'), null);
+    assert.equal(new URL(page.url()).hash, '#disclaimer');
+    assert.ok(await page.locator('#disclaimer').evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return rect.top >= 0 && rect.top < innerHeight;
+    }));
+    await page.reload({ waitUntil: 'networkidle' });
+    assert.equal(await page.locator('#guideLanguage').inputValue(), 'en');
+    assert.equal(await page.locator('#backLink').getAttribute('href'), '../app/');
+    for (const [name, width] of [['desktop', 1440], ['mobile', 390]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(() => scrollTo(0, 0));
+      await page.screenshot({ path: `.impeccable/review/${name}.png`, fullPage: true });
+    }
+    assert.deepEqual(errors, []);
+    console.log('browser smoke: guide languages, anchors, links and mobile overflow OK');
+  } finally { await context.close(); }
+}
+
+async function checkComposedGuides(browser) {
+  const root = await mkdtemp(path.join(tmpdir(), 'd2-guide-browser-'));
+  let composedServer;
+  const context = await browser.newContext();
+  try {
+    const development = path.join(root, 'development');
+    const stable = path.join(root, 'stable');
+    const output = path.join(root, 'pages');
+    await cp(path.resolve('dist'), stable, { recursive: true });
+    await build({ configFile: 'vite.config.mjs',
+      define: { __BUILD_CHANNEL__: JSON.stringify('develop') },
+      build: { outDir: development },
+    });
+    await composePages({ stableDirectory: stable, developmentDirectory: development,
+      outputDirectory: output, stableCommit: 'test-stable', developmentCommit: 'test-develop' });
+    composedServer = await preview({ configFile: 'vite.config.mjs', build: { outDir: output },
+      preview: { host: '127.0.0.1', port: 0, strictPort: false } });
+    const origin = composedServer.resolvedUrls.local[0];
+    const page = await context.newPage();
+    for (const prefix of ['', 'dev/']) {
+      await access(path.join(output, prefix, 'guide/index.html'));
+      await page.goto(new URL(`${prefix}app/`, origin).href, { waitUntil: 'networkidle' });
+      await page.locator('#pageLanguage').selectOption('zh-cht');
+      const href = await page.locator('#userGuideLink').getAttribute('href');
+      assert.equal(href, '../guide/');
+      await page.goto(new URL(href, page.url()).href, { waitUntil: 'networkidle' });
+      assert.equal(new URL(page.url()).pathname, `/${prefix}guide/`);
+      assert.equal(await page.locator('#guideLanguage').inputValue(), 'zh-cht');
+      assert.equal(await page.locator('#guideSections section').count(), 17);
+      assert.equal(new URL(await page.locator('#backLink').getAttribute('href'), page.url()).pathname, `/${prefix}app/`);
+    }
+    console.log('browser smoke: composed stable /guide/ and develop /dev/guide/ OK');
+  } finally {
+    await context.close();
+    await composedServer?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 let browser;
 try {
   browser = await chromium.launch({
@@ -3332,6 +3411,8 @@ try {
     headless: true,
   });
   await checkPortal(browser);
+  await checkGuide(browser);
+  await checkComposedGuides(browser);
   await checkInventoryPlanning(browser);
   await checkUpgradeTargetSync(browser);
   await checkCancelledReachabilityProbe(browser);

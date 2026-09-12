@@ -1,4 +1,4 @@
-import { cp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { build, mergeConfig } from "vite";
@@ -103,7 +103,29 @@ if (!assets.some(name => /armor-engine\.worker/.test(name))) {
   throw new Error("Worker chunk missing from dist-offline/assets");
 }
 
+// The offline app lives at the archive root, unlike the website's app/ entry.
+html = html.replaceAll('../guide/', './guide/index.html');
 await writeFile(htmlPath, html);
+// Build the guide as one inline module too, so file:// needs no module fetches.
+const guideBuild = await build({
+  configFile: false,
+  define: baseConfig.define,
+  build: {
+    write: false,
+    rollupOptions: {
+      input: path.join(projectRoot, 'src', 'guide.mjs'),
+      output: { codeSplitting: false },
+    },
+  },
+});
+let guideHtml = await readFile(path.join(projectRoot, 'guide', 'index.html'), 'utf8');
+const guideJs = guideBuild.output.find(entry => entry.type === 'chunk').code;
+const guideCss = guideBuild.output.find(entry => entry.fileName.endsWith('.css')).source;
+guideHtml = guideHtml.replace('<script type="module" src="../src/guide.mjs"></script>',
+  `<style>${guideCss}</style><script type="module">${guideJs}</script>`)
+  .replaceAll('../app/', '../index.html');
+await mkdir(path.join(outDir, 'guide'), { recursive: true });
+await writeFile(path.join(outDir, 'guide', 'index.html'), guideHtml);
 // The inlined HTML is fully self-contained (inline <style> + <script>), so
 // the original assets/ files are now unreferenced; deleting them keeps the
 // distributed zip from bloating with ~1.7MB of dead files.

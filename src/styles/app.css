@@ -5653,17 +5653,7 @@ a:focus-visible {
   gap: 8px;
   margin-left: auto;
 }
-.armor-source-help {
-  margin: 8px 0 0;
-  padding: 8px 10px;
-  border-left: 2px solid color-mix(in oklab, var(--accent) 42%, transparent);
-  border-radius: 0 4px 4px 0;
-  background: var(--surface-quiet);
-  color: var(--text-dim);
-  font-size: .8125rem;
-  line-height: 1.6;
-}
-.armor-source-help[hidden] { display: none; }
+.header-action, .notice-free-more, .armor-source-help-toggle { text-decoration: none; }
 
 .armor-filter-toolbar {
   display: flex;
@@ -5919,18 +5909,6 @@ body.has-overlay { overflow: hidden; }
 }
 .side-drawer-status:empty { display: none; }
 .side-drawer-status { padding: 0 16px 12px; }
-.drawer-section + .drawer-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
-.drawer-section h3 {
-  margin: 0 0 8px;
-  color: var(--text);
-  font-size: .875rem;
-  font-weight: 720;
-}
-.drawer-prose { color: var(--text-dim); font-size: .875rem; line-height: 1.75; text-wrap: pretty; }
-.drawer-prose p { margin: 0 0 10px; }
-.drawer-prose ol { margin: 0; padding-left: 1.15rem; display: grid; gap: 8px; }
-.drawer-prose li { overflow-wrap: anywhere; }
-.drawer-prose strong { color: var(--text); }
 
 .modal {
   position: fixed;
@@ -6234,7 +6212,6 @@ body.has-overlay { overflow: hidden; }
     justify-content: flex-end;
     margin-left: 0;
   }
-  .armor-source-help { max-width: 92ch; }
   /* Row 1 carries the whole import state with Clear on its right edge; row 2 is
      Class | Tier 5 | effective count, packed left. The toolbar keeps its own
      top rule as the divider, so no extra margin is stacked on the panel gap. */

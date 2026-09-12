@@ -1,4 +1,4 @@
-import { cp } from "node:fs/promises";
+import { access, cp } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { build } from "vite";
@@ -10,6 +10,7 @@ const projectRoot = path.resolve(
 await build({
   configFile: path.join(projectRoot, "vite.config.mjs"),
 });
+await access(path.join(projectRoot, "dist", "guide", "index.html"));
 
 await Promise.all([
   cp(

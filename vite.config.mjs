@@ -23,6 +23,7 @@ export default defineConfig({
       input: {
         portal: path.join(projectRoot, "index.html"),
         app: path.join(projectRoot, "app", "index.html"),
+        guide: path.join(projectRoot, "guide", "index.html"),
       },
     },
   },

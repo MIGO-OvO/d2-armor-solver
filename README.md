@@ -186,6 +186,10 @@ v2 围绕“真实库存配装”做了大幅升级：
 
 ## Usage / 导入与导出 DIM
 
+网站教程位于 [`guide/index.html`](guide/index.html)，随 Vite 多页面构建发布到 `dist/guide/index.html`。从求解器右上角「使用说明」打开，可阅读简中、繁中和英文教程。正式版 `/app/` 链接到 `/guide/`，开发版 `/dev/app/` 链接到 `/dev/guide/`；两者均使用相对链接，兼容仓库子路径部署。教程内容独立维护在 `src/guide-content.mjs`。
+
+离线 ZIP 与桌面版也打包同一份教程，无需联网阅读。
+
 ### 导入护甲清单
 
 在 DIM 中依次进入：

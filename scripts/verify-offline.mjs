@@ -58,6 +58,16 @@ try {
 
   await page.goto(indexUrl, { waitUntil: "load" });
   await page.locator("#pageTitle").waitFor({ state: "visible" });
+  assert.equal(await page.locator('#userGuideLink').getAttribute('href'), './guide/index.html');
+  assert.equal(await page.locator('#dimImportGuideLink').getAttribute('href'), './guide/index.html#dim-import');
+  const guide = await context.newPage();
+  guide.on('pageerror', error => browserErrors.push(error.message));
+  await guide.goto(new URL('./guide/index.html#dim-import', indexUrl).href, { waitUntil: 'load' });
+  await guide.locator('#dim-import').waitFor();
+  await guide.locator('#guideLanguage').selectOption('en');
+  assert.equal(await guide.locator('#guideTitle').innerText(), 'User guide');
+  assert.equal(await guide.locator('#backLink').getAttribute('href'), '../index.html');
+  await guide.close();
   assert.equal(
     await page.locator("#btnSolve").count(),
     1,

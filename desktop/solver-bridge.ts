@@ -31,10 +31,10 @@ export async function mountSolver(host: HTMLElement, languageHost: HTMLElement) 
     if (!node) throw new Error(`Missing solver output: ${selector}`);
     output.append(node);
   }
-  // Overlays (help drawer, saved-plan drawer, save dialog, toasts) stay fixed
+  // Overlays (saved-plan drawer, save dialog, toasts) stay fixed
   // over the whole window; they are moved only so the output column owns every
   // non-input surface the renderer produces.
-  for (const selector of ["#overlayScrim", "#programIntroDrawer", "#savedBuildsDrawer",
+  for (const selector of ["#overlayScrim", "#savedBuildsDrawer",
     "#saveBuildDialog", "#toastStack"]) {
     const node = main.querySelector(selector);
     if (!node) throw new Error(`Missing solver overlay: ${selector}`);
