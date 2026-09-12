@@ -369,3 +369,82 @@ test("balanced tuning (+3) is accepted by every piece regardless of fixed stat",
   assert.equal(result.valid, true, JSON.stringify(result.unassignedMods));
   assert.ok(result.plugOperations.every(op => op.plugItemHash === BALANCED_TUNING_MOD_HASH));
 });
+
+// --- Mathematical vs projected vs installable totals (handoff Phase D) ------
+// `projectedTotals` is the plan with every requested mod in place; at full
+// masterwork it IS the solver's mathematical result. `actualTotals` is the
+// installable subset: a mod the instance cannot accept right now contributes
+// nothing, so the two must diverge exactly by the blocked writes.
+
+test("without execution limits the installable totals equal the mathematical plan", () => {
+  const items = Array.from({ length: 5 }, (_, index) =>
+    makeItem({index, fixedTuningStat: "health", masterworkTier: 5}));
+  const modAssignments = SLOTS.map(() => ({size: 10, stat: "weapons"}));
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const result = assignArmorMods({pieces: makePieces(), inventory: items, tuningAssignments, modAssignments});
+  assert.deepEqual(result.unassignedMods, []);
+  assert.equal(result.executionStatus, EXECUTION_STATUS.VERIFIED);
+  assert.deepEqual(result.actualTotals, result.projectedTotals,
+    "nothing is blocked, so installable must equal the mathematical result");
+});
+
+test("an energy-blocked stat mod stays mathematical but leaves installable totals", () => {
+  const items = Array.from({length: 5}, (_, index) =>
+    makeItem({index, fixedTuningStat: "health", masterworkTier: 5, capacity: 1, used: 0}));
+  const modAssignments = SLOTS.map(() => ({size: 10, stat: "weapons"}));
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const result = assignArmorMods({pieces: makePieces(), inventory: items, tuningAssignments, modAssignments});
+
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
+  assert.ok(result.unassignedMods.some(mod => mod.kind === "stat" && mod.reason === "energy"));
+  assert.equal(result.plugOperations.filter(op => op.kind === "stat").length, 0,
+    "a blocked mod must never produce a socket operation");
+  // Mathematical/projected result is untouched by execution reality.
+  assert.equal(result.projectedTotals.weapons, 75);
+  // installableTotals loses exactly the 5 x +10 that cannot be installed.
+  assert.equal(result.actualTotals.weapons, 25);
+  assert.equal(result.actualTotals.health, result.projectedTotals.health);
+});
+
+test("a plug the socket cannot accept is excluded from installable totals", () => {
+  const tuningAssignments = SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"}));
+  const modAssignments = SLOTS.map(() => null);
+  const items = Array.from({length: 5}, (_, index) => {
+    const item = makeItem({index, fixedTuningStat: "health", masterworkTier: 5});
+    // A complete per-socket candidate list that does not contain the request.
+    item.sockets[1] = {
+      ...item.sockets[1],
+      candidateState: CANDIDATE_STATE.KNOWN,
+      candidatePlugHashes: new Set([BALANCED_TUNING_MOD_HASH]),
+    };
+    return item;
+  });
+  const result = assignArmorMods({pieces: makePieces(), inventory: items, tuningAssignments, modAssignments});
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
+  assert.ok(result.unassignedMods.some(mod => mod.kind === "tuning" && mod.reason === "plugUnavailable"));
+  assert.equal(result.projectedTotals.health, 100);
+  assert.equal(result.actualTotals.health, 75, "the +5 tuning that cannot be written is not counted");
+  assert.equal(result.actualTotals.weapons, 50, "and its -5 source is not deducted either");
+});
+
+test("preflight blocking and installable semantics stay consistent", () => {
+  const blocked = assignArmorMods({
+    pieces: makePieces(),
+    inventory: Array.from({length: 5}, (_, index) =>
+      makeItem({index, fixedTuningStat: "health", masterworkTier: 5, capacity: 1, used: 0})),
+    tuningAssignments: SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"})),
+    modAssignments: SLOTS.map(() => ({size: 10, stat: "weapons"})),
+  });
+  const clean = assignArmorMods({
+    pieces: makePieces(),
+    inventory: Array.from({length: 5}, (_, index) =>
+      makeItem({index, fixedTuningStat: "health", masterworkTier: 5})),
+    tuningAssignments: SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"})),
+    modAssignments: SLOTS.map(() => ({size: 10, stat: "weapons"})),
+  });
+  // Whatever preflight refuses to write must be missing from installable totals.
+  assert.ok(blocked.unassignedMods.length > 0);
+  assert.ok(blocked.projectedTotals.weapons - blocked.actualTotals.weapons > 0);
+  assert.equal(clean.unassignedMods.length, 0);
+  assert.deepEqual(clean.actualTotals, clean.projectedTotals);
+});

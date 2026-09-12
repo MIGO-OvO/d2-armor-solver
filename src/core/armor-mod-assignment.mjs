@@ -113,8 +113,15 @@ function assignPiece({
   const operations = [];
   const compatibility = tuningCompatibility(item, desiredTuningAssignment);
   if (!compatibility.ok) {
+    // Nothing is written, so the instance keeps whatever it already carries.
     unassigned.push({ index, slot, kind: "tuning", reason: "tuningMismatch" });
-    return { operations, unassigned, unverified };
+    return {
+      operations, unassigned, unverified,
+      statSettled: desiredStatHash ? desiredStatHash === currentStatModHash(item) : !currentStatModHash(item),
+      tuningSettled: desiredTuningHash
+        ? desiredTuningHash === currentTuningHash(item)
+        : !currentTuningHash(item),
+    };
   }
   if (compatibility.unverified) unverified.push({ index, slot, kind: "tuning", reason: "tuningCapabilityUnknown" });
   if (desiredStatAssignment && !desiredStatHash) unassigned.push({ index, slot, kind: "stat", reason: "invalidAssignment" });
@@ -232,7 +239,19 @@ function assignPiece({
   // established: the tuning socket is left untouched (no write, no clear), and
   // the executor reports the unverified tuning separately.
 
-  return { operations, unassigned, unverified };
+  // `settled` answers "is the requested state in effect once this plan runs":
+  // either a write was queued, or the instance already carries exactly that
+  // plug. Anything else (energy, socket, availability, mismatch) is excluded
+  // from the installable totals instead of being counted from the request.
+  const statSettled = desiredStatHash
+    ? desiredStatHash === currentStatHash
+      || operations.some(op => op.kind === "stat" && op.plugItemHash === desiredStatHash)
+    : !currentStatHash || operations.some(op => op.kind === "stat");
+  const tuningSettled = desiredTuningHash
+    ? desiredTuningHash === currentTuning
+      || operations.some(op => op.kind === "tuning" && op.plugItemHash === desiredTuningHash)
+    : !currentTuning || operations.some(op => op.kind === "tuning");
+  return { operations, unassigned, unverified, statSettled, tuningSettled };
 }
 
 // Order the per-piece operations deterministically: stat socket writes first,
@@ -337,11 +356,17 @@ export function assignArmorMods({
     if (statAssignment?.size > 0) resolvedCounts.stat++;
     if (tuningAssignment) resolvedCounts.tuning++;
 
+    // installableTotals: only the requested mods this instance can actually
+    // accept right now. A blocked stat/tuning write contributes nothing — the
+    // math still knows the plan, but the character does not carry it.
     const actual = pieceTotals(item, {
-      tuningAssignment, statAssignment: statAssignment, projected: false,
+      tuningAssignment: result.tuningSettled ? tuningAssignment : null,
+      statAssignment: result.statSettled ? statAssignment : null,
+      projected: false,
     });
+    // projectedTotals: the same plan with this piece upgraded to Tier 5.
     const projected = pieceTotals(item, {
-      tuningAssignment, statAssignment: statAssignment, projected: true,
+      tuningAssignment, statAssignment, projected: true,
     });
     for (const stat of STATS) {
       actualTotals[stat] += actual[stat];
