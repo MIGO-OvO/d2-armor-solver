@@ -38,6 +38,14 @@ body { overflow: hidden; }
    grids above need a wider gap. */
 .desktop-solver #comparisonGrid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .desktop-solver .cmd-bar { margin: 0 0 20px; }
+/* The shared plan-browser cap discounts the browser page chrome only. Inside the
+   desktop shell the scrollport starts below the 60px topbar and ends above the
+   30px status bar, so the cap must discount that chrome too or the panel would
+   run past the bottom of the workspace. */
+.desktop-solver .plan-browser {
+  height: calc(100dvh - 200px);
+  height: clamp(300px, calc(100dvh - 200px), 760px);
+}
 .desktop-solver .footer { margin-top: 24px; font-size: .75rem; }
 .desktop-startup, .desktop-error { padding: 16px; }
 .desktop-error { background: var(--card); color: var(--health); }

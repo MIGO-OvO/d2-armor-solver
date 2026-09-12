@@ -1315,22 +1315,40 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 .inventory-result-piece,
 .inventory-result-piece-name,
 .armor-state-cell,
-.farm-requirements-heading > *,
-.farm-requirement-row > *,
-.advanced-row > *,
-.advice-row > * { min-width: 0; }
+.acquisition-head > *,
+.acquisition-row-head > *,
+.acquisition-field,
+.acquisition-constraint-row > *,
+.acquisition-compare-row > *,
+.advanced-row > * { min-width: 0; }
 .inventory-result-actions { flex-wrap: wrap; }
-.farm-requirement-row > span,
-.advanced-row > span,
-.advice-row > strong { overflow-wrap: anywhere; }
+.acquisition-field-value,
+.acquisition-constraint-row > strong,
+.acquisition-compare-row > strong,
+.advanced-row > span { overflow-wrap: anywhere; }
 
 /* ---------- Plan browser ---------- */
+/* The plan browser is a fixed workspace, not a growing list. A bare
+   `max-height: calc(100vh - 220px)` on the list let the *panel* grow on tall
+   viewports: at 1440p/4K the whole list expanded, the left column reached
+   thousands of pixels, the selected loadout (a few hundred pixels tall) left a
+   large void beside it, and browsing plans required scrolling the page instead
+   of the list. Bounding the panel and letting only its middle row scroll keeps
+   the toolbar, the filter/sort controls and the "show more" button in place at
+   every viewport height.
+   `dvh` tracks the real visible area on mobile; the `vh` declaration above it
+   is the fallback for engines that predate `dvh`. */
 .plan-browser {
   position: sticky;
-  top: 72px;
+  top: 78px;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
   min-width: 0;
+  height: calc(100vh - 170px);
+  height: clamp(320px, calc(100dvh - 170px), 760px);
+  min-height: 0;
+  overflow: hidden;
   padding-right: 4px;
   border-right: 1px solid var(--border-subtle);
 }
@@ -1369,6 +1387,7 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 }
 .plan-sort {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   color: var(--text-dim);
@@ -1405,9 +1424,15 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   font-size: .8125rem;
   line-height: 1.6;
 }
+/* The list owns the only vertical scrollbar in the workspace. `min-height: 0`
+   is what lets it shrink inside the grid row instead of forcing the panel to
+   grow; `max-height: none` hands height control back to the panel. */
 .inventory-result-list {
   display: grid;
-  max-height: calc(100vh - 220px);
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  max-height: none;
   gap: 2px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1711,6 +1736,18 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 .armor-archetype { color: var(--text); }
 .armor-tuning { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
 .armor-mod { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
+/* A missing piece has no instance to preflight against, so its Tuning and armor
+   mod are planned values. The flag keeps that visible without pretending the
+   number was verified. */
+.armor-cell-flag {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: .625rem;
+  font-weight: 650;
+  letter-spacing: .04em;
+}
 .armor-state-cell {
   display: flex;
   flex-wrap: wrap;
@@ -1752,34 +1789,217 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 .owned-armor-match-actions small { color: var(--text-dim); font-size: .625rem; }
 .owned-armor-action { min-height: 28px; padding: 3px 9px; font-size: .6875rem; }
 
-/* ---------- Farm summary (derived from the same five rows) ---------- */
-.farm-requirements-heading {
+/* ---------- Acquisition plan ---------- */
+/* "What am I missing and how do I farm it?". Deliberately the same visual
+   language as the five-piece table: one flat panel, thin rules, a data grid and
+   a couple of small state badges — no card wall, no heavy outline, no
+   high-saturation block per piece. */
+.acquisition-plan {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+  border-top: 1px solid var(--border-subtle);
+}
+.acquisition-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 6px 14px;
-  color: var(--text-dim);
-  font-size: .75rem;
+  gap: 4px 14px;
 }
-.farm-requirements-title {
+.acquisition-title {
   margin: 0;
-  color: var(--accent-strong);
-  font-size: .8125rem;
+  color: var(--text);
+  font-size: .9375rem;
   font-weight: 700;
+  letter-spacing: -.005em;
 }
-.farm-requirement-list { display: grid; gap: 4px; }
-.farm-requirement-row strong { color: var(--text); }
-.farm-requirement-row span { color: var(--text); }
-.farm-requirement-row small { color: var(--text-dim); }
-
-/* ---------- Advanced / advice accordions ---------- */
-.advanced-details,
-.advice-details {
+.acquisition-count {
+  color: var(--text-dim);
+  font-family: var(--font-numeric);
+  font-size: .75rem;
+  font-variant-numeric: tabular-nums;
+}
+.acquisition-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+.acquisition-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 0;
   border-top: 1px solid var(--border-subtle);
 }
-.advanced-details > summary,
-.advice-details > summary {
+.acquisition-row:first-child { border-top: 0; }
+.acquisition-row-head {
+  display: grid;
+  grid-template-columns: 26px auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.acquisition-index {
+  color: var(--text-dim);
+  font-family: var(--font-numeric);
+  font-size: .6875rem;
+  font-variant-numeric: tabular-nums;
+}
+.acquisition-slot { color: var(--text); font-size: .8125rem; font-weight: 700; }
+.acquisition-target {
+  color: var(--accent-strong);
+  font-size: .8125rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.acquisition-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+/* Status is carried by the label, never by colour alone. */
+.acquisition-badge {
+  padding: 1px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: .625rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.acquisition-badge.is-farm { border-color: color-mix(in oklab, var(--accent) 45%, transparent); color: var(--accent-strong); }
+.acquisition-badge.is-exotic { border-color: color-mix(in oklab, var(--warning) 45%, transparent); color: var(--warning); }
+.acquisition-badge.is-set { border-color: color-mix(in oklab, var(--border-strong) 70%, transparent); color: var(--text-dim); }
+.acquisition-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  gap: 4px 14px;
+  padding-left: 36px;
+}
+.acquisition-field { display: grid; gap: 0; min-width: 0; }
+.acquisition-field-label {
+  color: var(--text-dim);
+  font-size: .6875rem;
+  font-weight: 650;
+}
+.acquisition-field-value {
+  color: var(--text);
+  font-size: .8125rem;
+  line-height: 1.45;
+}
+.acquisition-field-value.is-archetype { color: var(--archetype); }
+.acquisition-field-value.is-numeric {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+.acquisition-notice {
+  margin: 0 0 0 36px;
+  color: var(--warning);
+  font-size: .75rem;
+  line-height: 1.5;
+}
+.acquisition-sub {
+  margin-left: 36px;
+  border-top: 1px solid var(--border-subtle);
+}
+.acquisition-sub > summary {
+  padding: 5px 0;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+  min-height: 24px;
+}
+.acquisition-sub > summary::-webkit-details-marker { display: none; }
+.acquisition-sub > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 7px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform var(--duration-fast);
+}
+.acquisition-sub[open] > summary::before { transform: rotate(90deg); }
+.acquisition-sub > summary:hover { color: var(--text); }
+.acquisition-template {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px 8px;
+  padding: 2px 0 6px;
+}
+.acquisition-template-stat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 4px;
+  min-width: 0;
+  font-size: .6875rem;
+}
+.acquisition-template-stat .icon { width: .8125rem; height: .8125rem; }
+.acquisition-template-label { min-width: 0; overflow-wrap: anywhere; }
+.acquisition-template-stat strong {
+  grid-column: 1 / -1;
+  color: var(--text);
+  font-family: var(--font-numeric);
+  font-size: .9375rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.acquisition-note {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-size: .6875rem;
+  line-height: 1.55;
+}
+.acquisition-compare { display: grid; gap: 3px; padding: 2px 0 8px; }
+.acquisition-compare-row {
+  display: grid;
+  grid-template-columns: minmax(48px, 62px) minmax(0, 1fr);
+  gap: 4px 10px;
+  font-size: .75rem;
+}
+.acquisition-compare-row > span { color: var(--text-dim); font-weight: 650; }
+.acquisition-compare-row > strong { color: var(--text); font-weight: 600; }
+.acquisition-compare-row.is-differ > strong { color: var(--warning); }
+.acquisition-constraints {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.acquisition-constraints-title {
+  color: var(--text-dim);
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.acquisition-constraint-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 108px) minmax(0, 1fr);
+  gap: 4px 12px;
+  font-size: .75rem;
+}
+.acquisition-constraint-row > span { color: var(--text-dim); font-weight: 650; }
+.acquisition-constraint-row > strong { color: var(--text); font-weight: 650; }
+
+/* ---------- Advanced accordions ---------- */
+.advanced-details {
+  border-top: 1px solid var(--border-subtle);
+}
+.advanced-details > summary {
   padding: 9px 2px;
   color: var(--text-dim);
   font-size: .75rem;
@@ -1789,10 +2009,8 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   cursor: pointer;
   list-style: none;
 }
-.advanced-details > summary::-webkit-details-marker,
-.advice-details > summary::-webkit-details-marker { display: none; }
-.advanced-details > summary::before,
-.advice-details > summary::before {
+.advanced-details > summary::-webkit-details-marker { display: none; }
+.advanced-details > summary::before {
   content: "";
   display: inline-block;
   width: 0;
@@ -1803,10 +2021,8 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   border-left: 5px solid currentColor;
   transition: transform var(--duration-fast);
 }
-.advanced-details[open] > summary::before,
-.advice-details[open] > summary::before { transform: rotate(90deg); }
-.advanced-details > summary:hover,
-.advice-details > summary:hover { color: var(--text); }
+.advanced-details[open] > summary::before { transform: rotate(90deg); }
+.advanced-details > summary:hover { color: var(--text); }
 .advanced-list { display: grid; gap: 8px; padding: 4px 0 12px; }
 .advanced-row {
   display: grid;
@@ -1845,15 +2061,7 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   font-weight: 650;
   cursor: pointer;
 }
-.advice-body { display: grid; gap: 6px; padding: 2px 0 10px; }
-.advice-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 190px) minmax(0, 1fr);
-  align-items: baseline;
-  gap: 6px 14px;
-  font-size: .75rem;
-}
-.advice-row strong { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+.advanced-row strong { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
 
 /* ---------- Responsive ---------- */
 /* The seven-column armor table would force horizontal overflow in a narrow
@@ -1881,6 +2089,20 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   .inventory-result-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .inventory-result-stat:nth-child(3n + 1) { border-left: 0; }
   .inventory-result-stat:nth-child(n + 4) { border-top: 1px solid var(--border-subtle); }
+  /* The acquisition row's four-column head cannot stay on one line here, so
+     slot / identity / badges stack under the running index instead of forcing
+     horizontal overflow. */
+  .acquisition-row-head {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 2px 10px;
+  }
+  .acquisition-index { grid-column: 1; grid-row: 1; }
+  .acquisition-slot { grid-column: 2; grid-row: 1; }
+  .acquisition-target { grid-column: 2; grid-row: 2; }
+  .acquisition-badges { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  .acquisition-grid { grid-template-columns: minmax(0, 1fr); }
+  .acquisition-template { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .acquisition-constraint-row { grid-template-columns: minmax(0, 1fr); gap: 0 12px; }
 }
 
 @media (max-width: 1099px) {
@@ -1890,12 +2112,26 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 }
 
 @media (max-width: 900px) {
-  .plan-browser { position: static; border-right: 0; padding-right: 0; }
+  /* A fixed-height workspace is a desktop, two-column affordance. Below this
+     width the plan browser becomes a horizontally browsable strip, so the
+     desktop height cap and sticky positioning must not leak into phones. */
+  .plan-browser {
+    position: static;
+    grid-template-rows: auto auto auto;
+    grid-template-columns: none;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    border-right: 0;
+    padding-right: 0;
+  }
   .inventory-results-layout { grid-template-columns: minmax(0, 1fr); }
   .inventory-result-list {
     max-height: none;
+    grid-template-columns: none;
     grid-auto-columns: minmax(220px, 1fr);
     grid-auto-flow: column;
+    align-content: start;
     padding-bottom: 6px;
     overflow-x: auto;
     overflow-y: hidden;
@@ -1908,9 +2144,7 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   .inventory-results-layout { grid-template-columns: minmax(0, 1fr); }
   .inventory-result-detail { padding-top: 12px; border-top: 1px solid var(--border-subtle); }
   .target-strip-card .comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .farm-requirement-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .advanced-row,
-  .advice-row { grid-template-columns: minmax(0, 1fr); }
+  .advanced-row { grid-template-columns: minmax(0, 1fr); }
   .bungie-equip-panel { grid-template-columns: minmax(0, 1fr); }
   .bungie-equip-controls { align-items: stretch; flex-direction: column; }
   .bungie-equip-controls label { min-width: 0; }
