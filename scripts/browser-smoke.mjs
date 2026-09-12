@@ -923,6 +923,66 @@ async function checkUpgradeTargetSync(browser) {
   }
 }
 
+// A cancelled solver call is superseded work, not a failure. `#inputCard`'s
+// input listener stops every in-flight operation and re-probes 180ms later, so
+// editing a target while the realtime reachability probe is running rejects that
+// probe with an AbortError. The probe used to be the one call site that reported
+// that cancellation as "Reachability calculation failed", which the
+// mocked-Bungie phase caught as an unexpected console error. Holding the probe's
+// postMessage keeps the request pending, so the cancellation is deterministic
+// instead of a race only a slow runner hits.
+async function checkCancelledReachabilityProbe(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.evaluate(() => {
+      const original = Worker.prototype.postMessage;
+      window.__probeHold = {
+        started: 0,
+        restore: () => { Worker.prototype.postMessage = original; },
+      };
+      // Only the reachability probe is held: every other worker message (the
+      // seconds-long searches) must pass through untouched.
+      Worker.prototype.postMessage = function (message, ...rest) {
+        if (message?.operation === "calculateReachability") {
+          window.__probeHold.started += 1;
+          return undefined;
+        }
+        return original.call(this, message, ...rest);
+      };
+    });
+    await page.locator("#inputCard input[id^='target_']").first().evaluate(input => {
+      input.value = String(Number(input.value || 0) + 1);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // The realtime range probe only runs while an Exotic framework is selected.
+    await page.locator("#useExoticMode").check();
+    await page.waitForFunction(() => window.__probeHold.started > 0, null, { timeout: 15000 });
+    await page.evaluate(() => window.__probeHold.restore());
+    await page.evaluate(() => window.stopSearches());
+    // Let the debounced re-probe reach the real worker and finish: neither the
+    // cancellation nor the recovery may log anything.
+    await page.waitForTimeout(800);
+    assert.equal(
+      browserErrors.filter(error => /Reachability|AbortError|Cancelled/.test(error)).length,
+      0,
+      "cancelling an in-flight reachability probe must not be reported as a failure: "
+        + JSON.stringify(browserErrors),
+    );
+    assert.deepEqual(browserErrors, []);
+    console.log("browser smoke: a cancelled reachability probe stays silent OK");
+  } finally {
+    await context.close();
+  }
+}
+
 async function checkSetRequirementSnapshot(browser) {
   const context = await browser.newContext({ viewport: { width: 1200, height: 900 } });
   await context.addInitScript(() => {
@@ -3274,6 +3334,7 @@ try {
   await checkPortal(browser);
   await checkInventoryPlanning(browser);
   await checkUpgradeTargetSync(browser);
+  await checkCancelledReachabilityProbe(browser);
   await checkSetRequirementSnapshot(browser);
   await checkBungieLoginHidden(browser);
   await checkResultWorkspace(browser);

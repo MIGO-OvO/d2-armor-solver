@@ -1238,7 +1238,16 @@ async function updateRealtimeRanges() {
     });
   } catch (error) {
     if (revision === realtimeRangeRevision) {
-      console.error('Reachability calculation failed', error);
+      // Every other solver call site treats an AbortError as superseded work and
+      // returns quietly; this probe has to do the same. `#inputCard`'s input
+      // listener (and `scheduleRealtimeRanges`, which calls `stopSearches()`)
+      // cancels the in-flight probe 180ms before the next one starts, so a
+      // cancellation is routine and must not be reported as a failure.
+      if (error.name !== 'AbortError') {
+        console.error('Reachability calculation failed', error);
+      }
+      // The stale hint still has to go: after a stop nothing re-probes, so
+      // keeping it would describe the previous inputs.
       resetRealtimeRangeUI();
     }
     return;
@@ -1252,9 +1261,20 @@ async function updateRealtimeRanges() {
     return;
   }
   if (reachable.certificate?.status === 'INFEASIBLE_PROVEN') {
-    nearestTargetSuggestion = await getNearestTargetSuggestion(
-      exoticSettings, numPlus5, numPlus10, numPlus3, fragments
-    );
+    try {
+      nearestTargetSuggestion = await getNearestTargetSuggestion(
+        exoticSettings, numPlus5, numPlus10, numPlus3, fragments
+      );
+    } catch (error) {
+      if (error.name !== 'AbortError') throw error;
+      // The suggestion solve is cancelled by the same stop that cancels the
+      // probe (`stopSearches()` cancels every operation). Letting the rejection
+      // escape here would surface as an unhandled promise rejection, so fall
+      // through and render the unreachable panel without a suggestion — the
+      // reachability proof itself is unaffected. The revision check below still
+      // hands the summary to a newer probe when one is on its way.
+      nearestTargetSuggestion = null;
+    }
     if (revision !== realtimeRangeRevision) return;
     showInvalidCombinationHints(locks);
     summary.innerHTML = `<div class="range-panel">
