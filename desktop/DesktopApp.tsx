@@ -4,9 +4,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { clickSolver, mountSolver } from "./solver-bridge";
 
 const translations = {
-  "zh-chs": { title: "配装工作台", offline: "离线桌面版", solve: "从零求解", upgrade: "优化现有配装", import: "导入 DIM CSV", parameters: "配装参数", results: "查看结果", empty: "让下一套配装，有据可循。", hint: "在左侧设置六维目标，或导入 DIM 护甲清单，再开始求解。结果与方案详情会显示在这里。", privacy: "数据仅保存在本机", shortcut: "Ctrl + Enter 开始求解", loading: "正在加载本地求解器…", error: "加载失败，请重启应用。", linkError: "无法打开链接，请检查默认浏览器设置。", free: "完全免费 · 谨防付费转售" },
-  "zh-cht": { title: "配裝工作台", offline: "離線桌面版", solve: "從零求解", upgrade: "最佳化現有配裝", import: "匯入 DIM CSV", parameters: "配裝參數", results: "查看結果", empty: "讓下一套配裝，有據可循。", hint: "在左側設定六維目標，或匯入 DIM 護甲清單，再開始求解。結果與方案詳情會顯示在這裡。", privacy: "資料僅儲存在本機", shortcut: "Ctrl + Enter 開始求解", loading: "正在載入本機求解器…", error: "載入失敗，請重新啟動應用程式。", linkError: "無法開啟連結，請檢查預設瀏覽器設定。", free: "完全免費 · 謹防付費轉售" },
-  en: { title: "Loadout workbench", offline: "Offline desktop", solve: "Build from scratch", upgrade: "Optimize loadout", import: "Import DIM CSV", parameters: "Parameters", results: "View results", empty: "A clearer path to your next loadout.", hint: "Set your stat targets on the left, or import your DIM armor CSV, then start a search. Results and armor details appear here.", privacy: "Data stays on this device", shortcut: "Ctrl + Enter to search", loading: "Loading local solver…", error: "Could not load the solver. Restart the app.", linkError: "Could not open the link. Check your default browser settings.", free: "Always free · Never pay a reseller" },
+  "zh-chs": { title: "配装工作台", offline: "离线桌面版", solve: "从零求解", upgrade: "优化现有配装", help: "使用说明", saved: "已保存方案", import: "导入 DIM CSV", parameters: "配装参数", results: "查看结果", empty: "让下一套配装，有据可循。", hint: "在左侧设置六维目标，或导入 DIM 护甲清单，再开始求解。结果与方案详情会显示在这里。", privacy: "数据仅保存在本机", shortcut: "Ctrl + Enter 开始求解", loading: "正在加载本地求解器…", error: "加载失败，请重启应用。", linkError: "无法打开链接，请检查默认浏览器设置。", free: "完全免费 · 谨防付费转售" },
+  "zh-cht": { title: "配裝工作台", offline: "離線桌面版", solve: "從零求解", upgrade: "最佳化現有配裝", help: "使用說明", saved: "已儲存方案", import: "匯入 DIM CSV", parameters: "配裝參數", results: "查看結果", empty: "讓下一套配裝，有據可循。", hint: "在左側設定六維目標，或匯入 DIM 護甲清單，再開始求解。結果與方案詳情會顯示在這裡。", privacy: "資料僅儲存在本機", shortcut: "Ctrl + Enter 開始求解", loading: "正在載入本機求解器…", error: "載入失敗，請重新啟動應用程式。", linkError: "無法開啟連結，請檢查預設瀏覽器設定。", free: "完全免費 · 謹防付費轉售" },
+  en: { title: "Loadout workbench", offline: "Offline desktop", solve: "Build from scratch", upgrade: "Optimize loadout", help: "Help", saved: "Saved plans", import: "Import DIM CSV", parameters: "Parameters", results: "View results", empty: "A clearer path to your next loadout.", hint: "Set your stat targets on the left, or import your DIM armor CSV, then start a search. Results and armor details appear here.", privacy: "Data stays on this device", shortcut: "Ctrl + Enter to search", loading: "Loading local solver…", error: "Could not load the solver. Restart the app.", linkError: "Could not open the link. Check your default browser settings.", free: "Always free · Never pay a reseller" },
 };
 type Language = keyof typeof translations;
 
@@ -78,6 +78,9 @@ export function DesktopApp() {
         <span className="desktop-nav-caption">DESTINY 2 / ARMOR 3.0</span>
         <button disabled={!ready} aria-pressed={mode === "solve"} onClick={() => clickSolver("modeSolveButton")}>{t.solve}</button>
         <button disabled={!ready} aria-pressed={mode === "upgrade"} onClick={() => clickSolver("modeUpgradeButton")}>{t.upgrade}</button>
+        <div className="desktop-nav-divider" />
+        <button disabled={!ready} onClick={() => clickSolver("openProgramIntro")}>{t.help}</button>
+        <button disabled={!ready} onClick={() => clickSolver("openSavedBuilds")}>{t.saved}</button>
         <div className="desktop-nav-divider" />
         <button disabled={!ready} onClick={() => clickSolver("dimCsvFile")}>{t.import}</button>
         <button disabled={!ready} onClick={() => jump(".desktop-inputs")}>{t.parameters}</button>

@@ -53,9 +53,16 @@ try {
   assert.ok(workers.some(url => url.includes("armor-engine.worker")), "Desktop must use a Worker");
   assert.equal(await page.locator(".desktop-empty").count(), 0);
   // Save and reopen through the actual UI, not a synthetic localStorage write.
-  page.once("dialog", dialog => dialog.accept("Desktop regression"));
+  const savedPlansNav = page.getByRole("navigation").getByRole("button", { name: "已保存方案", exact: true });
   await page.locator("#saveBuildButton").click();
-  await page.locator("#savedBuildsList").getByRole("button", { name: /^Desktop regression/ }).waitFor();
+  await page.locator("#saveBuildDialog:not([hidden])").waitFor();
+  await page.locator("#saveBuildName").fill("Desktop regression");
+  await page.locator("#saveBuildDialog button[type=submit]").click();
+  await savedPlansNav.click();
+  await page.locator("#savedBuildsDrawer:not([hidden])").waitFor();
+  await page.locator("#savedBuildsList .saved-item", { hasText: "Desktop regression" }).waitFor();
+  await page.keyboard.press("Escape");
+  await page.locator("#savedBuildsDrawer").waitFor({ state: "hidden" });
   // A write that does not land must be reported, never silently swallowed.
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
@@ -64,15 +71,26 @@ try {
     };
     window.__restoreSetItem = () => { Storage.prototype.setItem = original; };
   });
-  page.once("dialog", dialog => dialog.accept("Desktop quota failure"));
   await page.locator("#saveBuildButton").click();
-  await page.locator("#savedBuildStatus .msg.error").waitFor();
-  assert.equal(await page.locator("#savedBuildsList").getByRole("button", { name: /^Desktop quota failure/ }).count(), 0,
-    "a failed save must not appear as a saved loadout");
+  await page.locator("#saveBuildName").fill("Desktop quota failure");
+  await page.locator("#saveBuildDialog button[type=submit]").click();
+  await page.locator("#saveBuildDialogStatus .msg.error").waitFor();
+  await page.keyboard.press("Escape");
   await page.evaluate(() => window.__restoreSetItem());
+  await savedPlansNav.click();
+  await page.locator("#savedBuildsDrawer:not([hidden])").waitFor();
+  assert.equal(
+    await page.locator("#savedBuildsList .saved-item", { hasText: "Desktop quota failure" }).count(),
+    0,
+    "a failed save must not appear as a saved loadout",
+  );
+  await page.keyboard.press("Escape");
   await page.reload();
   await page.locator(".desktop-nav button:not([disabled])").first().waitFor();
-  await page.locator("#savedBuildsList").getByRole("button", { name: /^Desktop regression/ }).click();
+  await savedPlansNav.click();
+  await page.locator("#savedBuildsList .saved-item", { hasText: "Desktop regression" })
+    .locator(".saved-item-load").click();
+  await page.locator("#savedBuildsDrawer").waitFor({ state: "hidden" });
   await page.locator("#pageLanguage").selectOption("en");
   await page.getByRole("navigation").getByRole("button", { name: "Optimize loadout", exact: true }).click();
   assert.equal(await page.locator("#upgradeBuildCard").isVisible(), true);

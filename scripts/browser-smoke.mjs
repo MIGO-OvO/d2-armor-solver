@@ -134,8 +134,29 @@ async function readLoadoutRows(page) {
   })));
 }
 
-async function findChrome() {
-  const candidates = [
+// The set requirement, the fixed-Exotic picker and the 2pc/4pc bonus prose all
+// live behind 高级约束 now, so a test that touches those controls has to open
+// the disclosure first — exactly like a reader. Both helpers are idempotent and
+// tolerate the element being absent.
+async function openAdvancedConstraints(page) {
+  const details = page.locator("#advancedConstraints");
+  if (await details.count() === 0) return;
+  if (await details.getAttribute("open") === null) {
+    await page.locator("#advancedConstraints > summary").click();
+    await page.locator("#advancedConstraints[open]").waitFor();
+  }
+}
+
+async function openSetEffects(page) {
+  await openAdvancedConstraints(page);
+  const details = page.locator(".set-effects-toggle");
+  if (await details.count() === 0) return;
+  if (await details.first().getAttribute("open") === null) {
+    await page.locator(".set-effects-toggle > summary").first().click();
+  }
+}
+
+async function findChrome() {  const candidates = [
     process.env.CHROME_PATH,
     process.platform === "win32"
       ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
@@ -622,18 +643,23 @@ async function checkInventoryPlanning(browser) {
     await page.evaluate(() => window.setCalculatorMode("solve"));
     await page.locator("#pageLanguage").selectOption("en");
     await page.locator("#onlyPlus5Tuning").check();
+    // The set picker lives behind 高级约束; read the option labels as text so
+    // the assertion does not depend on the disclosure being painted.
+    await openAdvancedConstraints(page);
     const setOption = page.locator('#setReqA option[value="741162535"]');
-    assert.match(await setOption.innerText(), /owned 2$/);
+    assert.match(await setOption.textContent(), /owned 2$/);
     await page.locator('#importClass').selectOption('warlock');
-    assert.match(await setOption.innerText(), /owned 3$/);
+    assert.match(await setOption.textContent(), /owned 3$/);
     await page.locator('#importClass').selectOption('');
-    assert.doesNotMatch(await setOption.innerText(), /owned/);
+    assert.doesNotMatch(await setOption.textContent(), /owned/);
     await page.locator('#importClass').selectOption('hunter');
     await page.locator('#inventoryExoticSlotFilter').selectOption('chest');
     await page.locator('#inventoryFixedExoticName').selectOption('any-exotic');
     await page.reload({ waitUntil: 'networkidle' });
     assert.equal(await page.locator('#inventoryFixedExoticName').inputValue(), 'any-exotic',
       'an unowned reservation must survive draft restore');
+    // The disclosure state lives in memory, so a reload starts collapsed again.
+    await openAdvancedConstraints(page);
     await page.evaluate(() => window.solve());
     await page.locator('#inventoryResults').waitFor({ state: 'visible' });
     // Reserving the chest slot for an unowned Exotic must keep owned Legendary
@@ -646,14 +672,16 @@ async function checkInventoryPlanning(browser) {
     assert.match(await page.locator('.acquisition-row', { hasText: 'Any Exotic' }).innerText(), /Chest/);
     // (5) The reserved-but-unowned Exotic must be flagged in its own armor row,
     // not only in the farm summary, and the row must read as a farm gap.
+    // textContent, not innerText: the armor rows carry `content-visibility:auto`,
+    // so an off-screen row legitimately renders no innerText.
     const reservedChestRow = page.locator('.inventory-result-piece[data-piece-slot="chest"]').first();
     assert.equal(
       await page.locator('.inventory-result-piece.is-farm .inventory-fixed-badge').count() >= 1,
       true,
       "an unowned Exotic requirement must be marked on the farm gap row",
     );
-    assert.match(await reservedChestRow.innerText(), /Farm|待刷|待取得/);
-    assert.match(await reservedChestRow.innerText(), /Exotic|异域|異域/);
+    assert.match(await reservedChestRow.textContent(), /Farm|待刷|待取得/);
+    assert.match(await reservedChestRow.textContent(), /Exotic|异域|異域/);
     await page.locator('#inventoryFixedExoticName').selectOption('');
     assert.ok(
       await countUnifiedOwnedRows(page, 'Chest') > 0,
@@ -870,6 +898,7 @@ async function checkUpgradeTargetSync(browser) {
       element.value = "135";
       element.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    await openAdvancedConstraints(page);
     await page.locator("#setReqMode").selectOption("set4");
     // The set picker now lists the whole 56-set catalog, so pick the set this
     // fixture actually owns instead of relying on the first option.
@@ -994,6 +1023,7 @@ async function checkSetRequirementSnapshot(browser) {
     const staleSolve = page.evaluate(() => window.analyzeArmorUpgrades());
     await page.waitForTimeout(25);
     // The set picker lists the full catalog now; select the fixture's set.
+    await openAdvancedConstraints(page);
     await page.locator("#setReqMode").selectOption("set4");
     await page.locator("#setReqA").selectOption("741162535");
     await staleSolve;
@@ -1262,6 +1292,11 @@ async function checkBungieAuthFlow(browser) {
     // Official Armor 3.0 terminology must render from the same contract in
     // every application locale, including dynamic Archetype controls.
     await page.evaluate(() => window.setCalculatorMode("upgrade"));
+    // Piece editors are collapsed by default; open the first one to read its
+    // Archetype control and Tuning Mod label. The open row survives the
+    // language switch because the renderer reads the disclosure state back
+    // from the DOM.
+    await page.locator("#upgradeBuildEditor .upgrade-piece-row summary").first().click();
     for (const [language, skirmisher, tuningMod] of [
       ["zh-chs", "突击手", "调整模组"],
       ["zh-cht", "散兵", "調校模組"],
@@ -1443,8 +1478,10 @@ async function checkBungieAuthFlow(browser) {
 
     // --- (e) saved game loadout and custom solver result cover all write routes ---
     assert.equal(await page.locator(".bungie-saved-loadouts").count(), 1);
+    await openAdvancedConstraints(page);
     await page.locator('#setReqMode').selectOption('set2');
     await page.locator('#setReqA').selectOption('741162535');
+    await openSetEffects(page);
     await page.locator('.set-preview-notes > summary').click();
     await page.locator(".bungie-saved-loadouts > summary").click();
     await page.evaluate(() => window.importInventoryFromBungie({ silent: true }));
@@ -2424,6 +2461,7 @@ async function checkLoadoutPresentation(browser) {
       localStorage.setItem(storageKeys.calculatorMode, "solve");
     }, TEST_STORAGE_KEYS);
     await page.reload({ waitUntil: "networkidle" });
+    await openAdvancedConstraints(page);
     await page.locator("#inventoryExoticSlotFilter").selectOption("helmet");
     const pinnedExoticValue = await page
       .locator("#inventoryFixedExoticName option", { hasText: "Closest Regression Exotic" })
@@ -2596,14 +2634,242 @@ async function checkExactInventoryTotals(browser) {
       assert.equal(advanced.rows, STATS.length, "the advanced panel must keep one row per stat");
       assert.match(advanced.text, /数学|數學|math/, "the advanced panel must keep the mathematical totals");
       assert.match(advanced.text, /升级后|升級後|projected/, "the advanced panel must keep the projected totals");
-      assert.match(advanced.text, /可装|可裝|installable/, "the advanced panel must keep the installable totals");
+      // The third column is an estimate of the post-execution instance state,
+      // not a promise that the mods are installable. Wording it "可装" is what
+      // made an UNVERIFIED plan read as "confirmed installable".
+      assert.match(advanced.text, /执行估算|執行估算|estimated/,
+        "the advanced panel must word the third total as an estimate");
+      assert.doesNotMatch(advanced.text, /可装|可裝|installable/,
+        "the installable subset must not be worded as a promise");
       const preflight = await page.locator('#loadoutDetail details[data-disclosure-key="advanced"] .advanced-row')
         .evaluateAll(elements => elements.map(element => element.textContent || "").join(" "));
       assert.match(preflight, /UNVERIFIED/, "the advanced panel must report the unverified preflight");
+      // Evidence class first, raw code second: UNVERIFIED must never be worded
+      // as an executable or blocked verdict, and a BLOCKED plan must always
+      // carry a named reason family.
+      assert.match(preflight, /尚未完全验证|尚未完全驗證|Not fully verified/,
+        "UNVERIFIED must be worded as unverified, not as executable: " + preflight);
+      assert.doesNotMatch(preflight, /已确认存在执行阻碍|已確認存在執行阻礙|confirmed execution obstacle/,
+        "an UNVERIFIED plan must not be worded as a confirmed obstacle");
       assert.doesNotMatch(preflight, /witnessTotalsMismatch/, "a math-only import must not fabricate a witness mismatch");
     }
     assert.deepEqual(browserErrors, []);
     console.log("browser smoke: exact DIM inventory totals / execution tri-state OK");
+  } finally {
+    await context.close();
+  }
+}
+
+// ============================================================
+// Information architecture + saved-plan workspace
+// ============================================================
+// The documented goals of the v3.3 refactor are checkable, so they are checked:
+// nothing huge above the fold, help behind a disclosure, advanced constraints
+// collapsed, one editor at a time, a result hero that answers "can I / how many
+// swaps / how many kept", and a saved-plan manager that is a drawer instead of
+// a permanent card at the bottom of the page.
+async function checkInformationArchitecture(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const browserErrors = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+
+    // (1) No program-introduction card in the document flow, and the free
+    // notice is a single compact line rather than the first screen's hero.
+    assert.equal(await page.locator("#mainContent .card--intro").count(), 0,
+      "the program introduction must not occupy document flow");
+    const notice = await page.locator("#freeNotice").evaluate(element => {
+      const box = element.getBoundingClientRect();
+      return { display: getComputedStyle(element).display, height: box.height, text: element.innerText };
+    });
+    assert.notEqual(notice.display, "none", "the free notice must still be shown");
+    assert.ok(notice.height <= 46, `the free notice must stay compact: ${notice.height}px`);
+    assert.match(notice.text, /完全免费/, "the free notice must keep the free claim");
+
+    // (2) Help opens from an explicit action.
+    assert.equal(await page.locator("#programIntroDrawer").isHidden(), true,
+      "the help drawer must start closed");
+    await page.locator("#openProgramIntro").click();
+    await page.locator("#programIntroDrawer:not([hidden])").waitFor();
+    const drawerText = await page.locator("#programIntroDrawer").innerText();
+    assert.match(drawerText, /程序介绍|程式介紹|About this tool/);
+    assert.match(drawerText, /使用方式|How to use/);
+    assert.match(drawerText, /免责声明|免責聲明|Disclaimer/);
+    assert.match(drawerText, /完全免费|完全免費|completely free/);
+    await page.keyboard.press("Escape");
+    await page.locator("#programIntroDrawer").waitFor({ state: "hidden" });
+
+    // (3) Advanced constraints are one collapsed summary line by default, and
+    // "how do I import" is a help affordance rather than a permanent paragraph.
+    assert.equal(await page.locator("#advancedConstraints").getAttribute("open"), null,
+      "advanced constraints must be collapsed by default");
+    assert.match(await page.locator("#advancedConstraintsSummary").innerText(), /未设置|未設定|Not set/);
+    assert.equal(await page.locator("#dimImportHelp").isHidden(), true,
+      "the DIM import instructions must not occupy permanent space");
+    await page.locator("#dimImportHelpToggle").click();
+    await page.locator("#dimImportHelp").waitFor({ state: "visible" });
+    assert.match(await page.locator("#dimImportHelp").innerText(), /DIM/);
+
+    // (4) One thin row per constraint once set: the summary names both.
+    await page.evaluate(() => window.setCalculatorMode("upgrade"));
+    assert.equal(await page.locator("#upgradeBuildEditor .upgrade-piece-row").count(), 5);
+    assert.equal(await page.locator("#upgradeBuildEditor .upgrade-piece-row[open]").count(), 0,
+      "five collapsed summaries by default");
+    await page.locator("#advancedConstraints > summary").click();
+    await page.locator("#setReqMode").selectOption("set2");
+    const summary = await page.locator("#advancedConstraintsSummary").innerText();
+    assert.match(summary, /套装|套裝|Set/, `the collapsed summary must name the set: ${summary}`);
+    await page.locator("#setReqMode").selectOption("none");
+
+    // (5) Set effects stay behind 查看套装效果.
+    assert.equal(await page.locator(".set-effects-toggle").getAttribute("open"), null,
+      "2pc/4pc bonus prose must be collapsed");
+    const setSummary = await page.locator(".set-requirement-summary").innerText();
+    assert.match(setSummary, /未要求套装|未要求套裝|No set requirement/);
+
+    // (6) The replacement result hero answers the three questions at a glance.
+    await page.evaluate(() => { window.setCalculatorMode("upgrade"); });
+    await page.locator("#btnUpgradeAnalyze").click();
+    await page.locator("#upgradeResults:not([hidden])").waitFor({ timeout: 60000 });
+    await page.locator("#btnUpgradeAnalyze:not([disabled])").waitFor({ timeout: 60000 });
+    const hero = await page.locator("#upgradeResults .upgrade-hero").first().evaluate(element => ({
+      tone: element.className,
+      eyebrow: (element.querySelector(".upgrade-eyebrow")?.textContent || "").trim(),
+      headline: (element.querySelector(".upgrade-recommendation")?.textContent || "").trim(),
+      outcome: (element.querySelector(".upgrade-outcome strong")?.textContent || "").trim(),
+      note: (element.querySelector(".upgrade-outcome span")?.textContent || "").trim(),
+    }));
+    assert.match(hero.headline, /换 \d+ 件|不用换|重配|Keep all five|Replace \d+/, `hero headline: ${hero.headline}`);
+    assert.match(hero.tone, /is-met|is-short|is-pending/, `hero tone must be stateful: ${hero.tone}`);
+    assert.match(hero.outcome, /达标|達標|还差|還差|short|met/i, `hero outcome: ${hero.outcome}`);
+    assert.match(hero.note, /替换|替換|保留|kept|replacement/i,
+      `hero must state replacement and kept counts: ${hero.note}`);
+    // Prose lives behind a disclosure, not in the hero's first paint.
+    assert.equal(await page.locator("#upgradeResults .upgrade-hero-more").getAttribute("open"), null,
+      "the hero must not unfold its prose by default");
+
+    // (7) The replacement path is a plan, and the mod table is collapsed.
+    if (await page.locator("#upgradeResults .upgrade-plan-head h3").count() > 0) {
+      assert.match(await page.locator("#upgradeResults .upgrade-plan-head h3").innerText(),
+        /推荐替换路径|建議替換路徑|Recommended replacement path/);
+      assert.match(await page.locator("#upgradeResults .upgrade-plan-summary").innerText(),
+        /换 \d+ 件|還差|Replace \d+|short/);
+      assert.match(await page.locator("#upgradeResults .upgrade-plan-kept").innerText(),
+        /保留|Keep/);
+    }
+    const assignments = page.locator(
+      "#upgradeResults details.upgrade-assignment-details:not(.witness-breakdown)",
+    );
+    if (await assignments.count() > 0) {
+      assert.equal(await assignments.first().getAttribute("open"), null,
+        "final tuning/mods must be collapsed by default");
+      assert.match(await assignments.first().locator("summary").first().innerText(),
+        /最终调整与模组配置|最終調校與模組配置|Final Tuning/);
+    }
+
+    // (8) Saved plans are a global drawer, not a card at the bottom.
+    assert.equal(await page.locator("#savedCard").count(), 0,
+      "the bottom-of-page saved-builds card must be gone");
+    assert.equal(await page.locator("#savedBuildsDrawer").isHidden(), true);
+
+    // (9)/(10) Save stores the *selected* plan's own witness and the manager can
+    // load and delete it.
+    await page.evaluate(() => window.setCalculatorMode("solve"));
+    await page.evaluate(() => window.solve());
+    await page.locator("#inventoryResults:not([hidden])").waitFor({ timeout: 60000 });
+    await page.locator("#btnSolve:not([disabled])").waitFor({ timeout: 60000 });
+    const secondRow = page.locator("#planList .inventory-result-option").nth(1);
+    const secondKey = await secondRow.getAttribute("data-plan-key");
+    await secondRow.click();
+    const selectedAudit = await page.evaluate(() => {
+      const entry = window.getSelectedUnifiedEntry();
+      return {
+        canonicalId: entry?.witness?.canonicalId || null,
+        key: entry ? window.unifiedEntryKey(entry) : null,
+      };
+    });
+    assert.equal(selectedAudit.key, secondKey,
+      "the selected entry must be the row that was clicked");
+    await page.locator("#loadoutDetail .inventory-result-actions button", { hasText: "保存" }).click();
+    await page.locator("#saveBuildDialog:not([hidden])").waitFor();
+    await page.locator("#saveBuildName").fill("IA regression");
+    await page.locator("#saveBuildDialog button[type=submit]").click();
+    await page.locator("#saveBuildDialog").waitFor({ state: "hidden" });
+    const saved = await page.evaluate(() => window.getSavedBuilds()[0]);
+    assert.equal(saved.name, "IA regression");
+    assert.ok(saved.result, "a saved plan must carry its sealed witness");
+    assert.equal(saved.result.canonicalId, selectedAudit.canonicalId,
+      "the saved plan must be the selected entry, not the theory solver's cursor");
+    assert.equal(await page.locator("#savedBuildsCount").innerText(), "1",
+      "the header entry must show how many plans are saved");
+
+    await page.locator("#openSavedBuilds").click();
+    await page.locator("#savedBuildsDrawer:not([hidden])").waitFor();
+    const item = page.locator("#savedBuildsList .saved-item", { hasText: "IA regression" });
+    await item.waitFor();
+    const itemBox = await item.boundingBox();
+    assert.ok(itemBox.height <= 150,
+      `a saved plan must be a compact list row, not a card (${Math.round(itemBox.height)}px)`);
+    // Clicking the row selects it and must not touch the working state.
+    await item.locator(".saved-item-name, .saved-item-main").first().click();
+    assert.equal(await item.evaluate(element => element.classList.contains("is-selected")), true,
+      "clicking a saved plan must select it");
+    assert.equal(await page.evaluate(() => window.getSavedBuilds().length), 1,
+      "selecting a saved plan must not mutate stored plans");
+    // Delete asks first, then offers an Undo. Earlier toasts (the save notice)
+    // may still be on screen, so target the toast that carries the action.
+    page.once("dialog", dialog => dialog.accept());
+    await item.locator(".saved-item-delete").click();
+    await page.waitForFunction(() => window.getSavedBuilds().length === 0);
+    const undoToast = page.locator("#toastStack .toast", { has: page.locator(".toast-action") });
+    await undoToast.first().waitFor();
+    assert.match(await undoToast.first().innerText(), /撤销|復原|Undo/,
+      "deleting must offer an Undo toast");
+    await undoToast.first().locator(".toast-action").click();
+    await page.waitForFunction(() => window.getSavedBuilds().length === 1);
+    // Load closes the drawer and keeps the reader on the same page.
+    await item.locator(".saved-item-load").click();
+    await page.locator("#savedBuildsDrawer").waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.getSavedBuilds().length), 1,
+      "loading must not consume the saved plan");
+
+    // (15) Switching plans keeps the header, the detail and the save action on
+    // one and the same entry.
+    const firstKey = await page.locator("#planList .inventory-result-option").first().getAttribute("data-plan-key");
+    await page.locator("#planList .inventory-result-option").first().click();
+    const consistency = await page.evaluate(() => ({
+      entryKey: window.unifiedEntryKey(window.getSelectedUnifiedEntry()),
+      entryCanonicalId: window.getSelectedUnifiedEntry()?.witness?.canonicalId || null,
+      selected: document.querySelector("#planList .inventory-result-option[aria-selected='true']")?.getAttribute("data-plan-key") || null,
+      label: (document.querySelector("#loadoutDetail .inventory-result-detail-label")?.textContent || "").trim(),
+    }));
+    assert.equal(consistency.entryKey, firstKey,
+      "the selected entry must be the row marked selected");
+    assert.equal(consistency.selected, firstKey);
+    assert.match(consistency.label, /#01/, `the detail header must follow the selection: ${consistency.label}`);
+    // Saving now must store the *first* plan, not the one selected before.
+    await page.locator("#loadoutDetail .inventory-result-actions button", { hasText: "保存" }).click();
+    await page.locator("#saveBuildName").fill("IA reselect");
+    await page.locator("#saveBuildDialog button[type=submit]").click();
+    const newest = await page.evaluate(() => window.getSavedBuilds()[0]);
+    assert.equal(newest.name, "IA reselect");
+    assert.equal(newest.result.canonicalId, consistency.entryCanonicalId,
+      "Save must resolve the currently selected unified entry");
+
+    // (7b) The plan browser still owns its own vertical scroll.
+    const panel = await page.locator("#planBrowser").evaluate(element => ({
+      position: getComputedStyle(element).position,
+      overflowY: getComputedStyle(element).display === "none" ? null : getComputedStyle(element).overflow,
+    }));
+    assert.equal(panel.position, "sticky", "the plan browser must stay a bounded sticky workspace");
+
+    assert.deepEqual(browserErrors, []);
+    console.log("browser smoke: information architecture / saved-plan workspace OK");
   } finally {
     await context.close();
   }
@@ -2623,6 +2889,7 @@ try {
   await checkResultWorkspace(browser);
   await checkLoadoutPresentation(browser);
   await checkExactInventoryTotals(browser);
+  await checkInformationArchitecture(browser);
   if (process.argv.includes("--target-sync-only")) {
     console.log("upgrade target sync and set requirement browser regressions OK");
   } else {
@@ -2791,12 +3058,72 @@ try {
     console.error(browserErrors);
   }
   assert.equal(upgradeRows, 5);
+  // Five compact summaries by default: no editor is expanded until asked for,
+  // and the card therefore stays short even with all five pieces present.
+  assert.equal(
+    await page.locator("#upgradeBuildEditor .upgrade-piece-row[open]").count(),
+    0,
+    "the current-loadout editor must default to five collapsed summaries",
+  );
+  assert.equal(
+    await page.locator("#upgradeBuildEditor .upgrade-piece-fields:visible").count(),
+    0,
+    "no piece editor may be rendered until its summary is expanded",
+  );
 
   const firstIdentity = await page.locator(
     "#upgradeBuildEditor .upgrade-piece-identity",
   ).first().innerText();
   assert.match(firstIdentity, /-5/, "piece summary should name the -5 stat");
   assert.match(firstIdentity, /\+10/, "piece summary should name the +10 stat mod");
+
+  // Expanding one piece reveals exactly one editor, on a compact 2x3 grid.
+  await page.locator("#upgradeBuildEditor .upgrade-piece-row summary").first().click();
+  assert.equal(
+    await page.locator("#upgradeBuildEditor .upgrade-piece-row[open]").count(),
+    1,
+    "exactly one piece editor may be open at a time",
+  );
+  const fieldLayout = await page.locator("#upgradeBuildEditor .upgrade-piece-fields")
+    .first().evaluate(element => ({
+      display: getComputedStyle(element).display,
+      columns: getComputedStyle(element).gridTemplateColumns.split(" ").length,
+      order: [...element.querySelectorAll(":scope > label.input-group")].map(label => ({
+        cls: label.className,
+        order: getComputedStyle(label).order,
+        top: Math.round(label.getBoundingClientRect().top),
+      })),
+    }));
+  assert.equal(fieldLayout.display, "grid");
+  assert.equal(fieldLayout.columns, 3, "the piece editor must use a 3-column grid");
+  const orderField = cls => Number(fieldLayout.order.find(entry => entry.cls.includes(cls))?.order);
+  assert.deepEqual(
+    [orderField("field-archetype"), orderField("field-tertiary"), orderField("field-mod-size")],
+    [1, 2, 3],
+    "row 1 must be archetype | tertiary | armor mod",
+  );
+  assert.deepEqual(
+    [orderField("field-tuning"), orderField("field-tuning-from"), orderField("field-mod-stat")],
+    [4, 5, 6],
+    "row 2 must be tuning | tuning source | mod stat",
+  );
+
+  // Opening another piece closes the previous one. The `toggle` event is queued
+  // as a task, so the assertion waits for the settled DOM instead of racing it.
+  await page.locator("#upgradeBuildEditor .upgrade-piece-row summary").nth(2).click();
+  await page.waitForFunction(() => {
+    const open = document.querySelectorAll("#upgradeBuildEditor .upgrade-piece-row[open]");
+    return open.length === 1 && open[0].dataset.index === "2";
+  }, null, { timeout: 5000 });
+  const openIndexes = await page.locator("#upgradeBuildEditor .upgrade-piece-row[open]")
+    .evaluateAll(rows => rows.map(row => Number(row.dataset.index)));
+  assert.deepEqual(openIndexes, [2], "expanding another piece must collapse the previous one");
+  await page.locator("#upgradeBuildEditor .upgrade-piece-row[open] summary").click();
+  await page.waitForFunction(() =>
+    document.querySelectorAll("#upgradeBuildEditor .upgrade-piece-row[open]").length === 0,
+  null, { timeout: 5000 });
+  assert.equal(await page.locator("#upgradeBuildEditor .upgrade-piece-row[open]").count(), 0);
+  await page.locator("#upgradeBuildEditor .upgrade-piece-row summary").first().click();
 
   const firstModStat = page.locator(
     "#upgradeBuildEditor .upgrade-piece-row",

@@ -59,10 +59,12 @@ body { overflow: hidden; }
   .desktop-solver .card { padding: 18px; }
   .desktop-solver .card--fragments .input-grid, .desktop-solver .comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .desktop-solver .upgrade-import-panel { padding: 16px; }
-  .desktop-solver .upgrade-import-heading { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .desktop-solver .upgrade-import-heading-actions { justify-content: flex-start; }
-  .desktop-solver .upgrade-import-toolbar, .desktop-solver .exotic-settings-grid { grid-template-columns: minmax(0, 1fr); }
-  .desktop-solver .upgrade-import-actions { grid-column: 1; margin-left: 0; flex-wrap: wrap; }
+  .desktop-solver .armor-source-head { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .desktop-solver .armor-source-actions { margin-left: 0; justify-content: flex-start; }
+  .desktop-solver .armor-filter-toolbar,
+  .desktop-solver .set-requirement-head,
+  .desktop-solver .exotic-settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .desktop-solver .armor-filter-toolbar .upgrade-import-actions { margin-left: 0; flex-wrap: wrap; }
 }
 @media (max-width: 859px) {
   .desktop-solver #targetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

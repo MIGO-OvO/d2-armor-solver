@@ -295,29 +295,58 @@ body {
   color: var(--text);
   font-size: 12px;
 }
+/* Free notice: deliberately low-weight. It is a claim plus a link, not a
+   banner — 38px on one line, quieter than every functional card below it. */
 .notice.notice--free {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 18px;
-  padding: 12px 16px;
-  border: 1px solid color-mix(in oklab, var(--success) 58%, transparent);
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  min-height: 38px;
+  margin-bottom: 14px;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
   border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--success) 8%, var(--card));
-  color: var(--text);
+  background: var(--surface-quiet);
+  color: var(--text-dim);
   text-align: left !important;
 }
-.notice.notice--free span:first-child {
-  color: var(--success) !important;
-  font-size: 14px !important;
-  font-weight: 760 !important;
+.notice-free-claim {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--success);
+  font-size: .875rem;
+  font-weight: 740;
 }
-.notice.notice--free span:last-child {
-  margin-left: auto !important;
-  color: var(--text-dim) !important;
-  font-size: 12px !important;
+.notice-free-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: .75rem;
 }
+.notice-free-claim .icon,
+.notice-free-warning .icon { width: .9375rem; height: .9375rem; flex: 0 0 auto; }
+.notice-free-warning .icon { color: var(--health); }
+.notice-free-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: .75rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.notice-free-more .icon { width: .875rem; height: .875rem; }
+.notice-free-more:hover { background: color-mix(in oklab, var(--accent) 14%, transparent); }
 .card {
   margin-bottom: 16px;
   padding: 22px;
@@ -2060,7 +2089,11 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 }
 .advanced-totals-row em { font-style: normal; color: var(--text-dim); }
 .advanced-totals-row > span { color: var(--text-dim); }
+/* Projected disagreeing with math is a real consistency error; the estimated
+   column diverging is normal (not masterworked yet, energy, unverified data),
+   so it must not borrow the warning colour. */
 .advanced-totals-row .is-blocked { color: var(--warning); font-weight: 650; }
+.advanced-totals-row .is-estimated { color: var(--text); font-weight: 650; }
 
 .advanced-sub { border-top: 1px solid var(--border-subtle); padding-top: 6px; }.advanced-sub > summary {
   padding: 4px 0;
@@ -4258,9 +4291,20 @@ a:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px 16px;
-  padding: 12px 4px 20px 28px;
+  padding: 10px 4px 16px 28px;
 }
 .upgrade-piece-fields .input-group { min-width: 0; }
+/* Compact 2x3 editor. The DOM order stays archetype → tertiary → tuning →
+   tuning source → mod size → mod stat (the browser regression suite addresses
+   the mod-stat select positionally), so the visual grouping asked for —
+   "archetype | tertiary | armor mod" above "tuning | tuning source | mod stat"
+   — is expressed with grid order instead of by reordering the markup. */
+.upgrade-piece-fields .field-archetype { order: 1; }
+.upgrade-piece-fields .field-tertiary { order: 2; }
+.upgrade-piece-fields .field-mod-size { order: 3; }
+.upgrade-piece-fields .field-tuning { order: 4; }
+.upgrade-piece-fields .field-tuning-from { order: 5; }
+.upgrade-piece-fields .field-mod-stat { order: 6; }
 .upgrade-piece-flags {
   display: flex;
   align-items: center;
@@ -4732,7 +4776,7 @@ a:focus-visible {
   .upgrade-piece-row summary {
     grid-template-columns: minmax(70px, .5fr) minmax(0, 1fr) minmax(7rem, max-content) 18px;
   }
-  .upgrade-piece-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .upgrade-piece-fields { grid-template-columns: minmax(0, 1fr); }
   .upgrade-stat-comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .upgrade-plan-step {
     grid-template-columns: 32px minmax(0, 1fr) minmax(180px, .8fr);
@@ -5641,3 +5685,565 @@ a:focus-visible {
 }
 /* The command bar owns search state; only numeric stability is set here. */
 #searchStatistics { font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   Information architecture v3.3 — headers, drawers, toolbars
+   ============================================================
+   Four levels, expressed with type / weight / whitespace / dividers rather than
+   with more colours or more borders:
+     Level 1  result hero, current task          (largest type, no border)
+     Level 2  main workspace card                (one border)
+     Level 3  toolbar / list / table rows        (leading divider only)
+     Level 4  help, advanced, side notes         (dim text, disclosure)
+   ============================================================ */
+
+/* --- Header: help + saved plans live here so they are reachable from both the
+   input state and the result state ------------------------------------------ */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.header-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-quiet);
+  color: var(--text);
+  font: inherit;
+  font-size: .8125rem;
+  font-weight: 650;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.header-action .icon { width: .9375rem; height: .9375rem; flex: 0 0 auto; color: var(--accent); }
+.header-action:hover {
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface-quiet));
+}
+.header-action-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.375rem;
+  height: 1.25rem;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
+  color: var(--accent);
+  font-size: .6875rem;
+  font-weight: 780;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Link-style button used for low-frequency help affordances -------------- */
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: .8125rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.btn-link .icon { width: .875rem; height: .875rem; }
+.btn-link:hover { background: color-mix(in oklab, var(--accent) 12%, transparent); }
+.btn-link[aria-expanded="true"] { color: var(--text); }
+
+/* --- Owned armor: header row + filter toolbar + collapsed constraints ------- */
+.armor-source-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.armor-source-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.armor-source-title h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 740;
+}
+.armor-source-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+.armor-source-help {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in oklab, var(--accent) 42%, transparent);
+  border-radius: 0 4px 4px 0;
+  background: var(--surface-quiet);
+  color: var(--text-dim);
+  font-size: .8125rem;
+  line-height: 1.6;
+}
+.armor-source-help[hidden] { display: none; }
+
+.armor-filter-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.armor-filter-toolbar .import-class-select,
+.armor-filter-toolbar .import-tier-toggle { margin: 0; }
+.armor-filter-count {
+  color: var(--text-dim);
+  font-size: .8125rem;
+  font-variant-numeric: tabular-nums;
+}
+.armor-filter-toolbar .upgrade-import-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* --- Advanced constraints: one summary line by default --------------------- */
+.advanced-constraints {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.advanced-constraints > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 10px 2px;
+  color: var(--text-dim);
+  font-size: .8125rem;
+  cursor: pointer;
+  list-style: none;
+}
+.advanced-constraints > summary::-webkit-details-marker { display: none; }
+.advanced-constraints > summary::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  align-self: center;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 140ms ease-out;
+}
+.advanced-constraints[open] > summary::before { transform: rotate(45deg); }
+.advanced-constraints > summary:hover { color: var(--text); }
+.advanced-constraints-title {
+  color: var(--text);
+  font-weight: 700;
+}
+.advanced-constraints-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.advanced-constraints.is-constrained > summary .advanced-constraints-value { color: var(--accent); font-weight: 620; }
+.advanced-constraints-body {
+  display: grid;
+  gap: 12px;
+  padding: 2px 0 12px;
+}
+
+/* --- Set requirement: controls + one summary line, effects behind a toggle -- */
+.set-requirement-head {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+.set-requirement-head label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 650;
+}
+.set-requirement-head label[hidden] { display: none; }
+.set-requirement-head select { max-width: 22rem; }
+.set-requirement-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: .8125rem;
+}
+.set-requirement-summary.is-empty { color: var(--text-dim); }
+.set-summary-item {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.set-summary-item strong { color: var(--accent); font-size: .875rem; }
+.set-effects-toggle {
+  margin-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+.set-effects-toggle > summary {
+  padding: 8px 0;
+  color: var(--accent);
+  font-size: .8125rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.set-effects-toggle .set-requirement-preview { margin-top: 4px; }
+
+/* --- Upgrade card: batch actions ------------------------------------------- */
+.upgrade-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+.upgrade-card-header h2 { flex: 1 1 22rem; }
+.upgrade-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.upgrade-bulk-actions .btn { font-size: .75rem; }
+
+/* --- Upgrade result hero: Level 1 ----------------------------------------- */
+.upgrade-hero-main { min-width: 0; }
+.upgrade-hero-more { margin-top: 6px; }
+.upgrade-hero-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  color: var(--accent);
+  font-size: .8125rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.upgrade-hero-more > summary::-webkit-details-marker { display: none; }
+.upgrade-hero-more > summary::after {
+  content: "▾";
+  font-size: .6875rem;
+  transition: transform 140ms ease-out;
+}
+.upgrade-hero-more[open] > summary::after { transform: rotate(180deg); }
+.upgrade-hero-more .upgrade-recommendation-copy { margin-top: 8px; font-size: .9375rem; }
+.upgrade-hero.is-short .upgrade-recommendation { color: var(--warning); }
+.upgrade-hero.is-short .upgrade-outcome strong { color: var(--warning); }
+.upgrade-hero.is-pending .upgrade-recommendation { color: var(--text); }
+.upgrade-hero.is-pending .upgrade-outcome strong { color: var(--text); }
+
+/* --- Recommended replacement path: a plan, not a stack of cards ------------ */
+.upgrade-plan-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 4px;
+}
+.upgrade-plan-head h3 { margin: 0; }
+.upgrade-plan-summary {
+  color: var(--success);
+  font-size: 1rem;
+  font-weight: 720;
+}
+.upgrade-plan-kept { color: var(--text-dim); font-size: .8125rem; }
+.upgrade-plan-steps {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.upgrade-plan-step { border-top: 1px solid var(--border-subtle); }
+.upgrade-plan-setup-details { margin-top: 2px; }
+.upgrade-plan-setup-details > summary {
+  padding: 2px 0 8px;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 620;
+  cursor: pointer;
+}
+.upgrade-plan-setup-details .upgrade-plan-setup { padding-top: 0; padding-bottom: 8px; }
+.upgrade-plan-note {
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: .75rem;
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+.upgrade-explanation,
+.upgrade-alternative {
+  margin-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.upgrade-explanation > summary,
+.upgrade-alternative > summary {
+  padding: 10px 0;
+  color: var(--text-dim);
+  font-size: .8125rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.upgrade-explanation > summary:hover,
+.upgrade-alternative > summary:hover { color: var(--text); }
+.upgrade-assignment-count {
+  margin-left: 8px;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 500;
+}
+
+/* --- Drawers, modal, toast ------------------------------------------------- */
+body.has-overlay { overflow: hidden; }
+.overlay-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in oklab, #05070c 62%, transparent);
+}
+.overlay-scrim[hidden] { display: none; }
+
+.side-drawer {
+  position: fixed;
+  z-index: 61;
+  inset: 0 0 0 auto;
+  width: min(420px, 100vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: -20px 0 52px rgb(0 0 0 / .5);
+}
+.side-drawer[hidden] { display: none; }
+.side-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.side-drawer-head h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 740;
+}
+.side-drawer-count { color: var(--text-dim); font-size: .8125rem; font-variant-numeric: tabular-nums; }
+.side-drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px;
+}
+.side-drawer-foot {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.side-drawer-status:empty { display: none; }
+.side-drawer-status { padding: 0 16px 12px; }
+.drawer-section + .drawer-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
+.drawer-section h3 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: .875rem;
+  font-weight: 720;
+}
+.drawer-prose { color: var(--text-dim); font-size: .875rem; line-height: 1.75; text-wrap: pretty; }
+.drawer-prose p { margin: 0 0 10px; }
+.drawer-prose ol { margin: 0; padding-left: 1.15rem; display: grid; gap: 8px; }
+.drawer-prose li { overflow-wrap: anywhere; }
+.drawer-prose strong { color: var(--text); }
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 62;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: color-mix(in oklab, #05070c 58%, transparent);
+}
+.modal[hidden] { display: none; }
+.modal-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: 0 24px 64px rgb(0 0 0 / .5);
+}
+.modal-card h2 { margin: 0; color: var(--text); font-size: 1rem; font-weight: 740; }
+.modal-field { display: grid; gap: 6px; color: var(--text-dim); font-size: .8125rem; font-weight: 650; }
+.modal-field input {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: .875rem;
+}
+.modal-field input:focus-visible { border-color: var(--accent); outline: none; }
+.modal-hint { margin: 0; color: var(--text-dim); font-size: .75rem; line-height: 1.6; }
+.modal-status:empty { display: none; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+.toast-stack {
+  position: fixed;
+  z-index: 63;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  font-size: .8125rem;
+  line-height: 1.55;
+  box-shadow: 0 12px 32px rgb(0 0 0 / .42);
+  pointer-events: auto;
+}
+.toast > span { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+.toast.is-error { border-left-color: var(--health); }
+.toast.is-warn { border-left-color: var(--warning); }
+.toast.is-success { border-left-color: var(--success); }
+.toast-action {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: .75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.toast-action:hover { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+
+/* --- Saved plans: compact rows, actions on the right ----------------------- */
+.saved-toolbar { padding: 12px 16px 0; }
+.saved-search { display: block; }
+.saved-search input {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: .8125rem;
+}
+.saved-empty {
+  margin: 8px 0;
+  color: var(--text-dim);
+  font-size: .8125rem;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+.saved-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+.saved-item:first-child { border-top: 1px solid var(--border-subtle); }
+.saved-item:hover { background: color-mix(in oklab, var(--accent) 5%, transparent); }
+.saved-item.is-selected { background: color-mix(in oklab, var(--accent) 9%, transparent); }
+.saved-item-main { display: grid; gap: 2px; min-width: 0; }
+.saved-item-name {
+  color: var(--text);
+  font-size: .875rem;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.saved-item-meta,
+.saved-item-stats { color: var(--text-dim); font-size: .75rem; line-height: 1.5; }
+.saved-item-stats { font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.saved-item-detail {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: .75rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.saved-item-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.saved-item-actions .btn { font-size: .75rem; min-height: 30px; padding: 3px 9px; }
+.saved-item-actions .saved-item-delete { padding: 3px 8px; }
+
+/* --- Responsive: drawers go full-bleed, toolbars stack --------------------- */
+@media (max-width: 900px) {
+  .header-actions { justify-content: flex-start; }
+  .armor-source-actions { margin-left: 0; }
+  .armor-filter-toolbar .upgrade-import-actions { margin-left: 0; }
+  .saved-item-actions { justify-content: flex-start; }
+}
+@media (max-width: 640px) {
+  /* `100vw` includes the scrollbar, which would push the drawer's left edge
+     past the viewport; pin both sides instead. */
+  .side-drawer { left: 0; width: auto; border-left: 0; }
+  .side-drawer-head { padding: 12px 14px; }
+  .side-drawer-body { padding: 12px 14px; }
+  .toast-stack { left: 12px; right: 12px; width: auto; bottom: 12px; }
+  .modal-card { padding: 16px; }
+  .upgrade-recommendation { font-size: 1.375rem; }
+}
+/* Per-piece verification data is a Level-4 diagnostic: it keeps its own
+   disclosure instead of borrowing the assignment panel's class. */
+.witness-breakdown {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.witness-breakdown > summary {
+  padding: 8px 0;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.witness-breakdown > summary:hover { color: var(--text); }

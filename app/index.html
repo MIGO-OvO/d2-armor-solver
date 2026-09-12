@@ -115,6 +115,17 @@
 <main class="container" aria-labelledby="pageTitle">
   <div class="header">
     <div class="header-tools">
+      <div class="header-actions">
+        <button type="button" class="header-action" id="openProgramIntro" onclick="openProgramIntro()" aria-haspopup="dialog" aria-controls="programIntroDrawer">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-hint"/></svg>
+          <span data-i18n="helpOpenLabel">使用说明</span>
+        </button>
+        <button type="button" class="header-action" id="openSavedBuilds" onclick="openSavedBuildsDrawer()" aria-haspopup="dialog" aria-controls="savedBuildsDrawer">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg>
+          <span data-i18n="savedBuildsOpenLabel">已保存方案</span>
+          <span class="header-action-count" id="savedBuildsCount" aria-hidden="true">0</span>
+        </button>
+      </div>
       <div class="language-switcher">
         <label for="pageLanguage" data-i18n="pageLanguageLabel">网页语言</label>
         <select id="pageLanguage" onchange="changePageLanguage()">
@@ -129,18 +140,20 @@
     <p class="subtitle" data-i18n="pageSubtitle">设置目标属性 → 计算 5 件护甲的最佳组合 · 12 种护甲框架 · 自动分配调整</p>
   </div>
 
-  <!-- Free Notice -->
-  <div class="notice notice--free">
-    <span class="icon-text" style="font-weight:800;color:var(--success);"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-free"/></svg><span data-i18n="freeNotice">本程序完全免费</span></span>
-    <span class="icon-text" style="color:var(--health);margin-left:16px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warn"/></svg><span data-i18n="fraudNotice">如果你是付费购买的，说明你被骗了！</span></span>
-  </div>
-
-  <!-- Program Introduction -->
-  <div class="card card--intro">
-    <details>
-      <summary style="cursor:pointer;font-weight:700;color:var(--accent);" data-i18n="introSummary">程序介绍</summary>
-      <div style="margin-top:12px;color:var(--text-dim);line-height:1.8;" data-i18n-html="introContent"></div>
-    </details>
+  <!-- Free notice: one thin line. The full explanation lives behind 使用说明. -->
+  <div class="notice notice--free" id="freeNotice">
+    <span class="notice-free-claim">
+      <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-free"/></svg>
+      <strong data-i18n="freeNotice">本程序完全免费</strong>
+    </span>
+    <span class="notice-free-warning">
+      <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-warn"/></svg>
+      <span data-i18n="fraudNotice">如果你是付费购买的，说明你被骗了！</span>
+    </span>
+    <button type="button" class="notice-free-more" onclick="openProgramIntro()" aria-haspopup="dialog" aria-controls="programIntroDrawer">
+      <span data-i18n="helpDisclaimerTitle">免责声明</span>
+      <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg>
+    </button>
   </div>
 
   <div class="solver-mode-switch" role="group" aria-label="计算模式" data-i18n-aria="calculatorModeLabel">
@@ -160,8 +173,12 @@
     <div class="upgrade-card-header">
       <h2 id="upgradeBuildHeading">
         <span data-i18n="upgradeCurrentHeading">当前五件护甲</span>
-        <small class="upgrade-card-copy" data-i18n="upgradeBuildDescription">选择每件护甲的框架、第三属性与模组；异域或不想替换的护甲请勾选“固定”。</small>
+        <small class="upgrade-card-copy" data-i18n="upgradeBuildDescription">默认只显示五件摘要；展开一件即可编辑，切换时自动收起上一件。</small>
       </h2>
+      <div class="upgrade-bulk-actions">
+        <button type="button" class="btn" onclick="setAllUpgradeLocked(false)"><span data-i18n="upgradeUnlockAll">全部可替换</span></button>
+        <button type="button" class="btn" onclick="setAllUpgradeLocked(true)"><span data-i18n="upgradeLockAll">全部保留</span></button>
+      </div>
     </div>
     <div class="upgrade-current-section">
       <div id="upgradeBuildEditor"></div>
@@ -353,13 +370,74 @@
       <h2 id="upgradeResultsHeading" data-i18n="upgradeResultsHeading">护甲替换分析</h2>
       <div id="upgradeResultsBody"></div>
     </section>
-
-    <div class="card" id="savedCard" style="display:none;">
-      <h2><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-folder"/></svg><span data-i18n-html="savedBuildsHeading">已保存配装 <span style="color:var(--text-dim);">（点击名称加载，点 × 删除）</span></span></h2>
-      <div id="savedBuildsList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-      <button class="btn danger" onclick="clearAllBuilds()" style="margin-top:8px;"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span data-i18n="clearAllButton">清空全部</span></button>
-    </div>
   </div>
+
+  <!-- ============================================================
+       Global overlays — help, the saved-plan manager and the save dialog.
+       They live outside the result workspace so a saved plan is reachable
+       from the input state too, and they never occupy document flow height.
+       ============================================================ -->
+  <div class="overlay-scrim" id="overlayScrim" hidden onclick="closeOverlays()"></div>
+
+  <aside class="side-drawer" id="programIntroDrawer" role="dialog" aria-modal="true" aria-labelledby="programIntroTitle" hidden>
+    <header class="side-drawer-head">
+      <h2 id="programIntroTitle" data-i18n="helpDrawerTitle">使用说明</h2>
+      <button type="button" class="icon-btn" onclick="closeOverlays()" aria-label="关闭窗口" data-i18n-aria="closeLabel"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="side-drawer-body">
+      <section class="drawer-section">
+        <h3 data-i18n="introSummary">程序介绍</h3>
+        <div class="drawer-prose" data-i18n-html="introContent"></div>
+      </section>
+      <section class="drawer-section">
+        <h3 data-i18n="helpHowToTitle">使用方式</h3>
+        <div class="drawer-prose" data-i18n-html="introUsage"></div>
+      </section>
+      <section class="drawer-section">
+        <h3 data-i18n="helpDisclaimerTitle">免责声明</h3>
+        <div class="drawer-prose" data-i18n-html="helpDisclaimerBody"></div>
+      </section>
+    </div>
+  </aside>
+
+  <aside class="side-drawer side-drawer--saved" id="savedBuildsDrawer" role="dialog" aria-modal="true" aria-labelledby="savedBuildsTitle" hidden>
+    <header class="side-drawer-head">
+      <h2 id="savedBuildsTitle" data-i18n="savedBuildsDrawerTitle">已保存方案</h2>
+      <span class="side-drawer-count" id="savedBuildsDrawerCount"></span>
+      <button type="button" class="icon-btn" onclick="closeOverlays()" aria-label="关闭窗口" data-i18n-aria="closeLabel"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="saved-toolbar">
+      <label class="saved-search">
+        <span class="sr-only" data-i18n="savedBuildsSearchLabel">搜索方案</span>
+        <input type="search" id="savedBuildsSearch" oninput="renderSavedBuilds()" placeholder="搜索方案" data-i18n-placeholder="savedBuildsSearchLabel">
+      </label>
+    </div>
+    <div class="side-drawer-body" id="savedBuildsList" role="list"></div>
+    <div class="side-drawer-status" id="savedBuildStatus" role="status" aria-live="polite"></div>
+    <footer class="side-drawer-foot">
+      <button type="button" class="btn danger" id="savedBuildsClearAll" onclick="clearAllBuilds()">
+        <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-trash"/></svg><span data-i18n="clearAllButton">清空全部</span>
+      </button>
+    </footer>
+  </aside>
+
+  <div class="modal" id="saveBuildDialog" role="dialog" aria-modal="true" aria-labelledby="saveBuildDialogTitle" hidden>
+    <form class="modal-card" onsubmit="return submitSaveBuild(event)">
+      <h2 id="saveBuildDialogTitle" data-i18n="saveDialogTitle">保存当前方案</h2>
+      <label class="modal-field">
+        <span data-i18n="saveDialogNameLabel">方案名称</span>
+        <input type="text" id="saveBuildName" autocomplete="off" maxlength="60">
+      </label>
+      <p class="modal-hint" id="saveBuildSummary"></p>
+      <div class="modal-status" id="saveBuildDialogStatus" role="status" aria-live="polite"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn" onclick="closeOverlays()" data-i18n="saveDialogCancel">取消</button>
+        <button type="submit" class="btn-solve" data-i18n="saveDialogConfirm">保存</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
 
   <div class="footer" data-i18n-html="footerContent">
     <div class="footer-title">命运2 T5配装求解器·优化版 Ver 3.0.1</div>

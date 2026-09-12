@@ -39,7 +39,7 @@ import {
   visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
-import { createCanonicalId, createSolutionDisplayModel, assertSolutionConsistency, SOLVER_V3_SCHEMA_VERSION } from "./core/solver-v3-contract.mjs";
+import { createCanonicalId, createSolutionDisplayModel, assertSolutionConsistency, EXECUTION_STATUS, SOLVER_V3_SCHEMA_VERSION } from "./core/solver-v3-contract.mjs";
 import {
   SAVED_BUILD_LIMIT,
   SAVED_BUILD_SCHEMA_VERSION,
@@ -63,6 +63,10 @@ import {
   resolveCurrentLoadoutTotals,
 } from "./core/upgrade-optimizer.mjs";
 import {certifiedFeasible, proofPresentation} from "./core/solver-presentation.mjs";
+import {
+  EXECUTION_BLOCK_CATEGORY,
+  summarizeBlockedReasons,
+} from "./core/armor-mod-assignment.mjs";
 
 let searchProfile = "balanced";
 let searchUiRevision = 0;
@@ -1635,7 +1639,7 @@ function renderSolutionStatRows(counts, prefix = '') {
 
 function renderWitnessBreakdown(witness) {
   const model = createSolutionDisplayModel(witness);
-  return `<details class="upgrade-assignment-details witness-breakdown" data-disclosure-key="witness-${escapeHtml(model.canonicalId)}" data-canonical-id="${escapeHtml(model.canonicalId)}">
+  return `<details class="witness-breakdown" data-disclosure-key="witness-${escapeHtml(model.canonicalId)}" data-canonical-id="${escapeHtml(model.canonicalId)}">
     <summary>${l('逐件复算数据', '逐件重算資料', 'Per-piece verification data')}</summary>
     ${model.pieces.map((piece, index) => `<div class="witness-piece" data-source-id="${escapeHtml(String(piece.sourceId || ''))}" data-tuning="${escapeHtml(JSON.stringify(model.tuningAssignments[index]))}" data-mod="${escapeHtml(JSON.stringify(model.modAssignments[index] || null))}" data-archetype="${escapeHtml(piece.archetype || piece.archetypeId || '')}" data-tertiary="${piece.tertiary}">
       <strong>${getUpgradeSlotLabel(UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot))} · ${escapeHtml(piece.itemName || piece.archetype || piece.archetypeId || '')}</strong>
@@ -1674,6 +1678,9 @@ function displayAllResults(result, targets, fragments, { scroll = true, forceOwn
   // settled pass renders the workspace once.
   if (refreshList && calculatorMode === 'solve') renderUnifiedResults();
   restoreDetails();
+  // The result on screen now matches the current inputs, so a later saved-plan
+  // load will not warn about edits the user has not actually made since.
+  lastCommittedInputSignature = currentInputSignature();
   // Switching plans must never yank the viewport; only an explicit new solve may
   // scroll the workspace into view. Defer by one frame because the loading
   // indicator above the workspace collapses in solve()'s finally block — scrolling
@@ -2113,6 +2120,13 @@ let manualOwnedSequence = 0;
 let manualOwnedEditorOpen = false;
 let ownedArmorActionStatus = null;
 let inventoryImportExpanded = false;
+// The save dialog is single-purpose: create a new plan, or rename an existing
+// one. `entry` is resolved at open time from getSelectedUnifiedEntry(), never
+// from the theory solver's own cursor.
+let pendingSave = null;
+// Signature of the input the on-screen result was computed from. Loading a
+// saved plan compares against it and asks before overwriting unsaved edits.
+let lastCommittedInputSignature = null;
 let importClassFilter = "";
 let importTier5Only = true;
 let setRequirement = { type: "none" };
@@ -2288,17 +2302,6 @@ function renderUpgradeImportPanel() {
   const restoreDetails = preserveDisclosureState(el);
   const isScratchMode = calculatorMode === "solve";
   const importHeading = l("已有护甲", "已有防具", "Owned armor");
-  const importDescription = isScratchMode
-    ? l(
-      "导入清单后，求解会自动优先匹配你已有的护甲。",
-      "匯入清單後，求解會自動優先符合你已有的防具。",
-      "Import an inventory to prioritize armor you already own.",
-    )
-    : l(
-      "导入清单后，可填入当前穿戴或直接查找已有护甲方案。",
-      "匯入清單後，可填入目前穿戴或直接尋找已有防具方案。",
-      "Import an inventory to fill the equipped loadout or search owned armor directly.",
-    );
   const { slots: exoticSlots, names: exoticNames } = getInventoryExoticPickerData();
   const classOptions = [
     ["", isScratchMode
@@ -2330,74 +2333,128 @@ function renderUpgradeImportPanel() {
   const toggleLabel = inventoryImportExpanded
     ? l("收起", "收起", "Collapse")
     : l("展开", "展開", "Expand");
+  const effectiveCount = importedInventory.length === 0
+    ? 0
+    : filterArmorItems(importedInventory, {
+      classId: importClassFilter || undefined,
+      tier5Only: importTier5Only,
+    }).length;
 
   el.classList.toggle('is-collapsed', !inventoryImportExpanded);
   el.innerHTML = `
-    <div class="upgrade-import-heading">
-      <div>
-        <h3>${importHeading}</h3>
-        <p>${importDescription}</p>
-      </div>
-      <div class="upgrade-import-heading-actions">
+    <div class="armor-source-head">
+      <div class="armor-source-title">
+        <h2 id="armorSourceHeading">${importHeading}</h2>
         <span class="upgrade-import-state">${importState}</span>
+      </div>
+      <div class="armor-source-actions">
         <label class="upgrade-import-file">
           <span class="btn upgrade-import-primary">${icon("folder")}${importedInventory.length > 0 ? l("重新导入", "重新匯入", "Replace inventory") : l("导入清单", "匯入清單", "Import inventory")}</span>
           <input type="file" id="dimCsvFile" accept=".csv,text/csv" onchange="handleDimCsvFile(this)">
         </label>
-        <button type="button" class="btn upgrade-import-toggle" id="toggleInventoryImportButton" aria-expanded="${inventoryImportExpanded}" aria-controls="upgradeImportBody" onclick="toggleInventoryImportPanel()">${icon(inventoryImportExpanded ? 'up' : 'down')}<span>${toggleLabel}</span></button>
-      </div>
-    </div>
-    <div class="upgrade-import-body" id="upgradeImportBody" ${inventoryImportExpanded ? '' : 'hidden'}>
-      <p class="upgrade-import-hint">${l(
-        "清单可从 DIM → 设置 → 电子表格 → 防具（Export CSV）导出；文件只在浏览器本地处理。",
-        "清單可從 DIM → 設定 → 試算表 → 防具（Export CSV）匯出；檔案只在瀏覽器本機處理。",
-        "Export the list from DIM → Settings → Spreadsheets → Armor (Export CSV). The file stays in your browser."
-      )}</p>
-      <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
-      <div class="upgrade-import-toolbar" aria-label="${l("已有护甲筛选与操作", "已有防具篩選與操作", "Owned armor filters and actions")}">
-      <label class="import-class-select">
-        <span>${l("职业", "職業", "Class")}</span>
-        <select id="importClass" onchange="updateImportOptions()">${classOptions}</select>
-      </label>
-      <label class="import-tier-toggle">
-        <input type="checkbox" id="importTier5Only" data-import-dependent ${importTier5Only ? "checked" : ""} onchange="updateImportOptions()">
-        <span>${l("仅 Tier 5", "僅 Tier 5", "Tier 5 only")}</span>
-      </label>
-      <div class="upgrade-import-actions">
         ${isScratchMode ? "" : `<button type="button" class="btn" data-import-dependent onclick="applyEquippedLoadout()">${icon("refresh")}${l("填入当前穿戴", "填入目前穿戴", "Fill equipped loadout")}</button>`}
-        <button type="button" class="btn danger" data-import-dependent onclick="clearImportedInventory()">${icon("trash")}${l("清空", "清空", "Clear")}</button>
+        <button type="button" class="btn upgrade-import-toggle" id="toggleInventoryImportButton" aria-expanded="${inventoryImportExpanded}" aria-controls="upgradeImportBody" onclick="toggleInventoryImportPanel()">${icon(inventoryImportExpanded ? 'up' : 'down')}<span>${toggleLabel}</span></button>
+        <button type="button" class="btn-link armor-source-help-toggle" id="dimImportHelpToggle" aria-expanded="false" aria-controls="dimImportHelp" onclick="toggleDimImportHelp(this)">${icon('hint')}<span>${t('dimImportHelpToggle')}</span></button>
       </div>
-      </div>
-      <div class="inventory-solve-options" id="inventorySolveOptions">
-      <div class="inventory-solve-option-copy">
-        <strong>${l("从零配装：优先使用已有护甲", "從零配裝：優先使用已有防具", "Build from scratch: prefer owned armor")}</strong>
-        <span>${l("按职业筛选库存；如需固定普通异域，再按部位和名称选择。方案优先减少刷取件数，其次选择最接近需求的同名异域。", "依職業篩選庫存；如需固定一般異域，再依部位和名稱選擇。方案優先減少取得件數，其次選擇最接近需求的同名異域。", "Filter inventory by class. To fix a regular Exotic, choose its slot and name. Plans minimize farming first, then prefer the closest owned copy of that Exotic.")}</span>
-      </div>
-      <div class="inventory-exotic-picker" aria-label="${l("固定异域筛选", "固定異域篩選", "Fixed Exotic filters")}">
-        <label class="inventory-fixed-exotic-control">
-          <span>${l("异域部位", "異域部位", "Exotic slot")}</span>
-          <select id="inventoryExoticSlotFilter" onchange="updateInventoryExoticSlot()" ${!importClassFilter || exoticSlots.length === 0 ? "disabled" : ""}>${exoticSlotOptions}</select>
-        </label>
-        <label class="inventory-fixed-exotic-control">
-          <span>${l("异域名称", "異域名稱", "Exotic name")}</span>
-          <select id="inventoryFixedExoticName" onchange="updateInventorySolveOptions()" ${isClassItemSlot || !inventoryExoticSlotFilter || exoticNames.length === 0 ? "disabled" : ""}>${exoticNameOptions}</select>
-        </label>
-      </div>
-      <p class="inventory-solve-option-hint" id="inventorySolveOptionHint">${l(
-        "先选择职业，再从该职业已有异域中选择部位和名称；同名多件会自动比较框架、第三属性与 +5 调整。",
-        "先選擇職業，再從該職業現有異域中選擇部位和名稱；同名多件會自動比較原型、第三數值與 +5 調校。",
-        "Choose a class, slot, and Exotic name. Multiple owned copies are compared by archetype, tertiary stat, and rolled +5 Tuning Stat."
-      )}</p>
-      </div>
-      <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
-      ${getSavedBungieLoadoutsHtml()}
     </div>
+    <p class="armor-source-help" id="dimImportHelp" hidden>${l(
+      "在 DIM 中打开设置 → 电子表格 → 防具，点击 Export CSV，再选择导出的文件；文件只在浏览器本地处理。",
+      "在 DIM 中開啟設定 → 試算表 → 防具，點擊 Export CSV，再選擇匯出的檔案；檔案只在瀏覽器本機處理。",
+      "In DIM open Settings → Spreadsheets → Armor and click Export CSV, then pick the exported file. The file is processed locally in your browser.",
+    )}</p>
+    <div class="upgrade-import-body" id="upgradeImportBody" ${inventoryImportExpanded ? '' : 'hidden'}>
+      <div class="upgrade-import-status" id="upgradeImportSummary" aria-live="polite"></div>
+      <div class="armor-filter-toolbar" id="armorFilterToolbar" aria-label="${l("已有护甲筛选与操作", "已有防具篩選與操作", "Owned armor filters and actions")}">
+        <label class="import-class-select">
+          <span>${l("职业", "職業", "Class")}</span>
+          <select id="importClass" onchange="updateImportOptions()">${classOptions}</select>
+        </label>
+        <label class="import-tier-toggle">
+          <input type="checkbox" id="importTier5Only" data-import-dependent ${importTier5Only ? "checked" : ""} onchange="updateImportOptions()">
+          <span>${l("仅 Tier 5", "僅 Tier 5", "Tier 5 only")}</span>
+        </label>
+        <span class="armor-filter-count" id="armorFilterCount">${l(
+          `当前有效 ${effectiveCount} 件`,
+          `目前有效 ${effectiveCount} 件`,
+          `${effectiveCount} effective`,
+        )}</span>
+        <div class="upgrade-import-actions">
+          <button type="button" class="btn danger" data-import-dependent onclick="clearImportedInventory()">${icon("trash")}${l("清空", "清空", "Clear")}</button>
+        </div>
+      </div>
+    </div>
+    <details class="advanced-constraints" id="advancedConstraints" data-disclosure-key="advanced-constraints">
+      <summary>
+        <span class="advanced-constraints-title">${l("高级约束", "進階限制", "Advanced constraints")}</span>
+        <span class="advanced-constraints-value" id="advancedConstraintsSummary"></span>
+      </summary>
+      <div class="advanced-constraints-body">
+        <div class="inventory-solve-options" id="inventorySolveOptions">
+          <div class="inventory-exotic-picker" aria-label="${l("固定异域筛选", "固定異域篩選", "Fixed Exotic filters")}">
+            <label class="inventory-fixed-exotic-control">
+              <span>${l("异域部位", "異域部位", "Exotic slot")}</span>
+              <select id="inventoryExoticSlotFilter" onchange="updateInventoryExoticSlot()" ${!importClassFilter || exoticSlots.length === 0 ? "disabled" : ""}>${exoticSlotOptions}</select>
+            </label>
+            <label class="inventory-fixed-exotic-control">
+              <span>${l("异域名称", "異域名稱", "Exotic name")}</span>
+              <select id="inventoryFixedExoticName" onchange="updateInventorySolveOptions()" ${isClassItemSlot || !inventoryExoticSlotFilter || exoticNames.length === 0 ? "disabled" : ""}>${exoticNameOptions}</select>
+            </label>
+          </div>
+          <p class="inventory-solve-option-hint" id="inventorySolveOptionHint"></p>
+        </div>
+        <div class="upgrade-set-effects" id="upgradeSetEffects"></div>
+      </div>
+    </details>
+    ${getSavedBungieLoadoutsHtml()}
   `;
   updateImportSummary();
   updateInventorySolveOptions();
   renderSetEffects();
   renderBungieAuthState();
+  updateAdvancedConstraintsSummary();
   restoreDetails();
+}
+
+function toggleDimImportHelp(button) {
+  const help = document.getElementById('dimImportHelp');
+  if (!help) return;
+  const open = help.hidden;
+  help.hidden = !open;
+  button?.setAttribute('aria-expanded', String(open));
+}
+
+// One line that answers "is anything constrained right now?" without opening
+// the editor: the two things a returning user has to remember about their plan.
+function describeFixedExoticConstraint() {
+  if (!inventoryFixedExoticKey) return '';
+  const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === inventoryExoticSlotFilter);
+  const slotLabel = slotIndex >= 0 ? getUpgradeSlotLabel(slotIndex) : '';
+  if (inventoryFixedExoticKey === 'any-exotic') {
+    const name = l('任意异域（待获取）', '任意異域（待取得）', 'Any Exotic (to acquire)');
+    return slotLabel ? `${name} · ${slotLabel}` : name;
+  }
+  if (inventoryExoticSlotFilter === 'classItem') {
+    const classId = importClassFilter || document.getElementById('exoticClass')?.value || 'hunter';
+    const name = getExoticClassItemName(classId);
+    return slotLabel ? `${name} · ${slotLabel}` : name;
+  }
+  const selected = getSelectedInventoryExotic();
+  const name = selected?.name || inventoryFixedExoticKey;
+  return slotLabel ? `${name} · ${slotLabel}` : name;
+}
+
+function updateAdvancedConstraintsSummary() {
+  const el = document.getElementById('advancedConstraintsSummary');
+  if (!el) return;
+  const parts = [];
+  const exotic = describeFixedExoticConstraint();
+  if (exotic) parts.push(l(`异域：${exotic}`, `異域：${exotic}`, `Exotic: ${exotic}`));
+  if (setRequirement && setRequirement.type !== 'none') {
+    const label = formatSetRequirementLabel(setRequirement);
+    parts.push(l(`套装：${label}`, `套裝：${label}`, `Set: ${label}`));
+  }
+  el.textContent = parts.length > 0 ? parts.join(' · ') : t('advancedConstraintsNone');
+  document.getElementById('advancedConstraints')?.classList.toggle('is-constrained', parts.length > 0);
 }
 
 function toggleInventoryImportPanel() {
@@ -3663,6 +3720,14 @@ function updateImportSummary() {
   const filtered = importClassFilter
     ? tierFiltered.filter(item => item.classId === importClassFilter)
     : tierFiltered;
+  const effectiveEl = document.getElementById("armorFilterCount");
+  if (effectiveEl) {
+    effectiveEl.textContent = l(
+      `当前有效 ${filtered.length} 件`,
+      `目前有效 ${filtered.length} 件`,
+      `${filtered.length} effective`,
+    );
+  }
   if (importedInventory.length === 0) {
     el.innerHTML = `<div class="upgrade-import-empty">${icon("folder")}<span>${l(
       calculatorMode === "solve"
@@ -3888,6 +3953,29 @@ function orderSetsByCategory(sets, language) {
   return groups;
 }
 
+// The default (collapsed) answer to "which set am I requiring, and how close am
+// I": one line naming the set, how many pieces are already owned and how many
+// the requirement asks for. The 2pc/4pc bonus prose stays behind 查看套装效果.
+function renderSetRequirementSummary(language, ownedSetCounts) {
+  const requirement = setRequirement;
+  if (!requirement || requirement.type === 'none') {
+    return `<div class="set-requirement-summary is-empty">${l(
+      '未要求套装', '未要求套裝', 'No set requirement')}</div>`;
+  }
+  const describe = (hash, count) => {
+    const set = getArmorSetByHash(hash);
+    if (!set) return '';
+    const owned = ownedSetCounts.get(Number(hash)) || 0;
+    return `<span class="set-summary-item"><strong>${escapeHtml(getSetName(set, language))}</strong>`
+      + `<span>${l(`已拥有 ${owned} 件`, `已擁有 ${owned} 件`, `${owned} owned`)}</span>`
+      + `<span>${l(`要求 ${count} 件`, `要求 ${count} 件`, `requires ${count}`)}</span></span>`;
+  };
+  const items = requirement.type === 'split'
+    ? [describe(requirement.a, 2), describe(requirement.b, 2)].filter(Boolean)
+    : [describe(requirement.setHash, requirement.count)].filter(Boolean);
+  return `<div class="set-requirement-summary">${items.join('')}</div>`;
+}
+
 // 2pc/4pc bonus preview for the set(s) currently required by the constraint,
 // with category / acquisition source / class naming notes from the metadata.
 function renderSetRequirementPreview(language, ownedSetCounts) {
@@ -3989,45 +4077,32 @@ function renderSetEffects() {
   const setOptions = makeSetOptions(firstSetHash);
   const secondSetOptions = makeSetOptions(secondSetHash, firstSetHash);
   const mode = setRequirement.type === "set" ? `set${setRequirement.count}` : setRequirement.type;
-  const setRequirementDescription = calculatorMode === "solve"
-    ? l(
-      "可选。用于给从零配装规划指定套装；已有件会优先覆盖要求，缺失件会标出应刷的套装。",
-      "可選。用於為從零配裝規劃指定套裝；現有件會優先覆蓋要求，缺失件會標出應取得的套裝。",
-      "Optional. Set the desired set for scratch-build plans; owned pieces cover it first, and missing pieces are tagged with the set to farm.",
-    )
-    : l(
-      "可选。启用后，求解会从已导入清单中搭配并保留所有固定装备。",
-      "可選。啟用後，求解會從已匯入清單中搭配並保留所有固定裝備。",
-      "Optional. When enabled, the solver builds from the imported list while preserving every fixed piece.",
-    );
 
   el.innerHTML = `
-    <div class="set-effects-head">
-      <div>
-        <span class="set-effects-title">${l("套装约束", "套裝約束", "Set requirement")}</span>
-        <p>${setRequirementDescription}</p>
-      </div>
-      <div class="set-requirement-controls">
-        <label>
-          <span>${l("要求", "要求", "Require")}</span>
-          <select id="setReqMode" onchange="updateSetRequirementMode(this.value)">
-            <option value="none" ${mode === "none" ? "selected" : ""}>${l("不要求", "不要求", "None")}</option>
-            <option value="set4" ${mode === "set4" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("指定套装 4 件套", "指定套裝 4 件套", "A set, 4-piece")}</option>
-            <option value="set2" ${mode === "set2" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("指定套装 2 件套", "指定套裝 2 件套", "A set, 2-piece")}</option>
-            <option value="split" ${mode === "split" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("两个套装各 2 件（2+2）", "兩個套裝各 2 件（2+2）", "Two sets, 2-piece each")}</option>
-          </select>
-        </label>
-        <label class="set-req-set" id="setReqALabel" ${mode === "none" ? "hidden" : ""}>
-          <span>${l("套装", "套裝", "Set")}</span>
-          <select id="setReqA" onchange="updateSetRequirementPicks()">${setOptions}</select>
-        </label>
-        <label class="set-req-set" id="setReqBLabel" ${mode === "split" ? "" : "hidden"}>
-          <span>${l("另一个套装", "另一個套裝", "Second set")}</span>
-          <select id="setReqB" onchange="updateSetRequirementPicks()">${secondSetOptions}</select>
-        </label>
-      </div>
+    <div class="set-requirement-head">
+      <label class="set-req-mode">
+        <span>${l("要求", "要求", "Require")}</span>
+        <select id="setReqMode" onchange="updateSetRequirementMode(this.value)">
+          <option value="none" ${mode === "none" ? "selected" : ""}>${l("不要求", "不要求", "None")}</option>
+          <option value="set4" ${mode === "set4" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("指定套装 4 件套", "指定套裝 4 件套", "A set, 4-piece")}</option>
+          <option value="set2" ${mode === "set2" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("指定套装 2 件套", "指定套裝 2 件套", "A set, 2-piece")}</option>
+          <option value="split" ${mode === "split" ? "selected" : ""} ${noSets ? "disabled" : ""}>${l("两个套装各 2 件（2+2）", "兩個套裝各 2 件（2+2）", "Two sets, 2-piece each")}</option>
+        </select>
+      </label>
+      <label class="set-req-set" id="setReqALabel" ${mode === "none" ? "hidden" : ""}>
+        <span>${l("套装", "套裝", "Set")}</span>
+        <select id="setReqA" onchange="updateSetRequirementPicks()">${setOptions}</select>
+      </label>
+      <label class="set-req-set" id="setReqBLabel" ${mode === "split" ? "" : "hidden"}>
+        <span>${l("另一个套装", "另一個套裝", "Second set")}</span>
+        <select id="setReqB" onchange="updateSetRequirementPicks()">${secondSetOptions}</select>
+      </label>
     </div>
-    ${renderSetRequirementPreview(language, ownedSetCounts)}
+    ${renderSetRequirementSummary(language, ownedSetCounts)}
+    <details class="set-effects-toggle" data-disclosure-key="set-effects">
+      <summary>${l("查看套装效果", "檢視套裝獎勵", "View set bonuses")}</summary>
+      ${renderSetRequirementPreview(language, ownedSetCounts)}
+    </details>
     ${calculatorMode === "upgrade" ? `<div class="set-active-list">${active.length === 0
       ? `<div class="set-active-empty">${l(
         "当前五件护甲没有激活任何护甲套装加成（2 件或 4 件）。",
@@ -4049,6 +4124,7 @@ function renderSetEffects() {
   `;
   syncUpgradeLocks();
   restoreDetails();
+  updateAdvancedConstraintsSummary();
 }
 
 function updateSetRequirementMode(value) {
@@ -4138,6 +4214,10 @@ function renderUpgradeBuildEditor(openIndex = null) {
   if (upgradeBuildState.length !== UPGRADE_SLOTS.length) {
     upgradeBuildState = UPGRADE_SLOTS.map((_, index) => normalizeUpgradePiece(upgradeBuildState[index], index));
   }
+  // Exactly one piece may be open at a time. Reading the current open row from
+  // the DOM (instead of a JS flag) keeps the disclosure honest across the many
+  // re-render paths, and the default is "all five collapsed" — five summaries —
+  // so the card stays short until the reader asks for an editor.
   const currentlyOpen = openIndex === null
     ? [...editor.querySelectorAll('.upgrade-piece-row[open]')].map(row => Number(row.dataset.index))
     : [openIndex];
@@ -4177,7 +4257,7 @@ function renderUpgradeBuildEditor(openIndex = null) {
     const statusIcon = piece.locked
       ? `<span class="upgrade-piece-status-icon" aria-hidden="true">${icon('lock', { size:'sm' })}</span>`
       : '';
-    const isOpen = currentlyOpen.includes(index) || (currentlyOpen.length === 0 && index === 0);
+    const isOpen = currentlyOpen.includes(index);
     return `<details class="upgrade-piece-row" data-index="${index}" ${isOpen ? 'open' : ''}>
       <summary>
         <span class="upgrade-piece-slot">${getUpgradeSlotLabel(index)}</span>
@@ -4185,33 +4265,19 @@ function renderUpgradeBuildEditor(openIndex = null) {
         <span class="upgrade-piece-status ${piece.locked ? 'is-locked' : ''}">${statusIcon}<span>${status}</span></span>
       </summary>
       <div class="upgrade-piece-fields">
-        <label class="input-group">
+        <label class="input-group field-archetype">
           <span>${t('armorArchetype')}</span>
           <select onchange="updateUpgradePiece(${index},'archetypeId',this.value,true)">
             ${ARCHETYPES.map(item => `<option value="${item.id}" ${item.id === piece.archetypeId ? 'selected' : ''}>${getArchetypeLabel(item.id)}</option>`).join('')}
           </select>
         </label>
-        <label class="input-group">
+        <label class="input-group field-tertiary">
           <span>${t('tertiaryStat')}</span>
           <select onchange="updateUpgradePiece(${index},'tertiary',this.value)">
             ${tertiaryOptions.map(stat => `<option value="${stat}" ${stat === piece.tertiary ? 'selected' : ''}>${STAT_LABELS[stat]}</option>`).join('')}
           </select>
         </label>
-        <label class="input-group">
-          <span>${t('tuningMod')}</span>
-          <select onchange="updateUpgradeTuningChoice(${index},this.value)">
-            <option value="plus3" ${piece.tuningMode === 'plus3' ? 'selected' : ''}>+3</option>
-            ${STATS.map(stat => `<option value="plus5:${stat}" ${piece.tuningMode !== 'plus3' && piece.tuningTo === stat ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
-          </select>
-        </label>
-        ${piece.tuningMode === 'shift' ? `
-        <label class="input-group">
-          <span>${l('调整来源（-5，可自选）','調校來源（-5，可自選）','Tuning source (-5, your pick)')}</span>
-          <select onchange="updateUpgradePiece(${index},'tuningFrom',this.value,true)">
-            ${getUpgradeStatOptions(piece.tuningFrom, piece.tuningTo)}
-          </select>
-        </label>` : ''}
-        <label class="input-group">
+        <label class="input-group field-mod-size">
           <span>${t('armorMod')}</span>
           <select onchange="updateUpgradePiece(${index},'armorModSize',Number(this.value),true)">
             <option value="0" ${piece.armorModSize === 0 ? 'selected' : ''}>${t('none')}</option>
@@ -4219,7 +4285,21 @@ function renderUpgradeBuildEditor(openIndex = null) {
             <option value="10" ${piece.armorModSize === 10 ? 'selected' : ''}>+10</option>
           </select>
         </label>
-        <label class="input-group">
+        <label class="input-group field-tuning">
+          <span>${t('tuningMod')}</span>
+          <select onchange="updateUpgradeTuningChoice(${index},this.value)">
+            <option value="plus3" ${piece.tuningMode === 'plus3' ? 'selected' : ''}>+3</option>
+            ${STATS.map(stat => `<option value="plus5:${stat}" ${piece.tuningMode !== 'plus3' && piece.tuningTo === stat ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
+          </select>
+        </label>
+        ${piece.tuningMode === 'shift' ? `
+        <label class="input-group field-tuning-from">
+          <span>${l('调整来源（-5，可自选）','調校來源（-5，可自選）','Tuning source (-5, your pick)')}</span>
+          <select onchange="updateUpgradePiece(${index},'tuningFrom',this.value,true)">
+            ${getUpgradeStatOptions(piece.tuningFrom, piece.tuningTo)}
+          </select>
+        </label>` : ''}
+        <label class="input-group field-mod-stat">
           <span>${l('模组属性','模組數值','Mod stat')}</span>
           <select ${piece.armorModSize === 0 ? 'disabled' : ''} onchange="updateUpgradePiece(${index},'armorModStat',this.value,true)">
             ${getUpgradeStatOptions(piece.armorModStat)}
@@ -4239,6 +4319,22 @@ function renderUpgradeBuildEditor(openIndex = null) {
     </details>`;
   }).join('')}</div>`;
   updateUpgradeBudgetSummary();
+}
+
+// Batch lock actions. Exotic pieces stay locked (they cannot be farmed), so
+// "all replaceable" only releases the manual locks and the legendary locks —
+// it never claims an Exotic can be swapped out.
+function setAllUpgradeLocked(locked) {
+  upgradeBuildState.forEach((piece, index) => {
+    if (!piece) return;
+    if (!locked && piece.exotic) return;
+    manualLocked[index] = Boolean(locked);
+    piece.locked = Boolean(locked) || Boolean(piece.exotic);
+  });
+  syncUpgradeLocks();
+  saveUpgradeDraft();
+  renderUpgradeBuildEditor();
+  refreshInventoryPlansFromSolutions();
 }
 
 let upgradeDragIndex = null;
@@ -4460,13 +4556,14 @@ function setCalculatorMode(mode, persist = true) {
     resetRealtimeRangeUI();
     toggleExoticMode();
     document.getElementById('results').classList.remove('show');
-    document.getElementById('savedCard').style.display = 'none';
     updateUpgradeBudgetSummary();
   } else {
     toggleExoticMode();
     scheduleRealtimeRanges();
-    renderSavedBuilds();
   }
+  // Saved plans are a global tool: the entry stays in the header in both modes,
+  // so only its list needs refreshing.
+  renderSavedBuilds();
   // The shared DIM panel serves both modes; refresh its copy and controls so
   // switching modes never leaves upgrade-only instructions in scratch mode
   // (or vice versa), while the imported inventory state remains intact.
@@ -4611,18 +4708,25 @@ function formatUpgradeTotals(totals) {
 
 function buildUpgradePlanFlow(analysis, plan) {
   if (!plan?.steps?.length) return '';
-  return `<div class="upgrade-plan-flow">
-    <h3>${l('替换顺序','替換順序','Replacement order')}</h3>
-    <p class="upgrade-plan-copy">${l(
-      '每一步都要刷到一件新护甲：框架、第三属性和调整 +5 属性都必须对上（+5 属性是随护甲刷出来的，装上后不能改，只有 -5 来源可选）。刷到后按这一行的调整和模组配好，六维就是这一步显示的数值。',
-      '每一步都要刷到一件新防具：原型、第三數值和調校 +5 數值都必須對上（+5 數值是隨防具刷出來的，裝上後不能改，只有 -5 來源可選）。取得後按這一行的調校和模組配好，六維就是這一步顯示的數值。',
-      'Each step needs a newly farmed piece whose archetype, tertiary stat, and rolled +5 tuning stat all match — the +5 side comes with the armor and cannot be changed, only the -5 source is yours to pick. Set it up as the row shows and you get the stats listed.'
-    )}</p>
-    <div class="upgrade-plan-steps">${plan.steps.map((step, index) => {
+  const reached = certifiedFeasible(plan.evaluation);
+  const kept = 5 - plan.replacementCount;
+  return `<section class="upgrade-plan-flow" aria-labelledby="upgradePlanFlowTitle">
+    <div class="upgrade-plan-head">
+      <h3 id="upgradePlanFlowTitle">${l('推荐替换路径', '建議替換路徑', 'Recommended replacement path')}</h3>
+      <span class="upgrade-plan-summary">${reached
+        ? l(`换 ${plan.replacementCount} 件即可达标`, `換 ${plan.replacementCount} 件即可達標`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} to meet every target`)
+        : l(`换 ${plan.replacementCount} 件，还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件，還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} and remain ${plan.metrics.shortfall} short`)}</span>
+      <span class="upgrade-plan-kept">${l(
+        `保留当前 ${kept} / 5 件护甲`,
+        `保留目前 ${kept} / 5 件防具`,
+        `Keep ${kept} / 5 current pieces`,
+      )}</span>
+    </div>
+    <ol class="upgrade-plan-steps">${plan.steps.map((step, index) => {
       const complete = certifiedFeasible(step.evaluation);
       const finalTuning = plan.evaluation.tuningAssignments[step.slotIndex];
       const finalArmorMod = plan.evaluation.modAssignments[step.slotIndex];
-      return `<div class="upgrade-plan-step">
+      return `<li class="upgrade-plan-step">
         <span class="upgrade-plan-number">${index + 1}</span>
         <div class="upgrade-plan-change">
           <strong class="upgrade-plan-slot">${getUpgradeSlotLabel(step.slotIndex)}${step.tuningOnly
@@ -4633,25 +4737,48 @@ function buildUpgradePlanFlow(analysis, plan) {
             <span class="upgrade-plan-arrow" aria-hidden="true">→</span>
             <strong class="upgrade-plan-config upgrade-plan-config--after">${formatUpgradePieceSummary(step.afterPiece)}</strong>
           </div>
+          <div class="upgrade-plan-progress ${complete ? 'is-complete' : ''}">
+            <strong>${complete
+              ? l('换完后六维都达标','換完後六維都達標','All targets met after this step')
+              : l(`换完还差 ${step.evaluation.metrics.shortfall} 点`, `換完還差 ${step.evaluation.metrics.shortfall} 點`, `${step.evaluation.metrics.shortfall} points short after this step`)}</strong>
+            <div class="upgrade-plan-totals">${formatUpgradeTotals(step.evaluation.finalTotals)}</div>
+          </div>
         </div>
-        <div class="upgrade-plan-setup">
-          <span><strong>${term('tuningModSlot')}</strong>${formatUpgradeTuning(finalTuning)}</span>
-          <span><strong>${t('armorMod')}</strong>${formatUpgradeArmorMod(finalArmorMod)}</span>
-        </div>
-        <div class="upgrade-plan-progress ${complete ? 'is-complete' : ''}">
-          <strong>${complete
-            ? l('换完后六维都达标','換完後六維都達標','All targets met after this step')
-            : l(`换完还差 ${step.evaluation.metrics.shortfall} 点`, `換完還差 ${step.evaluation.metrics.shortfall} 點`, `${step.evaluation.metrics.shortfall} points short after this step`)}</strong>
-          <div class="upgrade-plan-totals">${formatUpgradeTotals(step.evaluation.finalTotals)}</div>
-        </div>
-      </div>`;
-    }).join('')}</div>
-  </div>`;
+        <details class="upgrade-plan-setup-details" data-disclosure-key="plan-step-${index}">
+          <summary>${term('tuningModSlot')} / ${t('armorMod')}</summary>
+          <div class="upgrade-plan-setup">
+            <span><strong>${term('tuningModSlot')}</strong>${formatUpgradeTuning(finalTuning)}</span>
+            <span><strong>${t('armorMod')}</strong>${formatUpgradeArmorMod(finalArmorMod)}</span>
+          </div>
+        </details>
+      </li>`;
+    }).join('')}</ol>
+    <p class="upgrade-plan-note">${l(
+      '每一步都要刷到一件新护甲：框架、第三属性和调整 +5 属性都必须对上（+5 属性是随护甲刷出来的，装上后不能改，只有 -5 来源可选）。',
+      '每一步都要刷到一件新防具：原型、第三數值和調校 +5 數值都必須對上（+5 數值是隨防具刷出來的，裝上後不能改，只有 -5 來源可選）。',
+      'Each step needs a newly farmed piece whose archetype, tertiary stat, and rolled +5 tuning stat all match — the +5 side comes with the armor, only the -5 source is yours to pick.',
+    )}</p>
+  </section>`;
 }
 
-function buildUpgradeAssignments(analysis, evaluation, open = false) {
-  return renderWitnessBreakdown(evaluation) + `<details class="upgrade-assignment-details" ${open ? 'open' : ''}>
-    <summary>${l('最终调整与模组配置','最終調校與模組配置','Final Tuning and stat mods')}</summary>
+// The plan's explanation half — where each number comes from, and what happens
+// if nothing is farmed. Collapsed: the hero already answered "can I, and how
+// many swaps".
+function buildUpgradeExplanation(analysis, keepOnly = false) {
+  return `<details class="upgrade-explanation" data-disclosure-key="upgrade-explanation">
+    <summary>${l('数值说明与备选方案', '數值說明與備選方案', 'How the numbers work, and the alternative')}</summary>
+    ${buildUpgradeBaselineNote(analysis, keepOnly)}
+    ${buildUpgradeKeepArmorAlternative(analysis)}
+  </details>`;
+}
+
+function buildUpgradeAssignments(evaluation) {
+  const planned = (evaluation?.configs || []).length;
+  return `<details class="upgrade-assignment-details" data-disclosure-key="upgrade-assignments">
+    <summary>${l('最终调整与模组配置', '最終調校與模組配置', 'Final Tuning and stat mods')}<span class="upgrade-assignment-count">${planned > 0
+      ? l(`${planned} 件已规划`, `${planned} 件已規劃`, `${planned} pieces planned`)
+      : ''}</span></summary>
+    ${renderWitnessBreakdown(evaluation)}
     <div class="upgrade-assignment-list">${evaluation.configs.map((config, index) => `
       <div class="upgrade-assignment-row">
         <strong>${getUpgradeSlotLabel(index)}</strong>
@@ -4671,25 +4798,43 @@ function buildUpgradeAssignments(analysis, evaluation, open = false) {
 // tuning -5 sources and armor mods. This is what analysis.baseline already is.
 function buildUpgradeKeepArmorAlternative(analysis) {
   const shortfall = analysis.baseline.metrics.shortfall;
-  return `<details class="upgrade-assignment-details">
+  return `<details class="upgrade-alternative" data-disclosure-key="upgrade-alternative">
     <summary>${l(
       `备选方案：不刷护甲，保留现有五件重排调整与模组，还差 ${shortfall} 点`,
       `備選方案：不刷防具，保留目前五件重排調校與模組，還差 ${shortfall} 點`,
       `Alternative: no farming — keep all five pieces, rearrange tuning and mods, ${shortfall} points short`
     )}</summary>
     ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
-    ${buildUpgradeBaselineNote(analysis, true)}
+    ${buildUpgradeAssignments(analysis.baseline)}
     <p class="upgrade-empty">${l(
       '不想刷取新护甲的话，这是现有五件能达到的最好六维；想完全达标，还是需要按上面的方案刷取替换件。',
       '不想刷取新防具的話，這是目前五件能達到的最好六維；想完全達標，還是需要按上面的方案刷取替換件。',
       'If you do not want to farm, this is the best your five current pieces can reach; to meet every target you still need the replacement plan above.'
     )}</p>
-    ${buildUpgradeAssignments(analysis, analysis.baseline)}
   </details>`;
 }
 
-function renderUpgradeAnalysis(analysis, scroll = false) {
-  if (!analysis) return;
+// The result hero. Level 1 of the visual hierarchy: status, then the two
+// numbers a reader needs to decide (how many swaps, how many kept), and only
+// then — behind a disclosure — the prose. Nothing long is above the fold.
+function upgradeHero({ tone = 'is-met', eyebrow, headline, copy, outcome, outcomeNote }) {
+  return `<div class="upgrade-hero ${tone}">
+    <div class="upgrade-hero-main">
+      <span class="upgrade-eyebrow">${eyebrow}</span>
+      <div class="upgrade-recommendation">${headline}</div>
+      <details class="upgrade-hero-more" data-disclosure-key="upgrade-hero-more">
+        <summary>${l('查看说明', '檢視說明', 'Details')}</summary>
+        <p class="upgrade-recommendation-copy">${copy}</p>
+      </details>
+    </div>
+    <div class="upgrade-outcome">
+      <strong>${outcome}</strong>
+      <span>${outcomeNote}</span>
+    </div>
+  </div>`;
+}
+
+function renderUpgradeAnalysis(analysis, scroll = false) {  if (!analysis) return;
   lastUpgradeAnalysis = analysis;
   const section = document.getElementById('upgradeResults');
   const body = document.getElementById('upgradeResultsBody');
@@ -4703,31 +4848,36 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
   if (certifiedFeasible(analysis.baseline)) {
     const enteredAlreadyReached = certifiedFeasible(analysis.enteredBaseline);
     const needsMasterwork = (analysis.projectedMasterworkIndices?.length || 0) > 0;
-    body.innerHTML = `<div class="upgrade-hero">
-      <div>
-        <div class="upgrade-eyebrow">${l('当前配装','目前配裝','Current loadout')}</div>
-        <div class="upgrade-recommendation">${enteredAlreadyReached
-          ? l('不用换护甲','不用換防具','Keep all five pieces')
-          : (needsMasterwork
-            ? l('完成大师杰作并重配模组','完成大師之作並重配模組','Fully Masterwork and rearrange mods')
-            : l('只要重配模组','只要重配模組','Just rearrange the mods'))}</div>
-        <p class="upgrade-recommendation-copy">${l(
-          enteredAlreadyReached
-            ? '现在这套已经达标。下面是最后的模组分配，照着核对一遍就行。'
-            : '护甲都可以留下。按下面重新选调整的 -5 来源、重排属性模组就能达标；调整的 +5 属性是护甲自带的，这里没有动过。',
-          enteredAlreadyReached
-            ? '目前這套已經達標。下面是最後的模組分配，照著核對一遍就行。'
-            : '防具都可以留下。按下面重新選調校的 -5 來源、重排數值模組就能達標；調校的 +5 數值是防具自帶的，這裡沒有動過。',
-          enteredAlreadyReached
-            ? 'This loadout already meets every target. Check the final mod setup below and you are done.'
-            : 'You can keep every armor piece. Re-pick each tuning mod\'s -5 source and rearrange the stat mods as shown to meet every target — the rolled +5 stats are untouched.'
-        )}</p>
-      </div>
-      <div class="upgrade-outcome"><strong>${l('5 件都能留下','5 件都能留下','Keep all 5 pieces')}</strong><span>${l('不用再刷护甲','不用再刷防具','No armor farming needed')}</span></div>
-    </div>
+    body.innerHTML = `${upgradeHero({
+      tone: 'is-met',
+      eyebrow: l('当前配装','目前配裝','Current loadout'),
+      headline: enteredAlreadyReached
+        ? l('不用换护甲','不用換防具','Keep all five pieces')
+        : (needsMasterwork
+          ? l('完成大师杰作并重配模组','完成大師之作並重配模組','Fully Masterwork and rearrange mods')
+          : l('只要重配模组','只要重配模組','Just rearrange the mods')),
+      copy: enteredAlreadyReached
+        ? l(
+          '现在这套已经达标。下面是最后的模组分配，照着核对一遍就行。',
+          '目前這套已經達標。下面是最後的模組分配，照著核對一遍就行。',
+          'This loadout already meets every target. Check the final mod setup below and you are done.')
+        : l(
+          '护甲都可以留下。按下面重新选调整的 -5 来源、重排属性模组就能达标；调整的 +5 属性是护甲自带的，这里没有动过。',
+          '防具都可以留下。按下面重新選調校的 -5 來源、重排數值模組就能達標；調校的 +5 數值是防具自帶的，這裡沒有動過。',
+          'You can keep every armor piece. Re-pick each tuning mod\'s -5 source and rearrange the stat mods as shown to meet every target — the rolled +5 stats are untouched.'),
+      outcome: l('5 件都能留下','5 件都能留下','Keep all 5 pieces'),
+      outcomeNote: l(
+        '最少替换 0 件 · 保留 5 / 5 件 · 不用再刷护甲',
+        '最少替換 0 件 · 保留 5 / 5 件 · 不用再取得防具',
+        '0 replacements · 5 / 5 kept · no armor farming',
+      ),
+    })}
     ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
-    ${buildUpgradeBaselineNote(analysis)}
-    ${buildUpgradeAssignments(analysis, analysis.baseline, true)}`;
+    ${buildUpgradeAssignments(analysis.baseline)}
+    <details class="upgrade-explanation" data-disclosure-key="upgrade-explanation">
+      <summary>${l('数值说明', '數值說明', 'How the numbers work')}</summary>
+      ${buildUpgradeBaselineNote(analysis)}
+    </details>`;
   } else if (!analysis.plan) {
     // The bounded fallback found no better witness. This is not an optimality
     // or infeasibility proof, so the UI must keep that distinction explicit.
@@ -4735,26 +4885,36 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
       STATS.some(stat =>
         analysis.enteredBaseline.finalTotals[stat] !== analysis.baseline.finalTotals[stat]
       );
-    body.innerHTML = `<div class="upgrade-hero">
-      <div>
-        <div class="upgrade-eyebrow">${l('搜索受限','搜尋受限','Search limited')}</div>
-        <div class="upgrade-recommendation">${rearranged
-          ? l('当前最佳配装：重配模组','目前最佳配裝：重配模組','Current-best loadout after rearranging mods')
-          : l('当前配装是目前最佳搭配','目前配裝是當前最佳搭配','Current loadout is the best loadout found')}</div>
-        <p class="upgrade-recommendation-copy">${l(
-          `搜索时间内未找到更好的替换方案；当前搭配还差 ${analysis.baseline.metrics.shortfall} 点，仍可能存在更好的搭配。`,
-          `搜尋時間內未找到更好的替換方案；目前搭配還差 ${analysis.baseline.metrics.shortfall} 點，仍可能存在更好的搭配。`,
-          `The bounded search found no better replacement loadout. This setup is ${analysis.baseline.metrics.shortfall} points short; global optimality and infeasibility remain unproven.`
-        )}</p>
-      </div>
-      <div class="upgrade-outcome"><strong>${l(`还差 ${analysis.baseline.metrics.shortfall} 点`, `還差 ${analysis.baseline.metrics.shortfall} 點`, `${analysis.baseline.metrics.shortfall} points short`)}</strong><span>${l('当前最佳配装 · 无需刷取','目前最佳配裝 · 無需刷取','Current-best loadout · no farming needed')}</span></div>
-    </div>
+    body.innerHTML = `${upgradeHero({
+      tone: 'is-pending',
+      eyebrow: l('搜索受限','搜尋受限','Search limited'),
+      headline: rearranged
+        ? l('当前最佳配装：重配模组','目前最佳配裝：重配模組','Current-best loadout after rearranging mods')
+        : l('当前配装是目前最佳搭配','目前配裝是當前最佳搭配','Current loadout is the best loadout found'),
+      copy: l(
+        `搜索时间内未找到更好的替换方案；当前搭配还差 ${analysis.baseline.metrics.shortfall} 点，仍可能存在更好的搭配。`,
+        `搜尋時間內未找到更好的替換方案；目前搭配還差 ${analysis.baseline.metrics.shortfall} 點，仍可能存在更好的搭配。`,
+        `The bounded search found no better replacement loadout. This setup is ${analysis.baseline.metrics.shortfall} points short; global optimality and infeasibility remain unproven.`),
+      outcome: l(
+        `还差 ${analysis.baseline.metrics.shortfall} 点`,
+        `還差 ${analysis.baseline.metrics.shortfall} 點`,
+        `${analysis.baseline.metrics.shortfall} points short`),
+      outcomeNote: l(
+        '最少替换 0 件 · 保留 5 / 5 件 · 无需刷取',
+        '最少替換 0 件 · 保留 5 / 5 件 · 無需取得',
+        '0 replacements · 5 / 5 kept · no farming needed',
+      ),
+    })}
     ${buildUpgradeStatComparison(analysis, analysis.baseline.finalTotals)}
-    ${buildUpgradeBaselineNote(analysis)}`;
+    <details class="upgrade-explanation" data-disclosure-key="upgrade-explanation">
+      <summary>${l('数值说明', '數值說明', 'How the numbers work')}</summary>
+      ${buildUpgradeBaselineNote(analysis)}
+    </details>`;
   } else {
     const plan = analysis.plan;
     displayedEvaluation = plan.evaluation;
     const reached = certifiedFeasible(plan.evaluation);
+    const kept = 5 - plan.replacementCount;
     const farmLabel = importedInventory.length > 0
       ? `<div class="upgrade-option-label">${l(
         '刷取方案：替换清单中没有的护甲（与上面从已有清单搭配的方案二选一）',
@@ -4762,46 +4922,41 @@ function renderUpgradeAnalysis(analysis, scroll = false) {
         'Farming plan: pieces not in your inventory (alternative to the owned-armor loadouts above)'
       )}</div>`
       : '';
-    body.innerHTML = farmLabel + `<div class="upgrade-hero">
-      <div>
-        <div class="upgrade-eyebrow">${reached
-          ? (plan.replacementProof?.minimal
-            ? l('已证明的最少替换方案','已證明的最少替換方案','Proven minimum-replacement plan')
-            : l('可行替换配装','可行替換配裝','Feasible replacement loadout'))
-          : l('当前最佳替换配装','目前最佳替換配裝','Current-best replacement loadout')}</div>
-        <div class="upgrade-recommendation">${reached
-          ? l(`换 ${plan.replacementCount} 件就能达标`, `換 ${plan.replacementCount} 件就能達標`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} to meet every target`)
-          : l(`换 ${plan.replacementCount} 件后还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件後還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} and remain ${plan.metrics.shortfall} short`)}</div>
-        <p class="upgrade-recommendation-copy">${reached
-          ? l(
-            '方案已按优先顺序排好，照着下面执行即可。如果暂时不想刷，也可以先保留现有护甲重排调整与模组，但还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。',
-            '方案已按優先順序排好，照著下面執行即可。如果暫時不想刷，也可以先保留目前防具重排調校與模組，但還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。',
-            'The swaps are already prioritized. Follow the steps below. If you do not want to farm yet, keeping your current armor and rearranging tuning and mods works too, but leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below).'
-          )
-          : l(
-            '搜索时间内尚未找到全部达标的搭配。下面是目前找到的最佳方案，仍可能存在更好的搭配；保留现有护甲重排调整与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点。',
-            '搜尋時間內尚未找到全部達標的搭配。下面是目前找到的最佳方案，仍可能存在更好的搭配；保留目前防具重排調校與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點。',
-            'The bounded search has not found a loadout meeting all six targets. The result below is current-best, not a proof of global optimality or infeasibility; keeping current armor leaves ' + analysis.baseline.metrics.shortfall + ' points short.'
-          )}</p>
-      </div>
-      <div class="upgrade-outcome">
-        <strong>${reached
-          ? l('六维都达标','六維都達標','All six targets met')
-          : l(`还差 ${plan.metrics.shortfall} 点`, `還差 ${plan.metrics.shortfall} 點`, `${plan.metrics.shortfall} points short`)}</strong>
-        <span>${l(
-          `留下现有护甲 ${5 - plan.replacementCount} / 5 件`,
-          `留下目前防具 ${5 - plan.replacementCount} / 5 件`,
-          `Keep ${5 - plan.replacementCount} / 5 current pieces`
-        )}</span>
-      </div>
-    </div>
+    body.innerHTML = farmLabel + upgradeHero({
+      tone: reached ? 'is-met' : 'is-short',
+      eyebrow: reached
+        ? (plan.replacementProof?.minimal
+          ? l('已证明的最少替换方案','已證明的最少替換方案','Proven minimum-replacement plan')
+          : l('可行替换配装','可行替換配裝','Feasible replacement loadout'))
+        : l('当前最佳替换配装','目前最佳替換配裝','Current-best replacement loadout'),
+      headline: reached
+        ? l(`换 ${plan.replacementCount} 件就能达标`, `換 ${plan.replacementCount} 件就能達標`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} to meet every target`)
+        : l(`换 ${plan.replacementCount} 件后还差 ${plan.metrics.shortfall} 点`, `換 ${plan.replacementCount} 件後還差 ${plan.metrics.shortfall} 點`, `Replace ${plan.replacementCount} piece${plan.replacementCount === 1 ? '' : 's'} and remain ${plan.metrics.shortfall} short`),
+      copy: reached
+        ? l(
+          '方案已按优先顺序排好，照着下面执行即可。如果暂时不想刷，也可以先保留现有护甲重排调整与模组，但还差 ' + analysis.baseline.metrics.shortfall + ' 点（见下方备选方案）。',
+          '方案已按優先順序排好，照著下面執行即可。如果暫時不想刷，也可以先保留目前防具重排調校與模組，但還差 ' + analysis.baseline.metrics.shortfall + ' 點（見下方備選方案）。',
+          'The swaps are already prioritized. Follow the steps below. If you do not want to farm yet, keeping your current armor and rearranging tuning and mods works too, but leaves ' + analysis.baseline.metrics.shortfall + ' points short (see the alternative below).')
+        : l(
+          '搜索时间内尚未找到全部达标的搭配。下面是目前找到的最佳方案，仍可能存在更好的搭配；保留现有护甲重排调整与模组还差 ' + analysis.baseline.metrics.shortfall + ' 点。',
+          '搜尋時間內尚未找到全部達標的搭配。下面是目前找到的最佳方案，仍可能存在更好的搭配；保留目前防具重排調校與模組還差 ' + analysis.baseline.metrics.shortfall + ' 點。',
+          'The bounded search has not found a loadout meeting all six targets. The result below is current-best, not a proof of global optimality or infeasibility; keeping current armor leaves ' + analysis.baseline.metrics.shortfall + ' points short.'),
+      outcome: reached
+        ? l('六维都达标','六維都達標','All six targets met')
+        : l(`还差 ${plan.metrics.shortfall} 点`, `還差 ${plan.metrics.shortfall} 點`, `${plan.metrics.shortfall} points short`),
+      outcomeNote: l(
+        `最少替换 ${plan.replacementCount} 件 · 保留 ${kept} / 5 件`,
+        `最少替換 ${plan.replacementCount} 件 · 保留 ${kept} / 5 件`,
+        `${plan.replacementCount} replacement${plan.replacementCount === 1 ? '' : 's'} · ${kept} / 5 kept`,
+      ),
+    }) + `
     ${buildUpgradeStatComparison(analysis, plan.evaluation.finalTotals)}
-    ${buildUpgradeBaselineNote(analysis)}
     ${buildUpgradePlanFlow(analysis, plan)}
-    ${buildUpgradeAssignments(analysis, plan.evaluation, true)}
-    ${buildUpgradeKeepArmorAlternative(analysis)}`;
+    ${buildUpgradeAssignments(plan.evaluation)}
+    ${buildUpgradeExplanation(analysis)}`;
   }
   body.insertAdjacentHTML('afterbegin', buildUpgradeRequirementResult(analysis, displayedEvaluation));
+  lastCommittedInputSignature = currentInputSignature();
   if (scroll) section.scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
@@ -5404,13 +5559,13 @@ function syncCommandBarActions() {
 //   projectedTotals — the same plan with the armor upgraded to Tier 5; equals
 //     the mathematical result when the instances are already masterworked. It is
 //     the bridge the execution layer is validated against.
-//   installableTotals — only the socket operations the current instances can
-//     actually accept right now (energy, socket compatibility, plug
-//     availability). A mod *proven* blocked contributes nothing; a mod whose
-//     capability is merely unknown still counts, because absent metadata must
-//     never lower the plan's value.
-// Fragments are added to the armor-domain totals exactly once, here, so all
-// three are directly comparable with the user's targets.
+//   installableTotals — the instance state AFTER the plan runs, under current
+//     evidence. A queued write, an already-installed plug and a write that the
+//     metadata merely cannot disprove all count. A write *proven* impossible is
+//     not counted as the desired modifier — but it does not uninstall anything
+//     either, so the modifier the piece already carries stays (a blocked
+//     replacement is not a removal). Fragments are added exactly once, here, so
+//     all three totals are directly comparable with the user's targets.
 //
 // The witness's own verified visible totals. Rebuilt from the sealed witness
 // rather than trusted from storage, so a stale snapshot can never inflate the
@@ -5433,17 +5588,29 @@ function differingStats(left, right) {
 //   unverified.* — the metadata needed to judge the write is missing.
 //   masterwork   — nothing is wrong, the armor simply is not upgraded yet.
 // The distinction is what keeps "unknown" from being worded as "blocked".
+//
+// The blocked families come from the core (`summarizeBlockedReasons`) so the UI
+// can never disagree with the preflight about what went wrong, and a BLOCKED
+// plan always has at least one named family to show.
 function classifyPreflight(entry, execution, { mathematical, installable, projected }) {
   const unassigned = execution?.unassignedMods || [];
   const unverifiedMods = execution?.unverifiedMods || [];
-  const isSocketBlocked = reason => reason === "plugUnavailable" || reason === "cannotClear"
-    || String(reason).endsWith("SocketMissing");
+  const counts = execution?.blockedByCategory && typeof execution.blockedByCategory === "object"
+    ? execution.blockedByCategory
+    : summarizeBlockedReasons(unassigned);
   const blocked = {
-    energy: unassigned.filter(mod => mod.reason === "energy").length,
-    socket: unassigned.filter(mod => isSocketBlocked(mod.reason)).length,
-    mismatch: unassigned.filter(mod => mod.reason === "tuningMismatch" || mod.reason === "invalidAssignment").length,
+    energy: Number(counts[EXECUTION_BLOCK_CATEGORY.ENERGY]) || 0,
+    socket: Number(counts[EXECUTION_BLOCK_CATEGORY.SOCKET]) || 0,
+    plug: Number(counts[EXECUTION_BLOCK_CATEGORY.PLUG]) || 0,
+    tuning: Number(counts[EXECUTION_BLOCK_CATEGORY.TUNING]) || 0,
+    instance: Number(counts[EXECUTION_BLOCK_CATEGORY.INSTANCE]) || 0,
+    consistency: Number(counts[EXECUTION_BLOCK_CATEGORY.CONSISTENCY]) || 0,
   };
-  blocked.total = blocked.energy + blocked.socket + blocked.mismatch;
+  blocked.total = blocked.energy + blocked.socket + blocked.plug
+    + blocked.tuning + blocked.instance + blocked.consistency;
+  // Distinct raw reasons, so the advanced panel can still be exact without the
+  // reader having to guess which plug or socket was refused.
+  blocked.reasons = [...new Set(unassigned.map(mod => mod?.reason).filter(Boolean))];
   const unverified = {
     // DIM CSV exports carry the exact roll but no socket capability at all.
     socket: unverifiedMods.filter(mod => mod.kind === "item" && mod.reason === "socketCapabilityUnknown").length,
@@ -6168,8 +6335,19 @@ function renderAdvancedDetails(entry, totals = null) {
       search.running !== undefined ? `running=${String(search.running)}` : "",
     ].filter(Boolean).join(" · ")
     : "—";
+  // The preflight verdict is worded by evidence class first and by raw code
+  // second, so "UNVERIFIED" can never be read as "confirmed installable" and a
+  // BLOCKED plan always says there is a confirmed obstacle.
+  const preflightCode = entry.kind === "inventory"
+    ? (witness.executionStatus || null)
+    : null;
+  const preflightWords = {
+    [EXECUTION_STATUS.VERIFIED]: l("可执行", "可執行", "Executable"),
+    [EXECUTION_STATUS.UNVERIFIED]: l("尚未完全验证（按当前证据估算）", "尚未完全驗證（依目前證據估算）", "Not fully verified (estimated from current evidence)"),
+    [EXECUTION_STATUS.BLOCKED]: l("已确认存在执行阻碍", "已確認存在執行阻礙", "A confirmed execution obstacle exists"),
+  };
   const preflight = entry.kind === "inventory"
-    ? (witness.executionStatus || l("未标注", "未標示", "Not reported"))
+    ? `${preflightWords[preflightCode] || l("未标注", "未標示", "Not reported")}${preflightCode ? `（${preflightCode}）` : ""}`
     : (entry.planFeasible ? l("理论方案：无实例可预检", "理論方案：無實例可預檢", "Theoretical plan: no instance to preflight")
       : l("不可实施：套装或库存映射不可达", "無法實施：套裝或庫存映射不可達", "Unmappable: the set/owned mapping cannot reach it"));
   const totalsModel = totals || getUnifiedTotalsModel(entry);
@@ -6180,12 +6358,18 @@ function renderAdvancedDetails(entry, totals = null) {
     return `<span class="advanced-totals-row"><em style="color:${STAT_COLORS[stat]}">${STAT_LABELS[stat]}</em>`
       + `<span>${l("数学", "數學", "math")} ${mathematical}</span>`
       + `<span class="${projected === mathematical ? "" : "is-blocked"}">${l("升级后", "升級後", "projected")} ${projected}</span>`
-      + `<span class="${installable === mathematical ? "" : "is-blocked"}">${l("可装", "可裝", "installable")} ${installable}</span></span>`;
+      + `<span class="${installable === mathematical ? "" : "is-estimated"}">${l("执行估算", "執行估算", "estimated")} ${installable}</span></span>`;
   }).join("");
   // Evidence counts, so the panel shows *why* the preflight is not VERIFIED
-  // instead of a bare status word.
+  // instead of a bare status word. Families come from the core classifier, so a
+  // BLOCKED plan always names at least one reason.
   const detailParts = [
-    totalsModel.blocked?.total ? l(`已确认不可安装 ${totalsModel.blocked.total}`, `已確認無法安裝 ${totalsModel.blocked.total}`, `${totalsModel.blocked.total} confirmed blocked`) : "",
+    totalsModel.blocked?.energy ? l(`能量不足 ${totalsModel.blocked.energy}`, `能量不足 ${totalsModel.blocked.energy}`, `${totalsModel.blocked.energy} out of energy`) : "",
+    totalsModel.blocked?.socket ? l(`插槽不支持 ${totalsModel.blocked.socket}`, `插槽不支援 ${totalsModel.blocked.socket}`, `${totalsModel.blocked.socket} unsupported socket(s)`) : "",
+    totalsModel.blocked?.plug ? l(`模组不可用 ${totalsModel.blocked.plug}`, `模組無法使用 ${totalsModel.blocked.plug}`, `${totalsModel.blocked.plug} unavailable plug(s)`) : "",
+    totalsModel.blocked?.tuning ? l(`调整不兼容 ${totalsModel.blocked.tuning}`, `調校不相容 ${totalsModel.blocked.tuning}`, `${totalsModel.blocked.tuning} incompatible tuning`) : "",
+    totalsModel.blocked?.instance ? l(`实例/库存映射错误 ${totalsModel.blocked.instance}`, `實例/庫存對應錯誤 ${totalsModel.blocked.instance}`, `${totalsModel.blocked.instance} instance mapping error(s)`) : "",
+    totalsModel.blocked?.consistency ? l(`数学投影一致性错误 ${totalsModel.blocked.consistency}`, `數學投影一致性錯誤 ${totalsModel.blocked.consistency}`, `${totalsModel.blocked.consistency} projection mismatch(es)`) : "",
     totalsModel.unverified?.total ? l(`尚未验证 ${totalsModel.unverified.total}`, `尚未驗證 ${totalsModel.unverified.total}`, `${totalsModel.unverified.total} unverified`) : "",
   ].filter(Boolean);
   return `<details class="advanced-details" data-disclosure-key="advanced">
@@ -6209,7 +6393,7 @@ function renderAdvancedDetails(entry, totals = null) {
         <span>${escapeHtml(String(preflight))}${detailParts.length ? ` · ${escapeHtml(detailParts.join(" · "))}` : ""}</span>
       </div>
       <div class="advanced-row advanced-totals">
-        <span class="advanced-label">${l("数学 / 升级后 / 可装", "數學 / 升級後 / 可裝", "Math / projected / installable")}</span>
+        <span class="advanced-label">${l("数学 / 升级后 / 执行估算", "數學 / 升級後 / 執行估算", "Math / projected / estimated")}</span>
         <span class="advanced-totals-grid">${totalsRows}</span>
       </div>
       <details class="advanced-sub" data-disclosure-key="advanced-allocation">
@@ -6227,6 +6411,9 @@ function renderAdvancedDetails(entry, totals = null) {
 //   已确认…无法安装        — only for metadata-proven negatives (energy/socket/plug).
 //   尚未验证…              — for missing capability data (DIM CSV exports).
 //   部分护甲尚未完成大师杰作 — when the only gap is the armor's upgrade tier.
+// The "installable" number is the instance state after the plan runs, so a
+// blocked replacement keeps the modifier that is already installed; the note
+// therefore says what is *in effect*, never "the mod was removed".
 function renderExecutionNote(totalsModel) {
   const { status, blocked, unverified, mathematicalVsInstallable, masterworkPending } = totalsModel;
   if (!status && blocked.total === 0 && unverified.total === 0) return "";
@@ -6235,26 +6422,49 @@ function renderExecutionNote(totalsModel) {
   const sentences = [];
   if (mathematicalVsInstallable.length > 0) {
     sentences.push(l(
-      `数学结果 ${formatTotals(totalsModel.mathematical)}；当前可实际装备 ${formatTotals(totalsModel.installable)}。`,
-      `數學結果 ${formatTotals(totalsModel.mathematical)}；目前可實際裝備 ${formatTotals(totalsModel.installable)}。`,
-      `Mathematical ${formatTotals(totalsModel.mathematical)}; installable right now ${formatTotals(totalsModel.installable)}.`,
+      `数学结果 ${formatTotals(totalsModel.mathematical)}；按当前证据实际生效 ${formatTotals(totalsModel.installable)}。`,
+      `數學結果 ${formatTotals(totalsModel.mathematical)}；依目前證據實際生效 ${formatTotals(totalsModel.installable)}。`,
+      `Mathematical ${formatTotals(totalsModel.mathematical)}; actually in effect under current evidence ${formatTotals(totalsModel.installable)}.`,
     ));
   }
+  // One entry per named family. A BLOCKED plan always lands in at least one of
+  // these, so the "why" area can never be empty.
   const confirmed = [];
   if (blocked.energy) confirmed.push(l(
-    `${blocked.energy} 个属性模组因能量不足无法安装`,
-    `${blocked.energy} 個數值模組因能量不足無法安裝`,
-    `${blocked.energy} stat mod(s) cannot be installed for lack of energy`,
+    `${blocked.energy} 个属性模组因能量不足无法安装（原有模组保持不动）`,
+    `${blocked.energy} 個數值模組因能量不足無法安裝（原有模組保持不動）`,
+    `${blocked.energy} stat mod(s) cannot be installed for lack of energy (the installed mod stays)`,
   ));
   if (blocked.socket) confirmed.push(l(
-    `${blocked.socket} 个模组因插槽或模组不可用无法安装`,
-    `${blocked.socket} 個模組因插槽或模組不可用無法安裝`,
-    `${blocked.socket} mod(s) cannot be installed because the socket or plug is unavailable`,
+    `${blocked.socket} 个模组因插槽不支持无法安装`,
+    `${blocked.socket} 個模組因插槽不支援無法安裝`,
+    `${blocked.socket} mod(s) cannot be installed because the socket does not support the role`,
   ));
-  if (blocked.mismatch) confirmed.push(l(
-    `${blocked.mismatch} 个调整模组与该护甲的固定调整属性不符`,
-    `${blocked.mismatch} 個調校模組與該防具的固定調校數值不符`,
-    `${blocked.mismatch} tuning mod(s) do not match the armor's fixed Tuning Stat`,
+  if (blocked.plug) confirmed.push(l(
+    `${blocked.plug} 个模组不可用（插槽不接受该模组）`,
+    `${blocked.plug} 個模組無法使用（插槽不接受該模組）`,
+    `${blocked.plug} mod(s) are unavailable for the socket`,
+  ));
+  if (blocked.tuning) confirmed.push(l(
+    `${blocked.tuning} 个调整模组与该护甲的固定调整属性不兼容`,
+    `${blocked.tuning} 個調校模組與該防具的固定調校數值不相容`,
+    `${blocked.tuning} tuning mod(s) are incompatible with the armor's fixed Tuning Stat`,
+  ));
+  if (blocked.instance) confirmed.push(l(
+    `${blocked.instance} 处实例或库存映射错误（该槽位没有可写入的实例）`,
+    `${blocked.instance} 處實例或庫存對應錯誤（該欄位沒有可寫入的實例）`,
+    `${blocked.instance} instance/inventory mapping error(s) — no writable instance in that slot`,
+  ));
+  if (blocked.consistency) confirmed.push(l(
+    `${blocked.consistency} 处数学投影一致性检查失败`,
+    `${blocked.consistency} 處數學投影一致性檢查失敗`,
+    `${blocked.consistency} mathematical projection consistency failure(s)`,
+  ));
+  // Defensive: a future reason this build does not know still gets a sentence.
+  if (confirmed.length === 0 && blocked.total > 0) confirmed.push(l(
+    `${blocked.total} 个写入被确认无法执行`,
+    `${blocked.total} 個寫入被確認無法執行`,
+    `${blocked.total} write(s) are confirmed impossible`,
   ));
   if (confirmed.length) sentences.push(l(
     `已确认：${confirmed.join("，")}。`,
@@ -6637,6 +6847,40 @@ function getSavedBuilds() {
   return buildRepository.readSavedBuilds();
 }
 
+// A cheap fingerprint of everything that can change a plan. Comparing it with
+// the signature captured when the current result was produced answers
+// "are there unsaved condition edits on screen?" without diffing drafts.
+function currentInputSignature() {
+  const pieces = (upgradeBuildState || []).map(piece => [
+    piece?.slot ?? null, piece?.sourceId ?? null, piece?.archetypeId ?? null,
+    piece?.tertiary ?? null, piece?.tuningMode ?? null, piece?.tuningFrom ?? null,
+    piece?.tuningTo ?? null, piece?.armorModSize ?? 0, piece?.armorModStat ?? null,
+    piece?.exotic ? 1 : 0, piece?.locked ? 1 : 0,
+  ]);
+  const targets = Object.fromEntries(STATS.map(stat => [stat, getVal('target_' + stat)]));
+  const required = STATS.filter(stat => document.getElementById('upgradeRequired_' + stat)?.checked === true);
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, getFragVal(stat)]));
+  const exotic = document.getElementById('useExoticMode')?.checked === true
+    ? [document.getElementById('exoticClass')?.value, document.getElementById('exoticPrimaryPerk')?.value, document.getElementById('exoticSecondaryPerk')?.value]
+    : null;
+  return JSON.stringify({
+    mode: calculatorMode,
+    targets, required, fragments, exotic,
+    classFilter: importClassFilter,
+    inventoryCount: importedInventory.length,
+    fixedExotic: [inventoryExoticSlotFilter, inventoryFixedExoticKey],
+    setRequirement: snapshotSetRequirement(),
+    budget: [getVal('numPlus5'), getVal('numPlus10'), document.getElementById('usePlus3')?.checked === true, getPlus3Count()],
+    onlyPlus5: isOnlyPlus5Tuning(),
+    pieces,
+  });
+}
+
+function hasUnsavedConditionEdits() {
+  if (lastCommittedInputSignature === null) return false;
+  return currentInputSignature() !== lastCommittedInputSignature;
+}
+
 // Returns false when the write did not land. The caller must surface that:
 // reporting "saved" for a build that was never persisted is how a user loses
 // a loadout without ever being told.
@@ -6644,25 +6888,78 @@ function saveBuildsToStorage(builds) {
   return buildRepository.writeSavedBuilds(builds) === true;
 }
 
+// Status text lives in the saved-plan drawer, next to the list it is about.
 function showSavedBuildStatus(message, tone = "info") {
-  const card = document.getElementById('savedCard');
-  const list = document.getElementById('savedBuildsList');
-  if (card) card.style.display = 'block';
-  if (!list) return;
-  let status = document.getElementById('savedBuildStatus');
-  if (!status) {
-    status = document.createElement('div');
-    status.id = 'savedBuildStatus';
-    status.setAttribute('role', 'status');
-    status.setAttribute('aria-live', 'polite');
-    status.style.marginTop = '8px';
-    list.insertAdjacentElement('afterend', status);
-  }
+  const status = document.getElementById('savedBuildStatus');
+  if (!status) return;
   status.innerHTML = `<div class="msg ${tone}">${icon(tone === 'error' ? 'block' : tone === 'warn' ? 'warn' : 'check')}<span>${escapeHtml(message)}</span></div>`;
 }
 
 function clearSavedBuildStatus() {
-  document.getElementById('savedBuildStatus')?.remove();
+  const status = document.getElementById('savedBuildStatus');
+  if (status) status.innerHTML = '';
+}
+
+// ============================================================
+// OVERLAYS (help drawer, saved-plan drawer, save dialog, toasts)
+// ============================================================
+// One scrim, one Escape handler, one state read: the overlays never stack, so
+// closing "everything" is always correct and no overlay can trap focus behind
+// another one.
+function setOverlay(id, open) {
+  const node = document.getElementById(id);
+  if (node) node.hidden = !open;
+  const scrim = document.getElementById('overlayScrim');
+  if (scrim && open) scrim.hidden = false;
+}
+
+function closeOverlays() {
+  setOverlay('programIntroDrawer', false);
+  setOverlay('savedBuildsDrawer', false);
+  setOverlay('saveBuildDialog', false);
+  const scrim = document.getElementById('overlayScrim');
+  if (scrim) scrim.hidden = true;
+  document.body.classList.remove('has-overlay');
+}
+
+function openProgramIntro() {
+  closeOverlays();
+  setOverlay('programIntroDrawer', true);
+  document.body.classList.add('has-overlay');
+  document.getElementById('programIntroDrawer')?.querySelector('.side-drawer-head h2')?.focus?.();
+}
+
+function openSavedBuildsDrawer() {
+  closeOverlays();
+  renderSavedBuilds();
+  setOverlay('savedBuildsDrawer', true);
+  document.body.classList.add('has-overlay');
+}
+
+// Non-blocking feedback that never moves the page: "saved", "deleted" and the
+// Undo affordance all land here instead of in a status block that would have to
+// be scrolled to.
+function showToast(message, { tone = "info", action = null, actionLabel = "", duration = 6000 } = {}) {
+  const stack = document.getElementById('toastStack');
+  if (!stack) return () => {};
+  const toast = document.createElement('div');
+  toast.className = `toast is-${tone}`;
+  toast.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+  const text = document.createElement('span');
+  text.textContent = message;
+  toast.append(text);
+  const dismiss = () => { clearTimeout(timer); toast.remove(); };
+  if (typeof action === 'function' && actionLabel) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'toast-action';
+    button.textContent = actionLabel;
+    button.addEventListener('click', () => { action(); dismiss(); });
+    toast.append(button);
+  }
+  const timer = setTimeout(dismiss, duration);
+  stack.append(toast);
+  return dismiss;
 }
 
 // Long-term user input, whichever shape the record happens to carry: the new
@@ -6768,32 +7065,160 @@ function buildSavedBuildRecord(entry, name) {
   };
 }
 
+// A default name that already says something useful: the solved plan, the
+// class, and when it was made.
+function defaultSavedBuildName(entry) {
+  const input = {};
+  for (const stat of STATS) input[stat] = getVal('target_' + stat);
+  const classLabel = { hunter: l('猎人', '獵人', 'Hunter'), titan: l('泰坦', '泰坦', 'Titan'), warlock: l('术士', '術士', 'Warlock') }[importClassFilter] || '';
+  const requirement = snapshotSetRequirement();
+  const setLabel = requirement && requirement.type !== 'none' ? formatSetRequirementLabel(requirement) : '';
+  const kindLabel = entry?.farmCount === 0
+    ? l('已有齐全', '已有齊全', 'Fully owned')
+    : l('从零配装', '從零配裝', 'From scratch');
+  const date = new Date().toLocaleDateString(localeCode());
+  const time = new Date().toLocaleTimeString(localeCode()).slice(0, 5);
+  return [l('配装', '配裝', 'Loadout'), date, time, classLabel, setLabel, kindLabel]
+    .filter(Boolean).join(' · ');
+}
+
+// `saveBuild()` (the command-bar button and the plan header button) opens the
+// dialog. Keeping the naming step in a dialog instead of prompt() means the
+// save flow cannot scroll the page, cannot jump to another section, and can
+// report a storage failure inline.
 function saveBuild() {
   const entry = getSelectedUnifiedEntry();
   if (!entry) {
-    alert(l('请先求解配装再保存。', '請先求解配裝再儲存。', 'Solve a loadout before saving it.'));
+    showToast(l('请先求解配装再保存。', '請先求解配裝再儲存。', 'Solve a loadout before saving it.'), { tone: 'warn' });
     return;
   }
-  const witness = entry.witness;
-  assertSolutionConsistency(witness.problemSpec, witness);
+  const summary = getUnifiedEntrySummary(entry);
+  const dialog = document.getElementById('saveBuildDialog');
+  const nameInput = document.getElementById('saveBuildName');
+  const summaryEl = document.getElementById('saveBuildSummary');
+  if (!dialog || !nameInput) return;
+  pendingSave = { mode: 'create', index: -1, entry };
+  nameInput.value = defaultSavedBuildName(entry);
+  if (summaryEl) {
+    summaryEl.textContent = l(
+      `方案 #${String(selectedUnifiedIndex + 1).padStart(2, '0')} · 达标 ${summary.metCount}/6 · 已有 ${entry.ownedCount}/5`,
+      `方案 #${String(selectedUnifiedIndex + 1).padStart(2, '0')} · 達標 ${summary.metCount}/6 · 已有 ${entry.ownedCount}/5`,
+      `Plan #${String(selectedUnifiedIndex + 1).padStart(2, '0')} · ${summary.metCount}/6 met · ${entry.ownedCount}/5 owned`,
+    );
+  }
+  const title = dialog.querySelector('h2');
+  if (title) title.textContent = t('saveDialogTitle');
+  closeOverlays();
+  setOverlay('saveBuildDialog', true);
+  document.body.classList.add('has-overlay');
+  nameInput.focus();
+  nameInput.select();
+}
 
-  const name = prompt(l('给这套配装起个名字（留空自动命名）：', '為這套配裝命名（留空自動命名）：', 'Name this loadout (leave blank for an automatic name):')) ||
-    l('配装 ', '配裝 ', 'Loadout ') + new Date().toLocaleDateString(localeCode()) + ' ' + new Date().toLocaleTimeString(localeCode()).slice(0, 5);
+function renameBuild(index) {
+  const build = getSavedBuilds()[index];
+  if (!build) return;
+  const dialog = document.getElementById('saveBuildDialog');
+  const nameInput = document.getElementById('saveBuildName');
+  const summaryEl = document.getElementById('saveBuildSummary');
+  if (!dialog || !nameInput) return;
+  pendingSave = { mode: 'rename', index, entry: null };
+  nameInput.value = String(build.name ?? '');
+  if (summaryEl) summaryEl.textContent = savedBuildSubtitle(build);
+  const title = dialog.querySelector('h2');
+  if (title) title.textContent = l('重命名方案', '重新命名方案', 'Rename plan');
+  closeOverlays();
+  setOverlay('saveBuildDialog', true);
+  document.body.classList.add('has-overlay');
+  nameInput.focus();
+  nameInput.select();
+}
+
+// The dialog's submit handler. Storage failures surface inline and the dialog
+// stays open, because reporting "saved" for a build that was never persisted is
+// how a user loses a loadout without being told.
+function submitSaveBuild(event) {
+  event?.preventDefault?.();
+  const nameInput = document.getElementById('saveBuildName');
+  const errorEl = document.getElementById('saveBuildDialogStatus');
+  const name = String(nameInput?.value || '').trim();
+  if (!name) {
+    if (errorEl) {
+      errorEl.innerHTML = `<div class="msg error">${icon('block')}<span>${escapeHtml(l(
+        '请输入方案名称。', '請輸入方案名稱。', 'Enter a plan name.',
+      ))}</span></div>`;
+    }
+    nameInput?.focus();
+    return false;
+  }
+  if (errorEl) errorEl.innerHTML = '';
+
+  if (pendingSave?.mode === 'rename') {
+    const builds = getSavedBuilds();
+    const target = builds[pendingSave.index];
+    if (!target) { closeOverlays(); return false; }
+    target.name = name;
+    target.updatedAt = Date.now();
+    if (!saveBuildsToStorage(builds)) {
+      if (errorEl) {
+        errorEl.innerHTML = `<div class="msg error">${icon('block')}<span>${escapeHtml(l(
+          '重命名失败：浏览器存储不可用或已满。',
+          '重新命名失敗：瀏覽器儲存空間無法使用或已滿。',
+          'Rename failed: browser storage is unavailable or full.',
+        ))}</span></div>`;
+      }
+      return false;
+    }
+    closeOverlays();
+    clearSavedBuildStatus();
+    renderSavedBuilds();
+    showToast(l('已重命名。', '已重新命名。', 'Renamed.'));
+    return false;
+  }
+
+  const entry = pendingSave?.entry;
+  if (!entry) { closeOverlays(); return false; }
+  const witness = entry.witness;
+  try {
+    assertSolutionConsistency(witness.problemSpec, witness);
+  } catch (error) {
+    console.error('Saved build consistency check failed', error);
+    if (errorEl) {
+      errorEl.innerHTML = `<div class="msg error">${icon('block')}<span>${escapeHtml(l(
+        '方案未通过一致性检查，请重新求解后再保存。',
+        '方案未通過一致性檢查，請重新求解後再儲存。',
+        'This plan failed its consistency check. Solve again before saving.',
+      ))}</span></div>`;
+    }
+    return false;
+  }
 
   const builds = getSavedBuilds();
   builds.unshift(buildSavedBuildRecord(entry, name));
   if (builds.length > SAVED_BUILD_LIMIT) builds.length = SAVED_BUILD_LIMIT;
-
   if (!saveBuildsToStorage(builds)) {
-    showSavedBuildStatus(l(
+    const message = l(
       `保存失败：浏览器存储不可用或已满，方案「${name}」没有写入。请清理站点存储后重试。`,
       `儲存失敗：瀏覽器儲存空間無法使用或已滿，方案「${name}」沒有寫入。請清理網站儲存空間後重試。`,
       `Save failed: browser storage is unavailable or full, so "${name}" was not written. Free up site storage and try again.`,
-    ), 'error');
-    return;
+    );
+    if (errorEl) {
+      errorEl.innerHTML = `<div class="msg error">${icon('block')}<span>${escapeHtml(message)}</span></div>`;
+    }
+    showSavedBuildStatus(message, 'error');
+    return false;
   }
+  closeOverlays();
   clearSavedBuildStatus();
   renderSavedBuilds();
+  // Deliberately no navigation: the save lands as a toast so the reader keeps
+  // their scroll position and their selection.
+  showToast(l(
+    `已保存「${name}」。可在右上角「已保存方案」中载入。`,
+    `已儲存「${name}」。可在右上角「已儲存方案」中載入。`,
+    `Saved "${name}". Open it any time from "Saved plans" in the top-right corner.`,
+  ));
+  return false;
 }
 
 // Restores the durable input half of a build. Always safe: it touches only
@@ -6849,12 +7274,27 @@ function applySavedBuildInput(build) {
 }
 
 function loadBuild(build) {
+  if (!build) return;
+  // Loading replaces the whole input state, so an unsaved edit must be
+  // confirmed first — silently discarding a half-edited target set is exactly
+  // the kind of "the app ate my work" moment to avoid.
+  if (hasUnsavedConditionEdits() && !confirm(l(
+    '当前条件尚未保存。\n载入该方案会覆盖当前输入。',
+    '目前條件尚未儲存。\n載入該方案會覆蓋目前輸入。',
+    'Your current conditions are not saved.\nLoading this plan will overwrite the current input.',
+  ))) {
+    return;
+  }
   const input = applySavedBuildInput(build || {});
   const buildLanguage = build?.language || build?.exotic?.language;
   if (['zh-chs', 'zh-cht', 'en'].includes(buildLanguage) && buildLanguage !== getPageLanguage()) {
     document.getElementById('pageLanguage').value = buildLanguage;
     changePageLanguage();
   }
+  // The load becomes the new committed baseline, so the next load does not warn
+  // about the edits the user just intentionally replaced.
+  const commit = () => { lastCommittedInputSignature = currentInputSignature(); };
+  closeOverlays();
   // Snapshot half. A missing or no-longer-verifiable witness degrades to
   // "re-solve with the current solver" — it never removes the build.
   const cached = build?.result || null;
@@ -6864,6 +7304,7 @@ function loadBuild(build) {
       '舊版本方案：已載入目標與限制，請重新求解。',
       'This saved plan predates the current format. Its targets and constraints are loaded — solve again.',
     ) + '</div>';
+    commit();
     return;
   }
   try {
@@ -6874,6 +7315,7 @@ function loadBuild(build) {
       '舊版本方案，需要重新求解。目標與限制已載入。',
       'Saved with an older solver version; solve again. Targets and constraints are loaded.',
     ) + '</div>';
+    commit();
     return;
   }
   allSolutions = [cached];
@@ -6887,11 +7329,14 @@ function loadBuild(build) {
   lastNumPlus3 = input.onlyPlus5Tuning || !input.n3Enabled ? 0 : input.numPlus3;
   lastExoticSettings = getExoticSettings();
   displayAllResults(cached, input.targets, input.fragments);
+  commit();
 }
 
 function deleteBuild(idx) {
-  if (!confirm(l('确定删除这套配装？', '確定刪除這套配裝？', 'Delete this loadout?'))) return;
   const builds = getSavedBuilds();
+  const target = builds[idx];
+  if (!target) return;
+  if (!confirm(l(`确定删除「${target.name}」？`, `確定刪除「${target.name}」？`, `Delete "${target.name}"?`))) return;
   builds.splice(idx, 1);
   if (!saveBuildsToStorage(builds)) {
     showSavedBuildStatus(l(
@@ -6903,10 +7348,39 @@ function deleteBuild(idx) {
   }
   clearSavedBuildStatus();
   renderSavedBuilds();
+  // Undo instead of a second confirmation: the destructive step already asked,
+  // and a one-click restore is strictly safer than a modal nobody reads.
+  showToast(l(
+    `已删除「${target.name}」。`,
+    `已刪除「${target.name}」。`,
+    `Deleted "${target.name}".`,
+  ), {
+    action: () => {
+      const restored = getSavedBuilds();
+      restored.splice(Math.min(idx, restored.length), 0, target);
+      if (saveBuildsToStorage(restored)) {
+        clearSavedBuildStatus();
+        renderSavedBuilds();
+        showToast(l('已恢复。', '已復原。', 'Restored.'));
+      } else {
+        showSavedBuildStatus(l(
+          '恢复失败：浏览器存储不可用。', '復原失敗：瀏覽器儲存空間無法使用。',
+          'Restore failed: browser storage is unavailable.',
+        ), 'error');
+      }
+    },
+    actionLabel: l('撤销', '復原', 'Undo'),
+  });
 }
 
 function clearAllBuilds() {
-  if (!confirm(l('确定清空全部已保存配装？此操作不可撤销。', '確定清除全部已儲存配裝？此操作無法復原。', 'Clear all saved loadouts? This cannot be undone.'))) return;
+  const builds = getSavedBuilds();
+  if (builds.length === 0) return;
+  if (!confirm(l(
+    `确定清空全部 ${builds.length} 个已保存方案？此操作不可撤销。`,
+    `確定清除全部 ${builds.length} 個已儲存方案？此操作無法復原。`,
+    `Clear all ${builds.length} saved plans? This cannot be undone.`,
+  ))) return;
   if (!buildRepository.clearSavedBuilds()) {
     showSavedBuildStatus(l(
       '清空失败：浏览器存储不可用。',
@@ -6917,40 +7391,101 @@ function clearAllBuilds() {
   }
   clearSavedBuildStatus();
   renderSavedBuilds();
+  showToast(l('已清空全部方案。', '已清除全部方案。', 'All saved plans cleared.'));
+}
+
+// One compact line per saved plan: when it was saved, what kind of plan it is,
+// and the context (class / set) that tells two similar names apart.
+function savedBuildSubtitle(build) {
+  const savedAt = Number(build.savedAt || build.updatedAt || build.createdAt) || 0;
+  const dateStr = savedAt > 0
+    ? new Date(savedAt).toLocaleString(localeCode(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  const input = readSavedBuildInput(build);
+  const kindLabel = (build?.kind || build?.solutionSnapshot?.kind) === 'inventory'
+    ? l('已有护甲方案', '已有防具方案', 'Owned armor')
+    : l('从零求解', '從零求解', 'From scratch');
+  const classLabel = {
+    hunter: l('猎人', '獵人', 'Hunter'),
+    titan: l('泰坦', '泰坦', 'Titan'),
+    warlock: l('术士', '術士', 'Warlock'),
+  }[input.classFilter] || '';
+  const requirement = input.setRequirement;
+  const setLabel = requirement && requirement.type && requirement.type !== 'none'
+    ? formatSetRequirementLabel(requirement)
+    : '';
+  return [dateStr, kindLabel, classLabel, setLabel].filter(Boolean).join(' · ');
+}
+
+// Clicking a row selects it and reveals its full target line. It never mutates
+// the working state — loading is always an explicit button.
+function selectSavedBuild(index) {
+  const list = document.getElementById('savedBuildsList');
+  if (!list) return;
+  for (const item of list.querySelectorAll('.saved-item')) {
+    const isSelected = Number(item.dataset.buildIndex) === index;
+    item.classList.toggle('is-selected', isSelected);
+    const detail = item.querySelector('.saved-item-detail');
+    if (detail) detail.hidden = !isSelected;
+  }
 }
 
 function renderSavedBuilds() {
   const builds = getSavedBuilds();
-  const card = document.getElementById('savedCard');
   const list = document.getElementById('savedBuildsList');
+  const countEl = document.getElementById('savedBuildsCount');
+  const drawerCount = document.getElementById('savedBuildsDrawerCount');
+  if (countEl) countEl.textContent = String(builds.length);
+  if (drawerCount) {
+    drawerCount.textContent = builds.length > 0
+      ? l(`${builds.length} 个`, `${builds.length} 個`, `${builds.length}`)
+      : '';
+  }
+  const clearButton = document.getElementById('savedBuildsClearAll');
+  if (clearButton) clearButton.disabled = builds.length === 0;
+  if (!list) return;
   if (builds.length === 0) {
-    // Keep the card up when it is showing a storage-failure message: the
-    // reader must still see that nothing was saved.
-    const status = document.getElementById('savedBuildStatus');
-    card.style.display = status ? 'block' : 'none';
-    if (list) list.innerHTML = '';
+    list.innerHTML = `<p class="saved-empty">${l(
+      '还没有保存的方案。求解后在方案详情里点「保存」即可。',
+      '還沒有儲存的方案。求解後在方案詳情裡點「儲存」即可。',
+      'No saved plans yet. Solve a loadout and use "Save" in the plan detail.',
+    )}</p>`;
     return;
   }
-  card.style.display = 'block';
-  let html = '';
-  builds.forEach((b, i) => {
-    const savedAt = Number(b.savedAt || b.updatedAt || b.createdAt) || 0;
-    const d = new Date(savedAt);
-    const dateStr = d.toLocaleString(localeCode(), { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
-    const input = readSavedBuildInput(b);
-    const statSummary = STATS
-      .map(stat => `${STAT_LABELS[stat]}${input.targets?.[stat] ?? 0}`)
-      .join(' | ');
-    const deleteLabel = l('删除', '刪除', 'Delete') + ' ' + b.name;
-    html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);font-size:12px;">' +
-      '<button onclick="loadBuild(getSavedBuilds()[' + i + '])" style="flex:1;min-width:0;cursor:pointer;border:none;background:none;color:var(--accent);font-weight:600;font-size:12px;line-height:1.6;font-family:inherit;text-align:left;">' +
-      escapeHtml(String(b.name ?? '')) +
-      ' <span style="color:var(--text-dim);font-weight:400;">' + dateStr + ' | ' + statSummary + '</span>' +
-      '</button>' +
-      '<button class="icon-btn" onclick="deleteBuild(' + i + ')" style="cursor:pointer;border:none;background:none;color:var(--health);font-size:14px;padding:0 4px;" title="' + deleteLabel + '" aria-label="' + deleteLabel + '">' + icon('close') + '</button>' +
-      '</div>';
-  });
-  list.innerHTML = html;
+  const query = String(document.getElementById('savedBuildsSearch')?.value || '').trim().toLocaleLowerCase();
+  const rows = builds.map((build, index) => ({ build, index }));
+  const visible = query
+    ? rows.filter(({ build }) => String(build?.name ?? '').toLocaleLowerCase().includes(query))
+    : rows;
+  if (visible.length === 0) {
+    list.innerHTML = `<p class="saved-empty">${l(
+      '没有匹配的方案。', '沒有符合的方案。', 'No plan matches this search.',
+    )}</p>`;
+    return;
+  }
+  list.innerHTML = visible.map(({ build, index }) => {
+    const input = readSavedBuildInput(build);
+    const statLine = STATS.map(stat => Number(input.targets?.[stat] ?? 0)).join(' · ');
+    const name = String(build.name ?? '');
+    const canLoad = Boolean(build.result);
+    const targetsLine = STATS
+      .map(stat => `${STAT_LABELS[stat]} ${Number(input.targets?.[stat] ?? 0)}`).join(' · ');
+    return `<article class="saved-item" role="listitem" data-build-index="${index}" onclick="selectSavedBuild(${index})">
+      <div class="saved-item-main">
+        <span class="saved-item-name">${escapeHtml(name)}</span>
+        <small class="saved-item-meta">${escapeHtml(savedBuildSubtitle(build))}</small>
+        <span class="saved-item-stats">${escapeHtml(statLine)}</span>
+        <p class="saved-item-detail" hidden>${escapeHtml(l(
+          `目标六维：${targetsLine}`, `目標六維：${targetsLine}`, `Targets: ${targetsLine}`,
+        ))}</p>
+      </div>
+      <div class="saved-item-actions">
+        <button type="button" class="btn saved-item-load" ${canLoad ? '' : 'disabled'} onclick="event.stopPropagation();loadBuild(getSavedBuilds()[${index}])" aria-label="${escapeHtml(l(`载入 ${name}`, `載入 ${name}`, `Load ${name}`))}">${l('载入', '載入', 'Load')}</button>
+        <button type="button" class="btn saved-item-rename" onclick="event.stopPropagation();renameBuild(${index})">${l('重命名', '重新命名', 'Rename')}</button>
+        <button type="button" class="btn danger saved-item-delete" onclick="event.stopPropagation();deleteBuild(${index})" aria-label="${escapeHtml(l(`删除 ${name}`, `刪除 ${name}`, `Delete ${name}`))}">${icon('trash')}<span class="sr-only">${l('删除', '刪除', 'Delete')}</span></button>
+      </div>
+    </article>`;
+  }).join('');
 }
 
 // The command bar is sticky and its height depends on how its own controls wrap,
@@ -7012,6 +7547,7 @@ Object.assign(window, {
   formatIntrinsicTuning,
   formatFinalMinusTuning,
   renderAcquisitionPlan,
+  unifiedEntryKey,
   clearAllBuilds,
   copyDimExportLink,
   cycleFuzzyMode,
@@ -7022,6 +7558,8 @@ Object.assign(window, {
   clearImportedInventory,
   clearOwnedGear,
   deleteBuild,
+  renameBuild,
+  selectSavedBuild,
   getSavedBuilds,
   getSelectedUnifiedEntry,
   getSelectedUnifiedWitness,
@@ -7056,6 +7594,12 @@ Object.assign(window, {
   toggleInventoryImportPanel,
   toggleOnlyPlus5Tuning,
   togglePlus3,
+  toggleDimImportHelp,
+  setAllUpgradeLocked,
+  openProgramIntro,
+  openSavedBuildsDrawer,
+  closeOverlays,
+  submitSaveBuild,
   updateImportOptions,
   updateInventoryExoticSlot,
   updateInventorySolveOptions,
@@ -7082,6 +7626,18 @@ renderExoticInputs();
 syncPlus3PreferenceUI();
 toggleConditionsDrawer(false);
 document.addEventListener('toggle', rememberDetailDisclosure, true);
+// At most one current-loadout piece is expanded: opening a summary closes the
+// previously open one, so the card cannot grow back into five stacked editors.
+document.addEventListener('toggle', event => {
+  const row = event.target;
+  if (!row?.matches?.('.upgrade-piece-row[open]')) return;
+  for (const other of document.querySelectorAll('#upgradeBuildEditor .upgrade-piece-row[open]')) {
+    if (other !== row) other.open = false;
+  }
+}, true);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeOverlays();
+});
 document.getElementById('inputCard').addEventListener('input', () => {
   stopSearches();
   updateBudget();
