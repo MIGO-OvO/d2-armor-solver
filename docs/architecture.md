@@ -135,23 +135,55 @@ separate from mathematical truth. Search callbacks never enter ProblemSpec.
 
 ## Persistence
 
-`BuildRepository` owns the following existing keys:
+`BuildRepository` owns the following keys:
 
-- `d2_armor_page_language_v1`
-- `d2_armor_current_draft_v1`
-- `d2_armor_saved_builds`
-- `d2_armor_upgrade_draft_v1`
-- `d2_armor_calculator_mode_v1`
+- `d2_armor_page_language_v1` (shared across channels)
+- `d2_armor_current_draft_v1` (channel-scoped)
+- `d2_armor_upgrade_draft_v1` (channel-scoped)
+- `d2_armor_calculator_mode_v1` (channel-scoped)
+- `d2_armor_saved_builds_v3` (**shared across channels**)
 
-New draft writes include `schemaVersion: 1`. Existing unversioned drafts and
-saved-build arrays are accepted without migration, so deployments do not make
-origin-scoped browser data disappear.
+New draft writes include `schemaVersion: 1`. Existing unversioned drafts are
+accepted without migration, so deployments do not make origin-scoped browser data
+disappear.
+
+### Saved Builds are user data, not channel state
+
+A loadout the player explicitly saved must survive a stable/develop switch, a
+page update and a Solver schema bump. Saved Builds therefore live in
+`d2_armor_saved_builds_v3`, which never passes through `channelStorageKey()`, and
+are written as a versioned envelope:
+
+```
+{ schemaVersion: 3, legacyMergedAt, builds: [SavedBuild] }
+```
+
+A `SavedBuild` separates two lifetimes:
+
+- `input` — targets, fragments, budget, Exotic and set constraints. Long-term
+  durable; a future Solver must be able to restore it and re-solve.
+- `solutionSnapshot` plus `result` — canonical id, pieces, assignments, totals
+  and the raw sealed witness. A **cache**: when the Solver contract moves on and
+  the snapshot no longer re-verifies, the build is kept and the reader is told to
+  re-solve with the current algorithm. Nothing about the snapshot can delete a
+  build.
+
+The two historical channel keys `d2_armor_saved_builds` (stable) and
+`d2_armor_dev_saved_builds` (develop) are read once and merged on first load.
+Dedupe priority is stable build id → `canonicalId` → 保存时间 + 名称 + solution
+fingerprint. Legacy records get a *deterministic* derived id, which is what makes
+the migration idempotent across reloads. The legacy keys are read but never
+deleted, and the new version only ever writes the shared key.
+
+`writeSavedBuilds()` returns `false` when the write did not land (storage
+unavailable, quota exceeded). The UI must surface that: reporting a save that did
+not happen is how a user loses a loadout without being told.
 
 The `develop` Pages build rewrites mutable solver, Bungie token, display-name,
-and OAuth-state keys into the `d2_armor_dev_*` namespace. The language key is
-shared intentionally so a portal language choice follows the user into either
-channel without allowing development drafts or credentials to overwrite stable
-state.
+and OAuth-state keys into the `d2_armor_dev_*` namespace. The language key and the
+Saved Builds key are shared intentionally so a portal language choice and the
+player's saved loadouts follow them into either channel, without allowing
+development drafts or credentials to overwrite stable state.
 
 ## Styling
 
