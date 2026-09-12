@@ -1625,48 +1625,6 @@ async function refineWithPriorities() {
   }
 }
 
-function generateExoticRecommendation(result) {
-  const config = result.config;
-  if (result.exoticIndex !== null && result.exoticIndex !== undefined) {
-    const exotic = config[result.exoticIndex];
-    const selection = result.exoticSelection || lastExoticSettings;
-    const purpleFreq = {};
-    for (let i = 0; i < config.length; i++) {
-      if (i === result.exoticIndex) continue;
-      const name = config[i].archetype;
-      purpleFreq[name] = (purpleFreq[name] || 0) + 1;
-    }
-    let html = '<div style="padding:10px 14px;border-radius:8px;border:1px solid rgba(244,181,61,0.35);background:rgba(244,181,61,0.06);font-size:13px;line-height:1.8;">';
-    if (selection) {
-      const classId = selection.classId || lastExoticSettings?.classId || 'hunter';
-      const primaryId = selection.primaryPerkId || lastExoticSettings?.primaryPerkId;
-      const secondaryId = selection.secondaryPerkId || lastExoticSettings?.secondaryPerkId;
-      html += `<div><strong>${EXOTIC_CLASS_LABELS[classId]?.[getExoticLanguage()] || selection.classLabel || ''}</strong> · ` +
-        `${getExoticPerkName(primaryId, selection.primaryPerkName || '')} + ${getExoticPerkName(secondaryId, selection.secondaryPerkName || '')}</div>`;
-    }
-    const fixedPrefix = getPageLanguage() === 'en' ? `${t('exoticClassItem')}: ` : `${t('exoticClassItem')}：`;
-    const statSep = getPageLanguage() === 'en' ? ' ' : '';
-    html += `<div><strong style="color:var(--accent);">${fixedPrefix}</strong>${getArchetypeLabel(exotic.archetype)} · ${t('primaryStat')}${statSep}${STAT_LABELS[exotic.primary]} 30 / ${t('secondaryStat')}${statSep}${STAT_LABELS[exotic.secondary]} 25 / ${t('tertiaryStat')}${statSep}${STAT_LABELS[exotic.tertiary]} 20</div>`;
-    html += `<div><strong>${t('legendaryArmor')}：</strong>` +
-      Object.entries(purpleFreq).map(([name, count]) => `${getArchetypeLabel(name)} ×${count}`).join(l('，','，',', ')) + '</div>';
-    html += `<div style="color:var(--text-dim);">${l('调整属性已参与自动优化，无需预先指定。','調校數值已參與自動最佳化，無需預先指定。','Tuning is optimized automatically; no stat needs to be preselected.')}</div></div>`;
-    return html;
-  }
-
-  const freq = {};
-  for (let i = 0; i < 5; i++) { const name = config[i].archetype; freq[name] = (freq[name] || 0) + 1; }
-  const entries = Object.entries(freq).sort((a, b) => a[1] - b[1]);
-  const allSame = entries.length === 1;
-  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-  html += `<tr style="color:var(--text-dim);"><th style="text-align:left;padding:4px;">${t('armorArchetype')}</th><th style="text-align:center;padding:4px;">${l('件数','件數','Count')}</th><th style="text-align:left;padding:4px;">${l('用途','用途','Use')}</th></tr>`;
-  for (let idx = entries.length - 1; idx >= 0; idx--) {
-    const [name, count] = entries[idx];
-    const isExotic = count === entries[0][1] && !allSame;
-    html += `<tr style="border-top:1px solid var(--border);"><td style="padding:4px;">${getArchetypeLabel(name)}</td><td style="text-align:center;padding:4px;font-weight:700;">${count}</td><td style="padding:4px;">${isExotic ? t('exoticArmor') : t('legendaryArmor')}</td></tr>`;
-  }
-  html += '</table>'; return html;
-}
-
 function renderSolutionStatRows(counts, prefix = '') {
   return Object.entries(counts).map(([stat, count]) => `
     <div class="solution-stat-row">
@@ -5637,6 +5595,86 @@ function renderInventoryBungieEquip(entry, index) {
   </section>`;
 }
 
+// --- Entry piece projection ------------------------------------------------
+// Every result-page renderer used to read `entry.pieces` positionally and look
+// its Tuning / armor-mod assignment up with that same array index. A theoretical
+// plan stores its pieces in *Solver config order* — the Exotic Class Item may be
+// config index 0 — so the array position was never the slot. Any renderer that
+// sorted the five rows to fix the display order therefore pointed
+// `modAssignments[i]` at the wrong armor.
+//
+// This projection keeps the two index spaces apart permanently:
+//
+//   Solver config index ──┬─ assignmentIndex → addresses Tuning/mod assignments
+//                         └─ displayOrder    → the only thing UI sorting touches
+//
+// One fact, normalized once. The five-piece table, the acquisition plan and any
+// future per-piece surface all consume these rows instead of re-deriving them.
+function resolvePieceAssignmentIndex(piece, arrayIndex) {
+  const index = Number(piece?.index);
+  return Number.isInteger(index) && index >= 0 && index < UPGRADE_SLOTS.length
+    ? index
+    : arrayIndex;
+}
+
+function createEntryPieceRows(entry) {
+  const pieces = Array.isArray(entry?.pieces) ? entry.pieces : [];
+  const tuningAssignments = entry?.tuningAssignments || [];
+  const modAssignments = entry?.modAssignments || [];
+  const rows = pieces.map((piece, arrayIndex) => {
+    const assignmentIndex = resolvePieceAssignmentIndex(piece, arrayIndex);
+    const slot = piece?.slot
+      || UPGRADE_SLOTS[assignmentIndex]?.id
+      || UPGRADE_SLOTS[arrayIndex]?.id
+      || UPGRADE_SLOTS[0].id;
+    const slotIndex = Math.max(0, UPGRADE_SLOTS.findIndex(definition => definition.id === slot));
+    // An inventory witness keeps its concrete instance on the piece itself; a
+    // theoretical plan stores the matched owned instance under `piece.item`.
+    const ownedItem = entry.kind === "inventory" ? piece : piece?.item || null;
+    const isOwned = Boolean(ownedItem);
+    const setHash = entry.kind === "inventory"
+      ? piece?.setHash ?? null
+      : ownedItem?.setHash ?? piece?.farmSetHash ?? null;
+    const farmSetHash = piece?.farmSetHash ?? null;
+    return {
+      piece,
+      kind: entry.kind,
+      // Solver identity. Never derived from a position that UI sorting can move.
+      assignmentIndex,
+      // Presentation only, derived from the slot, never from the config order.
+      displayOrder: slotIndex,
+      slot,
+      slotIndex,
+      isOwned,
+      isFarm: !isOwned,
+      isExotic: Boolean(piece?.exotic),
+      ownedItem,
+      itemName: isOwned ? (ownedItem.itemName || ownedItem.name || null) : null,
+      setHash,
+      set: setHash ? getArmorSetByHash(setHash) : null,
+      archetypeKey: piece?.archetypeId || piece?.archetype || ownedItem?.archetypeId || null,
+      tertiary: piece?.tertiary || ownedItem?.tertiary || null,
+      baseStats: piece?.baseStats || null,
+      // Solver assignment state, addressed by assignmentIndex only.
+      tuningAssignment: tuningAssignments[assignmentIndex] || null,
+      armorModAssignment: modAssignments[assignmentIndex] || null,
+      // What the drop itself must roll. The +5 side of a Legendary Tuning mod is
+      // fixed by the item; it is not a free choice the player makes later.
+      intrinsicTuningMode: piece?.tuningMode === "plus3" ? "plus3" : "shift",
+      intrinsicTuningTo: piece?.tuningTo || null,
+      // Acquisition-only facts, available when the piece has no owned instance.
+      farmSetHash,
+      closestItem: piece?.closestItem || null,
+      closestMismatch: piece?.closestMismatch || null,
+    };
+  });
+  // Sorting is a display concern. `displayOrder` comes from the slot and
+  // `assignmentIndex` travels with each row, so reordering the table can never
+  // desynchronize a piece from its Tuning mod or armor mod.
+  return rows.sort((left, right) =>
+    left.displayOrder - right.displayOrder || left.assignmentIndex - right.assignmentIndex);
+}
+
 // --- Five-piece armor table ------------------------------------------------
 // Slot, item, archetype, tertiary stat, Tuning mod, armor mod and ownership
 // state used to live in four separate sections. They answer one question ("what
@@ -5656,63 +5694,89 @@ function renderOwnedPieceBungieAction(ownedItem) {
   return ownedItem ? renderOwnedArmorBungieAction(ownedItem) : "";
 }
 
-function renderArmorRow(entry, piece, pieceIndex) {
-  const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
-  const ownedItem = entry.kind === "inventory" ? piece : piece.item;
-  const isOwned = Boolean(ownedItem);
-  const setHash = entry.kind === "inventory"
-    ? piece.setHash
-    : (ownedItem?.setHash ?? piece.farmSetHash ?? null);
-  const set = setHash ? getArmorSetByHash(setHash) : null;
-  const name = isOwned
-    ? (ownedItem.itemName || ownedItem.name || l("已有护甲", "已有防具", "Owned armor"))
+// `固有调整` is the direction rolled onto the drop; `最终调整` is what the player
+// configures once it is acquired. A missing piece still has a plan — it simply
+// has no execution preflight — so both are shown for farm rows too.
+function formatIntrinsicTuning(row) {
+  if (row.intrinsicTuningMode === "plus3") return l("+3 均衡", "+3 均衡", "+3 Balanced");
+  if (!row.intrinsicTuningTo) return "—";
+  return `+5 ${STAT_LABELS[row.intrinsicTuningTo]}`;
+}
+
+function formatFinalMinusTuning(row) {
+  const assignment = row.tuningAssignment;
+  if (assignment?.mode === "+5-5" && assignment.from) return `-5 ${STAT_LABELS[assignment.from]}`;
+  if (row.intrinsicTuningMode === "plus3" || assignment?.mode === "+3") {
+    return l("+3 均衡", "+3 均衡", "+3 Balanced");
+  }
+  return "—";
+}
+
+function describeFarmSource(row) {
+  if (row.isExotic) return l("异域", "異域", "Exotic");
+  if (row.farmSetHash) {
+    return `${formatInventoryPlanSet(row.farmSetHash)}${l("套装", "套裝", " set")}`;
+  }
+  return l("任意来源", "任意來源", "any source");
+}
+
+function renderArmorRow(row, entry) {
+  const { piece } = row;
+  const setBadge = row.set
+    ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(row.set))}</span>`
+    : "";
+  const name = row.isOwned
+    ? (row.itemName || l("已有护甲", "已有防具", "Owned armor"))
     : l("待刷取", "待取得", "Farm");
-  const archetypeKey = piece.archetypeId || piece.archetype || ownedItem?.archetypeId;
-  const tertiary = piece.tertiary || ownedItem?.tertiary;
-  const tuningCell = isOwned
-    ? formatTuningCell(entry.tuningAssignments?.[pieceIndex])
-    : (piece.tuningMode === "plus3"
-      ? l("+3 均衡", "+3 均衡", "+3 Balanced")
-      : (piece.tuningTo ? `+5 ${STAT_LABELS[piece.tuningTo]}` : "—"));
-  const modCell = isOwned ? formatArmorModCell(entry.modAssignments?.[pieceIndex]) : "—";
-  const setBadge = set ? `<span class="upgrade-set-badge">${escapeHtml(getSetName(set))}</span>` : "";
+  // A farm piece is a plan, not an instance. It has no execution preflight, but
+  // the Solver still computed the Tuning and armor mods it will need, so hiding
+  // them behind "—" threw away the only actionable configuration the row had.
+  const tuningCell = formatTuningCell(row.tuningAssignment);
+  const modCell = formatArmorModCell(row.armorModAssignment);
+  // Mark planned-only socket state explicitly, so a planned +10 is never read
+  // as an installed one.
+  const plannedFlag = row.isFarm && row.armorModAssignment
+    ? `<small class="armor-cell-flag" title="${escapeHtml(l(
+      "该模组属于方案配置，护甲尚未获得，无法验证实例",
+      "該模組屬於方案配置，防具尚未取得，無法驗證實例",
+      "Planned configuration: the armor is not owned yet, so the instance cannot be verified",
+    ))}">${l("计划", "計畫", "Planned")}</small>`
+    : "";
   // A theoretical skeleton whose piece is already owned must say whether the
   // installed Tuning mod matches the plan, not just what the plan wants.
-  const requirementNote = entry.kind === "theory" && ownedItem
+  const requirementNote = entry?.kind === "theory" && row.ownedItem
     ? renderOwnedPieceRequirement(piece)
     : "";
-  const farmOrigin = piece.farmSetHash
-    ? `${formatInventoryPlanSet(piece.farmSetHash)}${l("套装", "套裝", " set")}`
-    : l("任意来源", "任意來源", "any source");
-  const stateCell = isOwned
+  const stateCell = row.isOwned
     ? `<span class="armor-state is-owned">${icon("check", { size: "sm" })}${l("已有", "已有", "Owned")}</span>`
-    : `<span class="armor-state is-farm">${escapeHtml(`${l("待刷", "待取得", "Farm")} · ${farmOrigin}`)}</span>`;
+    : `<span class="armor-state is-farm">${escapeHtml(`${l("待刷", "待取得", "Farm")} · ${describeFarmSource(row)}`)}</span>`;
   // Armor registered by hand is indistinguishable from imported armor once it is
   // in the pool; keep the provenance visible so a manual entry can be audited.
-  const sourceTag = isOwned && ownedItem?.manualOwned
+  const sourceTag = row.isOwned && row.ownedItem?.manualOwned
     ? `<span class="owned-armor-source is-manual">${l("手动", "手動", "Manual")}</span>`
     : "";
-  const badge = piece.locked
-    ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${piece.exotic
+  const badge = piece?.locked
+    ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${row.isExotic
       ? l("异域固定", "異域固定", "Fixed Exotic")
       : l("固定保留", "固定保留", "Fixed")}</span>`
-    : (!isOwned && piece.exotic
+    : (!row.isOwned && row.isExotic
       ? `<span class="inventory-fixed-badge">${icon("lock", { size: "sm" })}${l("需异域护甲", "需異域防具", "Exotic needed")}</span>`
       : "");
-  return `<div class="inventory-result-piece ${isOwned ? "is-owned" : "is-farm"}" role="row" data-piece-slot="${escapeHtml(piece.slot)}">
-    <span class="inventory-result-piece-slot">${getUpgradeSlotLabel(slotIndex)}</span>
+  return `<div class="inventory-result-piece ${row.isOwned ? "is-owned" : "is-farm"}"
+    role="row" data-piece-slot="${escapeHtml(row.slot)}" data-assignment-index="${row.assignmentIndex}"
+    data-ownership="${row.isOwned ? "owned" : "farm"}">
+    <span class="inventory-result-piece-slot">${getUpgradeSlotLabel(row.slotIndex)}</span>
     <span class="inventory-result-piece-name">${escapeHtml(name)}${setBadge}</span>
-    <span class="armor-cell armor-archetype">${archetypeKey ? escapeHtml(getArchetypeLabel(archetypeKey)) : "—"}</span>
-    <span class="armor-cell armor-tertiary"${tertiary ? ` style="color:${STAT_COLORS[tertiary]}"` : ""}>${tertiary ? escapeHtml(STAT_LABELS[tertiary]) : "—"}</span>
+    <span class="armor-cell armor-archetype">${row.archetypeKey ? escapeHtml(getArchetypeLabel(row.archetypeKey)) : "—"}</span>
+    <span class="armor-cell armor-tertiary"${row.tertiary ? ` style="color:${STAT_COLORS[row.tertiary]}"` : ""}>${row.tertiary ? escapeHtml(STAT_LABELS[row.tertiary]) : "—"}</span>
     <span class="armor-cell armor-tuning">${escapeHtml(tuningCell)}${requirementNote}</span>
-    <span class="armor-cell armor-mod">${escapeHtml(modCell)}</span>
-    <span class="armor-cell armor-state-cell">${stateCell}${sourceTag}${badge}${isOwned ? renderOwnedPieceBungieAction(ownedItem) : ""}</span>
+    <span class="armor-cell armor-mod">${escapeHtml(modCell)}${plannedFlag}</span>
+    <span class="armor-cell armor-state-cell">${stateCell}${sourceTag}${badge}${row.isOwned ? renderOwnedPieceBungieAction(row.ownedItem) : ""}</span>
   </div>`;
 }
 
-function renderArmorLoadoutTable(entry) {
-  const pieces = entry.pieces || [];
-  if (pieces.length === 0) return "";
+function renderArmorLoadoutTable(rows, entry) {
+  if (!Array.isArray(rows) || rows.length === 0) return "";
   return `<div class="armor-table" role="table" aria-label="${l("五件护甲明细", "五件防具明細", "Five-piece armor detail")}">
     <div class="armor-table-head" role="row">
       <span role="columnheader">${l("槽位", "部位", "Slot")}</span>
@@ -5724,13 +5788,11 @@ function renderArmorLoadoutTable(entry) {
       <span role="columnheader">${l("状态", "狀態", "State")}</span>
     </div>
     <div class="inventory-result-pieces" role="rowgroup">
-      ${pieces.map((piece, pieceIndex) => renderArmorRow(entry, piece, pieceIndex)).join("")}
+      ${rows.map(row => renderArmorRow(row, entry)).join("")}
     </div>
   </div>`;
 }
 
-// The farm list is derived from the same five pieces the table above shows, so
-// the two can never disagree. It stays a two-line summary, never a second table.
 // Exotic Class Items are the only Exotics named after their class (Relativism /
 // Stoicism / Solipsism). Every other Exotic keeps its own item name, so the
 // decision is made by SLOT and never by "is this piece exotic".
@@ -5756,36 +5818,179 @@ function getFarmExoticLabel(piece) {
   });
 }
 
-function renderFarmSummary(entry) {
-  const missing = (entry.pieces || [])
-    .map((piece, index) => ({ piece, index }))
-    .filter(({ piece }) => !(entry.kind === "inventory" ? piece : piece.item));
-  if (missing.length === 0) return "";
-  const rows = missing.map(({ piece }) => {
-    const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === piece.slot);
-    const archetypeKey = piece.archetypeId || piece.archetype;
-    const identity = [
-      piece.exotic ? getFarmExoticLabel(piece) : "",
-      archetypeKey ? getArchetypeLabel(archetypeKey) : "",
-      piece.tertiary ? STAT_LABELS[piece.tertiary] : "",
-    ].filter(Boolean).join(" / ");
-    const origin = piece.exotic
-      ? l("异域", "異域", "Exotic")
-      : piece.farmSetHash
-        ? `${formatInventoryPlanSet(piece.farmSetHash)}${l("套装", "套裝", " set")}`
-        : l("任意来源", "任意來源", "any source");
-    return `<div class="farm-requirement-row">
-      <strong>${getUpgradeSlotLabel(slotIndex)}</strong>
-      <span>${escapeHtml(identity || l("任意护甲框架", "任意防具原型", "Any Armor Archetype"))}</span>
-      <small>${escapeHtml(origin)}</small>
-    </div>`;
-  }).join("");
-  return `<section class="farm-requirements">
-    <div class="farm-requirements-heading">
-      <h3 class="farm-requirements-title">${l(`待刷 ${missing.length} 件`, `待取得 ${missing.length} 件`, `${missing.length} to farm`)}</h3>
-      <span>${l("先核对框架与第三属性，再按上表配置模组", "先核對原型與第三數值，再依上表配置模組", "Check archetype and tertiary stat first, then follow the table for mods")}</span>
+// A row's Exotic label is derived from the row's SLOT, never from a bare
+// `piece.exotic` flag: only a class-item Exotic may take a class-item name
+// (Relativism / Stoicism / Solipsism), and a helmet/arms/chest/legs Exotic must
+// never borrow one. Farm Legendary class items never reach this at all.
+function resolveRowExoticLabel(row) {
+  return row.isExotic ? getFarmExoticLabel(row.piece) : null;
+}
+
+// --- Acquisition plan ------------------------------------------------------
+// The five-piece table answers "what is the final loadout?". This section
+// answers the only other question a farm gap raises: "what am I missing, and
+// how do I get it?". It lists missing pieces only and never restates the table
+// row for row, so the two sections cannot drift or repeat each other.
+//
+// The archetype tally here covers *missing* pieces only. The plan-list row keeps
+// the whole-loadout tally, which is the right summary for comparing plans; it
+// would be wrong under "待刷 N 件", where the counts must not exceed N.
+function getMissingArchetypeSummary(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    if (row.isOwned || row.isExotic) continue;
+    const id = normalizeArchetypeId(row.archetypeKey) || row.archetypeKey;
+    if (!id) continue;
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || String(left[0]).localeCompare(String(right[0])))
+    .map(([id, count]) => `${getArchetypeLabel(id)}×${count}`)
+    .join(" · ");
+}
+
+function renderAcquisitionField(label, value, { style = "", className = "" } = {}) {
+  return `<span class="acquisition-field">
+    <span class="acquisition-field-label">${escapeHtml(label)}</span>
+    <span class="acquisition-field-value${className ? ` ${className}` : ""}"${style ? ` style="${style}"` : ""}>${escapeHtml(value)}</span>
+  </span>`;
+}
+
+// "Why can I not just use the copy already in my vault?" Every field shown here
+// comes from evidence the Inventory Planner already produced. When its mismatch
+// structure does not name concrete differences, only the neutral notice is
+// shown — the UI never guesses at a reason it cannot prove.
+function renderClosestOwnedComparison(row, key) {
+  const item = row.closestItem;
+  if (!item) return "";
+  const fieldLabels = {
+    archetype: l("框架不匹配", "原型不符", "Archetype differs"),
+    tertiary: l("第三属性不匹配", "第三數值不符", "Tertiary stat differs"),
+    tuningCapability: l("固有 +5 方向不匹配", "固有 +5 方向不符", "Intrinsic +5 differs"),
+  };
+  const fields = Array.isArray(row.closestMismatch?.fields) ? row.closestMismatch.fields : [];
+  const ownedTuning = item.tunedStat || item.tuningTo || null;
+  const owned = [
+    item.archetypeId ? getArchetypeLabel(item.archetypeId) : null,
+    item.tertiary ? STAT_LABELS[item.tertiary] : null,
+    ownedTuning ? `+5 ${STAT_LABELS[ownedTuning]}` : null,
+  ].filter(Boolean).join(" / ");
+  const target = [
+    row.archetypeKey ? getArchetypeLabel(row.archetypeKey) : null,
+    row.tertiary ? STAT_LABELS[row.tertiary] : null,
+    row.intrinsicTuningTo ? `+5 ${STAT_LABELS[row.intrinsicTuningTo]}` : null,
+  ].filter(Boolean).join(" / ");
+  const differences = fields.map(field => fieldLabels[field]).filter(Boolean);
+  return `<details class="acquisition-sub" data-disclosure-key="acquisition-compare-${key}">
+    <summary>${l("查看差异", "查看差異", "Compare")}</summary>
+    <div class="acquisition-compare">
+      <div class="acquisition-compare-row"><span>${l("已有", "已有", "Owned")}</span><strong>${escapeHtml(owned || "—")}</strong></div>
+      <div class="acquisition-compare-row"><span>${l("目标", "目標", "Target")}</span><strong>${escapeHtml(target || "—")}</strong></div>
+      ${differences.length
+        ? `<div class="acquisition-compare-row is-differ"><span>${l("差异", "差異", "Differs")}</span><strong>${escapeHtml(differences.join(" · "))}</strong></div>`
+        : ""}
     </div>
-    <div class="farm-requirement-list">${rows}</div>
+  </details>`;
+}
+
+function renderAcquisitionRow(row, position) {
+  const slotLabel = getUpgradeSlotLabel(row.slotIndex);
+  const exoticLabel = resolveRowExoticLabel(row);
+  const setName = row.farmSetHash ? formatInventoryPlanSet(row.farmSetHash) : null;
+  // The identity line doubles as the "where does it come from" answer, exactly
+  // as the five-piece table's name cell carries the item identity.
+  const targetLabel = exoticLabel
+    || (setName ? `${setName}${l("套装", "套裝", " set")}` : l("任意来源", "任意來源", "any source"));
+  const badges = [
+    `<span class="acquisition-badge is-farm">${l("待刷", "待取得", "Farm")}</span>`,
+    row.isExotic ? `<span class="acquisition-badge is-exotic">${l("异域", "異域", "Exotic")}</span>` : "",
+    row.farmSetHash ? `<span class="acquisition-badge is-set">${l("套装要求", "套裝要求", "Set required")}</span>` : "",
+  ].filter(Boolean).join("");
+  const key = `${row.slot}-${row.assignmentIndex}`;
+  const fields = [
+    renderAcquisitionField(t("armorArchetype"),
+      row.archetypeKey ? getArchetypeLabel(row.archetypeKey) : "—", { className: "is-archetype" }),
+    renderAcquisitionField(t("tertiaryStat"), row.tertiary ? STAT_LABELS[row.tertiary] : "—",
+      { style: `color:${STAT_COLORS[row.tertiary] || "inherit"}` }),
+    renderAcquisitionField(l("固有调整", "固有調校", "Intrinsic roll"), formatIntrinsicTuning(row)),
+    renderAcquisitionField(l("最终调整", "最終調校", "Final tuning"), formatFinalMinusTuning(row)),
+    renderAcquisitionField(t("armorMod"), formatArmorModCell(row.armorModAssignment), { className: "is-numeric" }),
+  ].join("");
+  const templateDetail = row.baseStats
+    ? `<details class="acquisition-sub" data-disclosure-key="acquisition-template-${key}">
+        <summary>${l("精确属性模板", "精確屬性模板", "Exact stat template")}</summary>
+        <div class="acquisition-template">${STATS.map(stat =>
+          `<span class="acquisition-template-stat" style="color:${STAT_COLORS[stat]}">${icon(stat)}<span class="acquisition-template-label">${STAT_LABELS[stat]}</span><strong>${Number(row.baseStats[stat] || 0)}</strong></span>`).join("")}</div>
+        <p class="acquisition-note">${l(
+          "这是该护甲需要满足的固有分布模板，用于确认刷取方向；实际掉落的六维必须与此一致。",
+          "這是該防具需滿足的固有分布模板，用於確認取得方向；實際掉落的六維必須與此一致。",
+          "The intrinsic distribution this drop has to match. The rolled six stats must agree with it.",
+        )}</p>
+      </details>`
+    : "";
+  const closestNotice = row.closestItem
+    ? `<p class="acquisition-notice">${l(
+      "△ 已有相近护甲，但不满足该方案要求",
+      "△ 已有相近防具，但不符合本方案要求",
+      "△ A similar piece is owned but does not satisfy this plan",
+    )}</p>`
+    : "";
+  return `<li class="acquisition-row" data-slot="${escapeHtml(row.slot)}" data-assignment-index="${row.assignmentIndex}" data-exotic="${row.isExotic}">
+    <div class="acquisition-row-head">
+      <span class="acquisition-index">${String(position).padStart(2, "0")}</span>
+      <span class="acquisition-slot">${escapeHtml(slotLabel)}</span>
+      <span class="acquisition-target">${escapeHtml(targetLabel)}</span>
+      <span class="acquisition-badges">${badges}</span>
+    </div>
+    <div class="acquisition-grid">${fields}</div>
+    ${templateDetail}
+    ${closestNotice}
+    ${renderClosestOwnedComparison(row, key)}
+  </li>`;
+}
+
+// Fully owned plans get no acquisition panel at all: the loadout header already
+// states "五件已有齐全", so an empty farm section would only add noise.
+function renderAcquisitionPlan(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return "";
+  const missing = rows.filter(row => row.isFarm);
+  if (missing.length === 0) return "";
+  const requirement = lastInventoryResult?.requirement || snapshotSetRequirement();
+  const requirementLabel = !requirement || requirement.type === "none"
+    ? l("无套装要求", "無套裝要求", "No set requirement")
+    : formatSetRequirementLabel(requirement);
+  const missingArchetype = getMissingArchetypeSummary(rows);
+  const missingExotic = missing.find(row => row.isExotic);
+  const exoticLabel = missingExotic
+    ? [resolveRowExoticLabel(missingExotic),
+      missingExotic.archetypeKey ? getArchetypeLabel(missingExotic.archetypeKey) : null]
+      .filter(Boolean).join(" · ")
+    : "";
+  const constraints = [
+    `<div class="acquisition-constraint-row"><span>${l("套装要求", "套裝要求", "Set requirement")}</span><strong>${escapeHtml(requirementLabel)}</strong></div>`,
+    missingArchetype
+      ? `<div class="acquisition-constraint-row"><span>${l("待刷框架", "待取得原型", "Missing archetypes")}</span><strong>${escapeHtml(missingArchetype)}</strong></div>`
+      : "",
+    exoticLabel
+      ? `<div class="acquisition-constraint-row"><span>${t("exoticArmor")}</span><strong>${escapeHtml(exoticLabel)}</strong></div>`
+      : "",
+  ].filter(Boolean).join("");
+  return `<section class="acquisition-plan" aria-labelledby="acquisitionPlanTitle">
+    <div class="acquisition-head">
+      <h3 class="acquisition-title" id="acquisitionPlanTitle">${l("刷取计划", "取得計畫", "Acquisition Plan")}</h3>
+      <span class="acquisition-count">${l(
+        `待刷 ${missing.length} 件 · 已有 ${rows.length - missing.length}/${rows.length}`,
+        `待取得 ${missing.length} 件 · 已有 ${rows.length - missing.length}/${rows.length}`,
+        `${missing.length} to farm · ${rows.length - missing.length}/${rows.length} owned`,
+      )}</span>
+    </div>
+    <ol class="acquisition-list">
+      ${missing.map((row, index) => renderAcquisitionRow(row, index + 1)).join("")}
+    </ol>
+    <div class="acquisition-constraints" role="group" aria-label="${l("方案约束", "方案限制", "Plan constraints")}">
+      <span class="acquisition-constraints-title">${l("方案约束", "方案限制", "Plan constraints")}</span>
+      ${constraints}
+    </div>
   </section>`;
 }
 
@@ -5888,40 +6093,6 @@ function renderAllocationBreakdown(result) {
   </div>${exoticSummary}`;
 }
 
-function renderFarmingAdvice(entry) {
-  const archetypeKey = getEntryArchetypeSummary(entry);
-  const requirement = lastInventoryResult?.requirement || snapshotSetRequirement();
-  const requirementLabel = !requirement || requirement.type === "none"
-    ? l("无套装要求", "無套裝要求", "No set requirement")
-    : formatSetRequirementLabel(requirement);
-  const fixedExotic = (entry.pieces || []).find(piece => piece.exotic);
-  const exoticName = fixedExotic
-    ? [
-      getFarmExoticLabel(fixedExotic),
-      getArchetypeLabel(fixedExotic.archetypeId || fixedExotic.archetype),
-    ].filter(Boolean).join(" · ")
-    : l("无固定异域要求", "無固定異域要求", "No fixed Exotic requirement");
-  // Only a theoretical witness carries the archetype config this summary needs;
-  // an inventory witness describes concrete instances instead.
-  let recommendation = "";
-  if (Array.isArray(entry.witness?.config) && entry.witness.config.length === 5) {
-    try {
-      recommendation = generateExoticRecommendation(entry.witness);
-    } catch (error) {
-      console.error("Exotic recommendation failed", error);
-    }
-  }
-  return `<details class="advanced-details advice-details" data-disclosure-key="farming-advice">
-    <summary>${l("刷取建议", "取得建議", "Farming advice")}</summary>
-    <div class="advice-body">
-      <div class="advice-row"><span class="advanced-label">${l("推荐框架", "推薦原型", "Recommended archetypes")}</span><strong>${escapeHtml(archetypeKey || "—")}</strong></div>
-      <div class="advice-row"><span class="advanced-label">${t("exoticArmor")}</span><strong>${escapeHtml(exoticName)}</strong></div>
-      <div class="advice-row"><span class="advanced-label">${l("套装要求", "套裝要求", "Set requirement")}</span><strong>${escapeHtml(requirementLabel)}</strong></div>
-    </div>
-    ${recommendation}
-  </details>`;
-}
-
 // Everything here is diagnostic: proofs, canonical identity, search counters and
 // the per-piece recomputation. It stays collapsed so the first screen answers
 // "which loadout, how many owned" instead of "what did the solver prove".
@@ -5997,6 +6168,10 @@ function renderAdvancedDetails(entry, totals = null) {
 
 function renderSelectedLoadout(entry, index) {
   if (!entry) return "";
+  // One normalization, consumed by both the five-piece table and the
+  // acquisition plan. Neither renderer reads `entry.pieces` positionally, so
+  // they can never disagree about slot order or assignment index.
+  const rows = createEntryPieceRows(entry);
   const { metCount, feasible } = getUnifiedEntrySummary(entry);
   const totalsModel = getUnifiedTotalsModel(entry);
   const finalTotals = totalsModel.installable;
@@ -6060,9 +6235,8 @@ function renderSelectedLoadout(entry, index) {
     </header>
     ${entry.kind === "inventory" ? renderInventoryBungieEquip(entry.witness, index) : ""}
     ${renderStatsSummary(entry, finalTotals)}
-    ${renderArmorLoadoutTable(entry)}
-    ${renderFarmSummary(entry)}
-    ${renderFarmingAdvice(entry)}
+    ${renderArmorLoadoutTable(rows, entry)}
+    ${renderAcquisitionPlan(rows)}
     ${renderAdvancedDetails(entry, totalsModel)}`;
 }
 
@@ -6693,6 +6867,13 @@ Object.assign(window, {
   bungieLogout,
   handleBungieLoadoutDetailKeydown,
   changePageLanguage,
+  // The presentation projection and its Tuning formatters, so the browser
+  // regression suite can assert slot ordering / assignment-index mapping against
+  // synthetic entries as well as against solved plans.
+  createEntryPieceRows,
+  formatIntrinsicTuning,
+  formatFinalMinusTuning,
+  renderAcquisitionPlan,
   clearAllBuilds,
   copyDimExportLink,
   cycleFuzzyMode,
