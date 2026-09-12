@@ -545,30 +545,45 @@ input[type="checkbox"]:focus-visible {
 }
 .footer {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   max-width: 72ch;
   margin: 18px auto 0;
-  padding: 24px 0 0;
+  padding: 18px 0 0;
   border-top: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 11px;
-  line-height: 1.7;
+  line-height: 1.65;
 }
 .footer-title {
   color: var(--text);
   font-weight: 650;
+  letter-spacing: .01em;
+}
+/* One quiet sentence instead of an author table: the optimized-edition credit
+   and the original-author acknowledgement wrap onto one row on wide screens and
+   stack on narrow ones. The secondary group is deliberately dimmer and the role
+   labels are quiet labels, not headings. */
+.footer-credits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px 14px;
 }
 .footer-credit {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 2px 8px;
+  gap: 2px 6px;
+  min-width: 0;
 }
-.footer-role {
-  color: var(--text);
-  font-weight: 700;
-}
+/* The secondary group is quieter, but not by fading it below the contrast
+   floor: 90% of --text-dim still measures ~5.7:1 on the page background at
+   11px, where a lighter tint would drop under 4.5:1. */
+.footer-credit--secondary { color: color-mix(in oklab, var(--text-dim) 90%, transparent); }
+.footer-role { font-weight: 600; letter-spacing: .04em; }
+.footer-dot { opacity: .6; }
 .footer a {
   color: var(--accent) !important;
   text-underline-offset: .18em;
@@ -1288,17 +1303,27 @@ input[type="checkbox"]:focus-visible {
 .advanced-row > span { overflow-wrap: anywhere; }
 
 /* ---------- Plan browser ---------- */
-/* The plan browser is a fixed workspace, not a growing list. A bare
-   `max-height: calc(100vh - 220px)` on the list let the *panel* grow on tall
-   viewports: at 1440p/4K the whole list expanded, the left column reached
-   thousands of pixels, the selected loadout (a few hundred pixels tall) left a
-   large void beside it, and browsing plans required scrolling the page instead
-   of the list. Bounding the panel and letting only its middle row scroll keeps
-   the toolbar, the filter/sort controls and the "show more" button in place at
-   every viewport height.
-   `dvh` tracks the real visible area on mobile; the `vh` declaration above it
+/* The plan browser is a content-sized workspace, not a fixed-height panel. It
+   used to carry `height: clamp(320px, calc(100dvh - …), 760px)`, which forced
+   the left column to a viewport-tall box whatever the result set was: with a
+   short list the rows ended hundreds of pixels above the panel bottom and left
+   a dead rectangle beside the loadout detail, and the panel could not shrink
+   even when the detail was shorter than it.
+   Height now comes from the content (toolbar + list + "show more"). Only the
+   *list* is capped, by `--plan-list-cap`, so a long result set still scrolls
+   inside the panel instead of growing the page, while a short one collapses to
+   its own height. The list stays the single vertical scroll owner, so the
+   toolbar and the "show more" button never move away.
+   `dvh` tracks the real visible area on mobile; the `vh` declaration before it
    is the fallback for engines that predate `dvh`. */
 .plan-browser {
+  /* The cap belongs to the list, not the panel. The 240px budget covers the
+     toolbar, the "show more" row, the panel gaps and ~100px of air below the
+     pinned panel, so a panel pinned at `top: var(--cmd-bar-offset)` never
+     reaches the bottom of the viewport. The desktop shell overrides the budget
+     because its scrollport is 90px shorter than the viewport. */
+  --plan-list-cap: min(calc(100vh - var(--cmd-bar-offset) - 240px), 560px);
+  --plan-list-cap: min(calc(100dvh - var(--cmd-bar-offset) - 240px), 560px);
   position: sticky;
   top: var(--cmd-bar-offset);
   display: grid;
@@ -1306,12 +1331,8 @@ input[type="checkbox"]:focus-visible {
      default `auto` column a wide chip row or sort control would widen the whole
      column and give the list a horizontal scrollbar it should never need. */
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
   min-width: 0;
-  height: clamp(320px, calc(100vh - var(--cmd-bar-offset) - 96px), 760px);
-  height: clamp(320px, calc(100dvh - var(--cmd-bar-offset) - 96px), 760px);
-  min-height: 0;
   overflow: hidden;
   padding-right: 4px;
   border-right: 1px solid var(--border-subtle);
@@ -1388,15 +1409,18 @@ input[type="checkbox"]:focus-visible {
   font-size: .8125rem;
   line-height: 1.6;
 }
-/* The list owns the only vertical scrollbar in the workspace. `min-height: 0`
-   is what lets it shrink inside the grid row instead of forcing the panel to
-   grow; `max-height: none` hands height control back to the panel. */
+/* The list owns the only vertical scrollbar in the workspace. It grows with its
+   rows up to `--plan-list-cap` and then scrolls internally, so the panel is
+   exactly as tall as toolbar + list + "show more" — never taller. `min-height:
+   0` lets it shrink inside the grid row instead of forcing the panel to grow.
+   The fallback keeps the panel scrolling even if the custom property is lost. */
 .inventory-result-list {
   display: grid;
   align-content: start;
   grid-template-columns: minmax(0, 1fr);
   min-height: 0;
-  max-height: none;
+  max-height: min(calc(100vh - var(--cmd-bar-offset) - 240px), 560px);
+  max-height: var(--plan-list-cap, min(calc(100vh - var(--cmd-bar-offset) - 240px), 560px));
   gap: 2px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2083,15 +2107,13 @@ input[type="checkbox"]:focus-visible {
 }
 
 @media (max-width: 900px) {
-  /* A fixed-height workspace is a desktop, two-column affordance. Below this
+  /* A content-sized workspace is a desktop, two-column affordance. Below this
      width the plan browser becomes a horizontally browsable strip, so the
-     desktop height cap and sticky positioning must not leak into phones. */
+     desktop list cap and sticky positioning must not leak into phones. */
   .plan-browser {
     position: static;
-    grid-template-rows: auto auto auto;
     grid-template-columns: none;
     height: auto;
-    min-height: 0;
     overflow: visible;
     border-right: 0;
     padding-right: 0;
@@ -4890,7 +4912,10 @@ a:focus-visible {
 .footer a {
   display: inline-flex;
   align-items: center;
-  min-height: 2rem;
+  /* 24px keeps the WCAG 2.5.8 minimum target without stretching the footer to
+     one 32px line per credit row; the coarse-pointer and narrow-screen rules
+     below raise it to the full touch target. */
+  min-height: 1.5rem;
 }
 @media (hover: hover) {
   .target-stat-group:hover {
@@ -4991,7 +5016,13 @@ a:focus-visible {
     font-size: .875rem;
     text-align: left;
   }
+  .footer-credits,
   .footer-credit { justify-content: flex-start; }
+  /* The credit lines wrap wherever they must on a narrow screen, and a
+     separator orphaned at the start of a line reads worse than plain spacing. */
+  .footer-dot { display: none; }
+  .footer-credits { gap: .25rem .75rem; }
+  .footer-credit { gap: .125rem .5rem; }
   .budget-toolbar .input-group label,
   .budget-info > small,
   .budget-equation,

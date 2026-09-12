@@ -2425,6 +2425,131 @@ async function checkLoadoutPresentation(browser) {
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
 
+    // (24) The plan browser is content-sized, not viewport-sized. It used to
+    // carry `height: clamp(320px, 100dvh - …, 760px)`, so a short result set
+    // left a dead rectangle under the last row and the panel could not shrink
+    // beside a taller loadout. Only the list is capped now: the panel ends where
+    // toolbar + list + "show more" end.
+    const readBrowser = () => page.evaluate(() => {
+      const panel = document.getElementById("planBrowser");
+      const list = document.getElementById("planList");
+      const row = document.querySelector(".inventory-results-layout");
+      const detail = document.getElementById("loadoutDetail");
+      const folder = document.querySelector(".plan-browser-more");
+      const toolbar = document.querySelector(".plan-browser-toolbar");
+      const panelBox = panel.getBoundingClientRect();
+      const listBox = list.getBoundingClientRect();
+      const rows = [...list.querySelectorAll(".inventory-result-option")];
+      const lastRow = rows[rows.length - 1];
+      const gap = Number.parseFloat(getComputedStyle(panel).rowGap || "0") || 0;
+      return {
+        rows: rows.length,
+        panelHeight: Math.round(panelBox.height),
+        panelContentHeight: Math.round(toolbar.getBoundingClientRect().height
+          + listBox.height + (folder ? folder.getBoundingClientRect().height : 0)
+          + gap * (folder ? 2 : 1)),
+        tailBelowList: Math.round(panelBox.bottom - listBox.bottom),
+        deadTail: lastRow ? Math.round(panelBox.bottom - lastRow.getBoundingClientRect().bottom) : null,
+        listClient: list.clientHeight,
+        listScroll: list.scrollHeight,
+        listScrolls: list.scrollHeight > list.clientHeight + 1,
+        listTop: Math.round(listBox.top),
+        detailHeight: Math.round(detail.getBoundingClientRect().height),
+        rowHeight: Math.round(row.getBoundingClientRect().height),
+      };
+    });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const longBrowser = await readBrowser();
+    assert.ok(longBrowser.rows >= 10, "the fixture must render a long plan list");
+    assert.ok(longBrowser.listScrolls, "a long plan list must scroll inside the panel");
+    assert.ok(longBrowser.panelHeight <= longBrowser.panelContentHeight + 2,
+      "the panel must not be taller than its own content: " + JSON.stringify(longBrowser));
+    assert.ok(longBrowser.tailBelowList <= 2,
+      "the panel must not keep empty space under a scrolling list: " + JSON.stringify(longBrowser));
+
+    // The state a short result set produces: the list is a grid whose children
+    // are the rows and no app code reads its height, so trimming rows drives the
+    // same CSS the fixture cannot otherwise reach (it always solves 12+ plans).
+    // The filter is restored afterwards so the later cases see the same list.
+    const activeFilter = await page.locator(".plan-chip[aria-pressed=true]").first()
+      .evaluate(element => /'([a-z]+)'/.exec(element.getAttribute("onclick") || "")?.[1] || "all");
+    const selectedLocator = page.locator("#planList .inventory-result-option[aria-selected=true]");
+    const selectedKey = await selectedLocator.count() > 0
+      ? await selectedLocator.first().getAttribute("data-plan-key")
+      : null;
+    const trimmed = await page.evaluate(() => {
+      const list = document.getElementById("planList");
+      const rows = [...list.querySelectorAll(".inventory-result-option")];
+      rows.slice(3).forEach(node => node.remove());
+      return rows.length;
+    });
+    assert.ok(trimmed > 3, "the fixture must expose more than three plans to trim");
+    const shortBrowser = await readBrowser();
+    assert.equal(shortBrowser.rows, 3, "the short-list case must keep three rows");
+    assert.ok(!shortBrowser.listScrolls, "a three-row plan list must not scroll");
+    assert.ok(shortBrowser.panelHeight <= shortBrowser.panelContentHeight + 2,
+      "a short plan list must collapse the panel to its content: " + JSON.stringify(shortBrowser));
+    assert.ok(shortBrowser.deadTail <= 2 && shortBrowser.deadTail >= -2,
+      "the last plan row must end at the bottom of the panel: " + JSON.stringify(shortBrowser));
+    assert.ok(shortBrowser.panelHeight < 380,
+      "a three-row plan browser must not hold a viewport-tall box: " + JSON.stringify(shortBrowser));
+
+    // The right column is free to be taller; the left one must not stretch to it.
+    for (const width of [1440, 1920]) {
+      await page.setViewportSize({ width, height: width === 1920 ? 1080 : 1000 });
+      await page.waitForTimeout(80);
+      const state = await readBrowser();
+      assert.ok(Math.abs(state.rowHeight - Math.max(state.panelHeight, state.detailHeight)) <= 2,
+        `the workspace row must size to its taller column at ${width}px: ` + JSON.stringify(state));
+      assert.ok(state.panelHeight <= state.panelContentHeight + 2,
+        `the plan panel must stay content-sized beside a taller loadout at ${width}px: `
+        + JSON.stringify(state));
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.evaluate(filter => {
+      window.setPlanFilter(filter);
+      window.scrollTo(0, 0);
+    }, activeFilter);
+    await page.locator("#planList .inventory-result-option").first().waitFor();
+    if (selectedKey) {
+      const row = page.locator(`#planList .inventory-result-option[data-plan-key="${selectedKey}"]`);
+      if (await row.count() > 0) await row.first().click();
+    }
+    const restored = await readBrowser();
+    assert.equal(restored.rows, longBrowser.rows,
+      "the plan list must be rebuilt after the short-list case: " + JSON.stringify(restored));
+
+    // (25) The footer is one compact credit sentence, not an author table: no
+    // UID numbers, both Bilibili profiles still reachable, and a height that
+    // stops it reading as a block of metadata.
+    const footer = await page.evaluate(() => {
+      const element = document.querySelector(".footer");
+      const links = [...element.querySelectorAll("a")];
+      return {
+        height: Math.round(element.getBoundingClientRect().height),
+        text: element.innerText.replace(/\s+/g, " ").trim(),
+        links: links.length,
+        bilibiliLinks: links.filter(link => link.href.includes("space.bilibili.com")).length,
+        rows: new Set([...element.querySelectorAll("*")]
+          .filter(node => node.textContent.trim())
+          .map(node => Math.round(node.getBoundingClientRect().top))).size,
+      };
+    });
+    assert.equal(/\bUID\b/i.test(footer.text), false,
+      `the footer must not print a UID: ${footer.text}`);
+    assert.equal(/23930138|57597346/.test(footer.text), false,
+      `the footer must not print an author id: ${footer.text}`);
+    assert.ok(footer.links >= 3, `the footer must keep its links: ${JSON.stringify(footer)}`);
+    assert.equal(footer.bilibiliLinks, 2,
+      `both Bilibili profiles must stay reachable: ${JSON.stringify(footer)}`);
+    assert.ok(footer.height <= 100,
+      `the footer must stay one compact credit block at 1440px: ${JSON.stringify(footer)}`);
+    // Three distinct tops is the ceiling for the shipped shape: the title row,
+    // the credit row, and the taller link box inside it. The author-table
+    // layout this replaced measured six.
+    assert.ok(footer.rows <= 3,
+      `the footer must keep a title row plus one credit row: ${JSON.stringify(footer)}`);
+
     // (15) An owned Exotic whose identity matches the pinned Exotic but whose
     // stat distribution does not is the exact case the old UI left unexplained:
     // the vault clearly holds the item, yet the plan still demands a farm. Seed
