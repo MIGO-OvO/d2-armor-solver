@@ -15,8 +15,8 @@ find combinations in your inventory, or plan replacements for your current armor
 Health, Melee, Grenade, Super, Class, and Weapons share one constraint model with Fragment bonuses,
 Tuning, stat mods, Exotics, and armor sets.
 
-**Free to use. No project account required. If you paid for this tool, you were scammed.**
-Computation runs locally. Bungie sign-in is optional and only available in configured online deployments.
+**Free to use, no need to register an account.**
+The calculator performs calculations locally and supports importing existing armor by logging in with a Bungie account.
 
 [Open solver](https://migo-ovo.github.io/d2-armor-solver/app/) ·
 [User guide](https://migo-ovo.github.io/d2-armor-solver/guide/) ·
