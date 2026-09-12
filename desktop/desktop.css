@@ -43,8 +43,8 @@ body { overflow: hidden; }
    30px status bar, so the cap must discount that chrome too or the panel would
    run past the bottom of the workspace. */
 .desktop-solver .plan-browser {
-  height: calc(100dvh - 200px);
-  height: clamp(300px, calc(100dvh - 200px), 760px);
+  height: calc(100vh - var(--cmd-bar-offset) - 120px);
+  height: clamp(300px, calc(100dvh - var(--cmd-bar-offset) - 120px), 760px);
 }
 .desktop-solver .footer { margin-top: 24px; font-size: .75rem; }
 .desktop-startup, .desktop-error { padding: 16px; }

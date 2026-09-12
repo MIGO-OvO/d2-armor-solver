@@ -1021,13 +1021,14 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   min-width: 0;
   margin: 0 auto 28px;
 }
-/* The command bar is sticky, so anything scrolled to must clear it or the bar
-   would sit on top of the target strip after every solve. */
+.results { display: none; }
+/* The command bar is sticky, so anything scrolled to must clear it, and so must
+   the sticky plan browser. Its height is measured at runtime (see
+   `syncCommandBarOffset`) because it depends on how its own controls wrap. */
 #results,
 #targetSummary,
 #inventoryResults,
-#ownedGearSection { scroll-margin-top: 78px; }
-.results { display: none; }
+#ownedGearSection { scroll-margin-top: calc(var(--cmd-bar-offset) + 18px); }
 /* minmax(0, 1fr) keeps a wide descendant (the constraint matrix) from
    widening the whole workspace instead of scrolling inside its own panel. */
 .results.show {
@@ -1340,13 +1341,17 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
    is the fallback for engines that predate `dvh`. */
 .plan-browser {
   position: sticky;
-  top: 78px;
+  top: var(--cmd-bar-offset);
   display: grid;
+  /* `minmax(0, 1fr)` keeps the toolbar and the list inside the panel: with the
+     default `auto` column a wide chip row or sort control would widen the whole
+     column and give the list a horizontal scrollbar it should never need. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
   min-width: 0;
-  height: calc(100vh - 170px);
-  height: clamp(320px, calc(100dvh - 170px), 760px);
+  height: clamp(320px, calc(100vh - var(--cmd-bar-offset) - 96px), 760px);
+  height: clamp(320px, calc(100dvh - var(--cmd-bar-offset) - 96px), 760px);
   min-height: 0;
   overflow: hidden;
   padding-right: 4px;
@@ -4861,6 +4866,10 @@ a:focus-visible {
   --duration-fast: 120ms;
   --duration-ui: 220ms;
   --ease-out-quart: cubic-bezier(.25, 1, .5, 1);
+  /* Measured at runtime from the sticky command bar (see `syncCommandBarOffset`)
+     because the bar's height depends on how its own controls wrap. Any sticky
+     surface below it offsets by this value. */
+  --cmd-bar-offset: 78px;
 }
 html {
   scrollbar-color: var(--border-strong) var(--bg);

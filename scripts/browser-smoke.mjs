@@ -2158,36 +2158,63 @@ async function checkLoadoutPresentation(browser) {
     assert.ok(afterScroll.panelHeight <= 780,
       "the panel height must not change while its list scrolls");
 
-    // The sticky panel must clear the sticky command bar at every page offset,
-    // or the filter/sort controls would sit underneath it.
-    const stickyClearance = [];
-    for (const offset of [0, 400, 900, 1600]) {
-      await page.evaluate(position => window.scrollTo(0, position), offset);
-      await page.waitForTimeout(60);
-      stickyClearance.push(await page.evaluate(() => {
-        const bar = document.getElementById("searchCommandBar").getBoundingClientRect();
-        const toolbar = document.querySelector(".plan-browser-toolbar").getBoundingClientRect();
-        const panel = document.getElementById("planBrowser").getBoundingClientRect();
-        return {
-          scrollY: Math.round(window.scrollY),
-          barBottom: Math.round(bar.bottom),
-          toolbarTop: Math.round(toolbar.top),
-          panelTop: Math.round(panel.top),
-          viewportHeight: window.innerHeight,
-        };
-      }));
+    // The plan panel is sticky *inside its own row*. While it can hold its sticky
+    // offset it must clear the sticky command bar; at the very end of the scroll
+    // the row clamps it back down, which is the intended "the panel ends with its
+    // loadout" behaviour. Sampling by scroll fraction rather than by fixed offset
+    // is required: the pinning window is only as tall as the panel is shorter
+    // than the row.
+    const stickyStates = [];
+    for (const width of [1440, 1200, 1024]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const maxScroll = await page.evaluate(() =>
+        document.documentElement.scrollHeight - window.innerHeight);
+      for (const fraction of [0, 0.3, 0.6, 0.75, 0.9, 1]) {
+        await page.evaluate(position => window.scrollTo(0, position), Math.round(maxScroll * fraction));
+        await page.waitForTimeout(60);
+        stickyStates.push(await page.evaluate(() => {
+          const bar = document.getElementById("searchCommandBar").getBoundingClientRect();
+          const panelElement = document.getElementById("planBrowser");
+          const panel = panelElement.getBoundingClientRect();
+          const toolbar = document.querySelector(".plan-browser-toolbar").getBoundingClientRect();
+          const row = document.querySelector(".inventory-results-layout").getBoundingClientRect();
+          const stickyOffset = parseFloat(getComputedStyle(panelElement).top) || 0;
+          return {
+            width: window.innerWidth,
+            scrollY: Math.round(window.scrollY),
+            barBottom: Math.round(bar.bottom),
+            toolbarTop: Math.round(toolbar.top),
+            panelTop: Math.round(panel.top),
+            panelBottom: Math.round(panel.bottom),
+            rowBottom: Math.round(row.bottom),
+            stickyOffset,
+            pinned: Math.abs(panel.top - stickyOffset) <= 1 && window.scrollY > 0,
+            clampedToRow: Math.abs(panel.bottom - row.bottom) <= 2,
+            viewportHeight: window.innerHeight,
+          };
+        }));
+      }
     }
-    for (const state of stickyClearance) {
+    const describeSticky = states => states.map(state =>
+      `${state.width}px@${state.scrollY}:panel=${state.panelTop}-${state.panelBottom}`
+      + `/row=${state.rowBottom}/bar=${state.barBottom}/sticky=${state.stickyOffset}`
+      + `${state.pinned ? "/PINNED" : ""}${state.clampedToRow ? "/CLAMPED" : ""}`).join(" ");
+    const pinnedStates = stickyStates.filter(state => state.pinned);
+    assert.ok(pinnedStates.length > 0,
+      "the fixture must pin the plan browser at some scroll offset: " + describeSticky(stickyStates));
+    for (const state of pinnedStates) {
       assert.ok(state.toolbarTop >= state.barBottom - 1,
-        `the plan toolbar must stay clear of the command bar at scrollY=${state.scrollY}: `
-        + JSON.stringify(state));
-      assert.ok(state.panelTop >= state.barBottom - 1,
-        `the plan panel must stay clear of the command bar at scrollY=${state.scrollY}`);
+        `a pinned plan toolbar must clear the command bar at ${state.width}px: ` + JSON.stringify(state));
+      assert.ok(state.panelBottom <= state.viewportHeight + 1,
+        `a pinned plan panel must still fit the viewport at ${state.width}px: ` + JSON.stringify(state));
     }
-    // Once the workspace is pinned, the panel must remain inside the viewport.
-    const pinned = stickyClearance.at(-1);
-    assert.ok(pinned.toolbarTop < pinned.viewportHeight,
-      "the pinned plan toolbar must remain inside the viewport");
+    for (const state of stickyStates) {
+      assert.ok(state.panelBottom <= state.rowBottom + 2,
+        `the plan panel must stay inside its own row at ${state.width}px / scrollY=${state.scrollY}`);
+      assert.ok(state.panelTop >= state.barBottom - 1 || state.clampedToRow,
+        `the plan panel may only sit above the command bar once its row clamps it: ` + JSON.stringify(state));
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.evaluate(() => window.scrollTo(0, 0));
 
     // (21) 1440p and 4K viewports must not let the list expand without bound.

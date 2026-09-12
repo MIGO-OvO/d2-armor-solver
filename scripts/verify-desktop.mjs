@@ -122,25 +122,27 @@ try {
         const panel = document.getElementById("planBrowser");
         const list = document.getElementById("planList");
         if (!panel || !list) return null;
-        const workspaceBox = document.querySelector(".desktop-workspace").getBoundingClientRect();
+        const workspace = document.querySelector(".desktop-workspace");
         const box = panel.getBoundingClientRect();
         return {
           position: getComputedStyle(panel).position,
           height: Math.round(box.height),
-          workspaceHeight: Math.round(workspaceBox.height),
-          workspaceOverflowY: getComputedStyle(document.querySelector(".desktop-workspace")).overflowY,
+          // The sticky offset is measured from the real command bar, so the
+          // budget has to follow it rather than assume a constant.
+          stickyOffset: parseFloat(getComputedStyle(panel).top) || 0,
+          workspaceHeight: Math.round(workspace.getBoundingClientRect().height),
+          workspaceOverflowY: getComputedStyle(workspace).overflowY,
           rows: list.querySelectorAll(".inventory-result-option").length,
           listScrolls: list.scrollHeight > list.clientHeight,
-          listOverflowX: list.scrollWidth - list.clientWidth,
         };
       });
       assert.ok(planBrowser, `the desktop shell must render the plan browser at ${width}px`);
       assert.equal(planBrowser.position, "sticky", `the plan browser must be a sticky workspace at ${width}px`);
       assert.ok(planBrowser.height <= 780,
         `the plan browser must stay bounded at ${width}px: ${planBrowser.height}`);
-      assert.ok(planBrowser.height <= planBrowser.workspaceHeight - 78 - 24 + 2,
+      assert.ok(planBrowser.height <= planBrowser.workspaceHeight - planBrowser.stickyOffset - 24 + 2,
         `the plan browser must fit the desktop workspace once pinned at ${width}px: `
-        + `${planBrowser.height} vs ${planBrowser.workspaceHeight}`);
+        + JSON.stringify(planBrowser));
       assert.equal(planBrowser.workspaceOverflowY, "auto", "the desktop workspace owns the page scroll");
       // The list is the only thing that scrolls vertically inside the panel.
       const pinnedList = await page.evaluate(() => {

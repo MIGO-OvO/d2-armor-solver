@@ -6841,6 +6841,32 @@ function renderSavedBuilds() {
   list.innerHTML = html;
 }
 
+// The command bar is sticky and its height depends on how its own controls wrap,
+// which is a function of the window width, the language and the current search
+// state — not something a media query can express. A fixed `top` offset for the
+// sticky plan browser would therefore slide the filter/sort toolbar underneath
+// the bar at some widths (measured: 60px at 1440, 100px at 1024). The bar's real
+// height is measured and published as a custom property instead, so the sticky
+// offsets and the panel's height cap follow it.
+function syncCommandBarOffset() {
+  const bar = document.getElementById("searchCommandBar");
+  const root = document.documentElement;
+  if (!bar || !root) return;
+  const height = Math.ceil(bar.getBoundingClientRect().height);
+  if (height > 0) root.style.setProperty("--cmd-bar-offset", `${height}px`);
+}
+
+function initializeCommandBarOffset() {
+  const bar = document.getElementById("searchCommandBar");
+  if (!bar) return;
+  syncCommandBarOffset();
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(syncCommandBarOffset).observe(bar);
+  } else {
+    window.addEventListener("resize", syncCommandBarOffset);
+  }
+}
+
 function initializeFloatingJumpVisibility() {
   const controls = document.getElementById('floatJump');
   const footer = document.querySelector('.footer');
@@ -6961,6 +6987,7 @@ loadCurrentDraft();
 renderSavedBuilds();
 initializeUpgradeOptimizer();
 initializeFloatingJumpVisibility();
+initializeCommandBarOffset();
 handleBungieOAuthCallback().finally(syncBungieAutoRefresh);
 document.addEventListener("visibilitychange", () => {
   syncBungieAutoRefresh();
