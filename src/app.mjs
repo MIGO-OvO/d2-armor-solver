@@ -39,8 +39,12 @@ import {
   visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
-import { createCanonicalId, createSolutionDisplayModel, assertSolutionConsistency } from "./core/solver-v3-contract.mjs";
-import { buildRepository } from "./core/build-repository.mjs";
+import { createCanonicalId, createSolutionDisplayModel, assertSolutionConsistency, SOLVER_V3_SCHEMA_VERSION } from "./core/solver-v3-contract.mjs";
+import {
+  SAVED_BUILD_LIMIT,
+  SAVED_BUILD_SCHEMA_VERSION,
+  buildRepository,
+} from "./core/build-repository.mjs";
 import {
   BUILD_CHANNEL,
   BUILD_COMMIT_SHA,
@@ -3296,7 +3300,7 @@ function handleBungieEquipError(error, surface = "result") {
 async function equipInventorySolution(index) {
   // Only a fully owned inventory entry can be written back to the game; a
   // theoretical skeleton with farm gaps has no live instances to equip.
-  const unified = lastUnifiedLoadouts[index];
+  const unified = resolveUnifiedEntry(index);
   const entry = unified?.kind === "inventory" ? unified.witness : null;
   if (!entry || isBungieApplying) return;
   const equipState = getInventorySolutionEquipState(entry);
@@ -5030,6 +5034,33 @@ let lastUnifiedLoadouts = [];
 let selectedUnifiedIndex = 0;
 let unifiedCache = { key: null, solutions: null, entries: [] };
 let renderingUnifiedList = false;
+// Every progressive inventory arrival must invalidate the unified projection.
+// `results.length` cannot do that: the Top-K keeps 12 entries while their
+// content and order change, so the cache would serve a stale list forever.
+let inventoryResultRevision = 0;
+
+// --- Single source of truth for "which loadout is on screen" ---------------
+// Save, DIM export, Bungie equip and every advanced panel resolve the current
+// selection here. `allSolutions[currentSolutionIdx]` is the *theory* solver's
+// own cursor and must never be read as the user's current choice.
+function getSelectedUnifiedEntry() {
+  const index = Number.isInteger(selectedUnifiedIndex) ? selectedUnifiedIndex : 0;
+  return lastUnifiedLoadouts[index] ?? null;
+}
+
+function getSelectedUnifiedWitness() {
+  return getSelectedUnifiedEntry()?.witness ?? null;
+}
+
+// Thin adapter for legacy call sites that still pass the rendered row index.
+// The index must address the same list the UI rendered; anything else falls
+// back to the one selection, so a stale index can never resurrect an old plan.
+function resolveUnifiedEntry(index) {
+  if (Number.isInteger(index) && index >= 0 && index < lastUnifiedLoadouts.length) {
+    return lastUnifiedLoadouts[index];
+  }
+  return getSelectedUnifiedEntry();
+}
 // The list itself keeps every candidate the solver retained. These fields only
 // decide which rows exist in the DOM and which one is open — filtering and
 // paging must never change search breadth, only rendered DOM size.
@@ -5071,7 +5102,7 @@ function compareUnifiedEntries(left, right) {
   return 0;
 }
 
-function normalizeInventoryEntry(entry) {
+function normalizeInventoryEntry(entry, search) {
   return {
     kind: "inventory",
     witness: entry,
@@ -5086,10 +5117,15 @@ function normalizeInventoryEntry(entry) {
     tuningAssignments: entry.tuningAssignments,
     modAssignments: entry.modAssignments,
     certificate: entry.certificate,
+    // Search metadata belongs to the result *collection*, never to a single
+    // row. Normalizing it onto the entry here is what lets the list and the
+    // advanced panel read one shape (entry.search / entry.search.coverage)
+    // instead of guessing between witness.search and plan.solution.search.
+    search: entry.search || search || null,
   };
 }
 
-function normalizeTheoryPlan(plan) {
+function normalizeTheoryPlan(plan, search) {
   const witness = plan.matchedSolution || plan.solution;
   if (!witness) return null;
   // Two different questions share one boolean here. `ruleFeasible` answers "do
@@ -5117,21 +5153,27 @@ function normalizeTheoryPlan(plan) {
     tuningAssignments: witness.tuningAssignments,
     modAssignments: witness.modAssignments,
     certificate: witness.certificate,
+    search: witness.search || search || null,
   };
 }
 
 function buildUnifiedLoadouts() {
-  const cacheKey = `${ownedPlanRevision}|${inventorySolveRevision}|${lastInventoryResult?.results?.length ?? 0}`;
+  // Progressive search replaces the Top-K with better candidates while its
+  // length stays at maxResults, so identity of the inventory result revision —
+  // not its size — is what invalidates this projection.
+  const cacheKey = `${ownedPlanRevision}|${inventorySolveRevision}|${inventoryResultRevision}`;
   if (unifiedCache.key === cacheKey && unifiedCache.solutions === allSolutions) {
     return unifiedCache.entries;
   }
-  const entries = (lastInventoryResult?.results || []).map(normalizeInventoryEntry);
+  const entries = (lastInventoryResult?.results || [])
+    .map(entry => normalizeInventoryEntry(entry, lastInventoryResult?.search));
   const request = createOwnedArmorPlanRequest(
     allSolutions, Math.max(SOLUTION_PREVIEW_COUNT, allSolutions.length), { allowEmpty: true },
   );
   if (request) {
+    const theorySearch = allSolutions?.search || null;
     for (const plan of rankInventoryPlans(request)) {
-      const entry = normalizeTheoryPlan(plan);
+      const entry = normalizeTheoryPlan(plan, theorySearch);
       if (entry) entries.push(entry);
     }
   }
@@ -5152,7 +5194,12 @@ function buildUnifiedLoadouts() {
 }
 
 function renderInventoryResults(result) {
-  if (result) lastInventoryResult = result;
+  if (result && result !== lastInventoryResult) {
+    lastInventoryResult = result;
+    // Any accepted inventory result — including a progressive merge that keeps
+    // the same Top-K size — advances the projection revision.
+    inventoryResultRevision++;
+  }
   renderUnifiedResults();
 }
 
@@ -5295,6 +5342,19 @@ function renderResultWorkspace(allEntries, view, index) {
     </div>`;
 }
 
+// Which row stays selected after the list is rebuilt. Content identity wins, so
+// a progressive refresh that reorders the Top-K keeps the reader on the same
+// loadout; a plan that was eliminated falls back to the same ordinal (clamped
+// into range) rather than to nothing, and an empty view has no selection.
+function resolveSelectedRowIndex(view, entryKey, previousIndex) {
+  if (!Array.isArray(view) || view.length === 0) return -1;
+  if (entryKey) {
+    const found = view.findIndex(entry => unifiedEntryKey(entry) === entryKey);
+    if (found >= 0) return found;
+  }
+  return Math.min(Math.max(0, Number(previousIndex) || 0), view.length - 1);
+}
+
 function renderUnifiedResults() {
   if (renderingUnifiedList) return;
   const el = document.getElementById("inventoryResults");
@@ -5323,10 +5383,8 @@ function renderUnifiedResults() {
     }
     // Preserve the plan the reader is on across progressive updates, filter
     // changes and language switches by content key, not by array position.
-    let index = selectedEntryKey
-      ? view.findIndex(entry => unifiedEntryKey(entry) === selectedEntryKey)
-      : -1;
-    if (index < 0) index = Math.min(Math.max(0, selectedUnifiedIndex), view.length - 1);
+    let index = resolveSelectedRowIndex(view, selectedEntryKey, selectedUnifiedIndex);
+    if (index < 0) index = 0;
     selectedUnifiedIndex = index;
     selectedEntryKey = unifiedEntryKey(view[index]);
     planRenderLimit = Math.min(Math.max(PLAN_PAGE_SIZE, planRenderLimit), view.length);
@@ -5346,8 +5404,9 @@ function applyPlanSelection() {
   for (const option of document.querySelectorAll("#planList .inventory-result-option")) {
     option.setAttribute("aria-selected", String(Number(option.dataset.planIndex) === selectedUnifiedIndex));
   }
+  const selected = getSelectedUnifiedEntry();
   const detail = document.getElementById("loadoutDetail");
-  if (detail) detail.innerHTML = renderSelectedLoadout(lastUnifiedLoadouts[selectedUnifiedIndex], selectedUnifiedIndex);
+  if (detail) detail.innerHTML = renderSelectedLoadout(selected, selectedUnifiedIndex);
   restoreDetailDisclosure();
   syncCommandBarActions();
 }
@@ -5355,7 +5414,7 @@ function applyPlanSelection() {
 // The command bar owns every result-level action, so it must always describe
 // the currently selected plan instead of a stale one.
 function syncCommandBarActions() {
-  const entry = lastUnifiedLoadouts[selectedUnifiedIndex];
+  const entry = getSelectedUnifiedEntry();
   const exportButton = document.getElementById("cmdExportDim");
   if (exportButton) {
     exportButton.disabled = !entry || entry.farmCount !== 0;
@@ -5377,16 +5436,76 @@ function syncCommandBarActions() {
 }
 
 
-// The six-stat totals the result list should present (handoff 3.7 / Phase D):
-//   - Bungie-sourced results: the plan's assignment recomputes totals with only
-//     the mods that can actually be installed on the real instances (actual
-//     masterwork, real energy). finalTotals counts every requested mod, so an
-//     energy-infeasible mod would otherwise inflate the shown stats.
-//   - CSV/theoretical results: the solver's finalTotals (no real instances to
-//     verify against) stay as the display source.
-// Fragments are added here the same way the solver's finalTotals include them.
-function getDisplayedFinalTotals(entry) {
-  return createSolutionDisplayModel(entry).visibleTotals;
+// Three totals answer three different questions, and the result page must not
+// conflate them (handoff 3.7 / Phase D):
+//   mathematicalTotals — what the Solver proved, assuming every planned
+//     Tuning/mod is in place and the armor is masterworked. This is the number
+//     the certificate is about; it is never edited by execution reality.
+//   projectedTotals — the same plan with the armor upgraded to Tier 5; equals
+//     the mathematical result when the instances are already masterworked.
+//   installableTotals — only the socket operations the current instances can
+//     actually accept right now (energy, socket compatibility, plug
+//     availability). A mod blocked by preflight contributes nothing.
+// Fragments are added to the armor-domain totals exactly once, here, so all
+// three are directly comparable with the user's targets.
+//
+// The witness's own verified visible totals. Rebuilt from the sealed witness
+// rather than trusted from storage, so a stale snapshot can never inflate the
+// displayed numbers.
+function getDisplayedFinalTotals(witness) {
+  return createSolutionDisplayModel(witness).visibleTotals;
+}
+
+function addFragmentTotals(totals, fragments) {
+  return Object.fromEntries(STATS.map(stat =>
+    [stat, Number(totals?.[stat] || 0) + Number(fragments?.[stat] || 0)]));
+}
+
+function differingStats(left, right) {
+  return STATS.filter(stat => Number(left?.[stat] || 0) !== Number(right?.[stat] || 0));
+}
+
+function getEntryTotalsModel(entry) {
+  const witness = entry?.witness || {};
+  let mathematical;
+  try {
+    mathematical = getDisplayedFinalTotals(witness);
+  } catch (error) {
+    console.error("Mathematical totals rebuild failed", error);
+    mathematical = witness.visibleTotals || witness.finalTotals || witness.totals || {};
+  }
+  const fragments = witness.fragments || {};
+  // Execution evidence exists only for owned-inventory witnesses: a theory
+  // skeleton has no live instance to preflight against.
+  const execution = entry?.kind === "inventory" ? witness.execution : null;
+  const structural = (execution?.unassignedMods || [])
+    .filter(mod => mod.kind === "item" && mod.reason !== "witnessTotalsMismatch");
+  const usableExecution = execution?.actualTotals && structural.length === 0
+    && STATS.some(stat => Number(execution.actualTotals[stat] || 0) !== 0);
+  const installable = usableExecution
+    ? addFragmentTotals(execution.actualTotals, fragments)
+    : mathematical;
+  const projected = usableExecution && execution.projectedTotals
+    ? addFragmentTotals(execution.projectedTotals, fragments)
+    : mathematical;
+  const blockedMods = (execution?.unassignedMods || [])
+    .filter(mod => mod.kind === "stat" || mod.kind === "tuning");
+  return {
+    mathematical,
+    projected,
+    installable,
+    blockedMods,
+    unverifiedMods: execution?.unverifiedMods || [],
+    mathematicalVsInstallable: differingStats(mathematical, installable),
+    mathematicalVsProjected: differingStats(mathematical, projected),
+  };
+}
+
+// What the six stat bars show: the values the loadout can carry *now*. When
+// execution evidence proves a planned mod cannot be installed, the bar must
+// drop to the installable value instead of advertising the arithmetic.
+function getUnifiedTotalsModel(entry) {
+  return getEntryTotalsModel(entry);
 }
 
 function getUnifiedEntrySummary(entry) {
@@ -5394,18 +5513,8 @@ function getUnifiedEntrySummary(entry) {
   const metCount = STATS.filter(stat => stats[stat]?.met).length;
   const requiredCount = lastInventoryRequiredStats.length;
   const requiredReachedCount = lastInventoryRequiredStats.filter(stat => stats[stat]?.met).length;
-  return {metCount, requiredCount, requiredReachedCount, status: searchProofLabel(entry.witness),
+  return {metCount, requiredCount, requiredReachedCount, status: searchProofLabel(entry.witness, entry.search),
     feasible: entry.feasible};
-}
-
-function getUnifiedTotals(entry) {
-  try {
-    return getDisplayedFinalTotals(entry.witness);
-  } catch (error) {
-    console.error("Unified totals rebuild failed", error);
-    const witness = entry.witness || {};
-    return witness.visibleTotals || witness.finalTotals || witness.totals || {};
-  }
 }
 
 function safeWitnessBreakdown(witness) {
@@ -5440,17 +5549,17 @@ function getEntryStateBadge(entry) {
       ),
     };
   }
-  if (entry.witness?.search?.running === true) {
+  if (entry.search?.running === true) {
     return {
       tone: "is-pending",
       label: l("搜索未完成", "搜尋未完成", "Search incomplete"),
-      title: searchProofLabel(entry.witness),
+      title: searchProofLabel(entry.witness, entry.search),
     };
   }
   return {
     tone: "is-short",
     label: l("未达标", "未達標", "Not qualifying"),
-    title: searchProofLabel(entry.witness),
+    title: searchProofLabel(entry.witness, entry.search),
   };
 }
 
@@ -5622,14 +5731,29 @@ function renderArmorLoadoutTable(entry) {
 
 // The farm list is derived from the same five pieces the table above shows, so
 // the two can never disagree. It stays a two-line summary, never a second table.
-function getFarmExoticLabel(piece) {
-  const classItemSettings = document.getElementById("useExoticMode")?.checked ? getExoticSettings() : null;
-  if (piece.slot === "classItem") {
-    return getExoticClassItemName(classItemSettings?.classId || importClassFilter || "hunter");
+// Exotic Class Items are the only Exotics named after their class (Relativism /
+// Stoicism / Solipsism). Every other Exotic keeps its own item name, so the
+// decision is made by SLOT and never by "is this piece exotic".
+function resolveExoticPieceLabel(piece, { classItemName = null, fallbackName = null } = {}) {
+  if (piece?.slot === "classItem") {
+    return classItemName || fallbackName || l("异域职业物品", "異域職業物品", "Exotic Class Item");
   }
+  return piece?.item?.name || piece?.itemName || fallbackName || l("异域护甲", "異域防具", "Exotic Armor");
+}
+
+function getFarmExoticLabel(piece) {
+  const isClassItem = piece?.slot === "classItem";
+  const classItemSettings = isClassItem && document.getElementById("useExoticMode")?.checked
+    ? getExoticSettings()
+    : null;
   const fixedExotic = getSelectedInventoryExotic();
-  if (fixedExotic && fixedExotic.slot === piece.slot) return fixedExotic.name;
-  return l("异域护甲", "異域防具", "Exotic Armor");
+  const fallbackName = fixedExotic && fixedExotic.slot === piece?.slot ? fixedExotic.name : null;
+  return resolveExoticPieceLabel(piece, {
+    classItemName: isClassItem
+      ? getExoticClassItemName(classItemSettings?.classId || importClassFilter || "hunter")
+      : null,
+    fallbackName,
+  });
 }
 
 function renderFarmSummary(entry) {
@@ -5773,9 +5897,7 @@ function renderFarmingAdvice(entry) {
   const fixedExotic = (entry.pieces || []).find(piece => piece.exotic);
   const exoticName = fixedExotic
     ? [
-      fixedExotic.exotic && getExoticClassItemName(importClassFilter || "hunter")
-        ? getExoticClassItemName(importClassFilter || "hunter")
-        : (fixedExotic.item?.name || fixedExotic.itemName || ""),
+      getFarmExoticLabel(fixedExotic),
       getArchetypeLabel(fixedExotic.archetypeId || fixedExotic.archetype),
     ].filter(Boolean).join(" · ")
     : l("无固定异域要求", "無固定異域要求", "No fixed Exotic requirement");
@@ -5803,26 +5925,43 @@ function renderFarmingAdvice(entry) {
 // Everything here is diagnostic: proofs, canonical identity, search counters and
 // the per-piece recomputation. It stays collapsed so the first screen answers
 // "which loadout, how many owned" instead of "what did the solver prove".
-function renderAdvancedDetails(entry) {
+function renderAdvancedDetails(entry, totals = null) {
   const witness = entry.witness || {};
   const certificate = witness.certificate || {};
-  const search = witness.search || entry.plan?.solution?.search || null;
-  const proofLabel = searchProofLabel(witness);
+  // Search metadata lives on the result collection. Entry construction gathers
+  // it into `entry.search`, so this panel never has to guess between
+  // witness.search, plan.solution.search and a bare search object.
+  const search = entry.search || witness.search || null;
+  const coverage = search?.coverage || {};
+  const proofLabel = searchProofLabel(witness, search);
   const canonicalId = witness.canonicalId || entry.plan?.solution?.canonicalId || "—";
   const searchStats = search
     ? [
       `${Math.round(search.elapsedMs || 0)} ms`,
       `${Number(search.nodes || 0).toLocaleString()} ${l("节点", "節點", "nodes")}`,
+      coverage.statesExamined !== undefined
+        ? `statesExamined=${Number(coverage.statesExamined).toLocaleString()}` : "",
       search.termination ? `${l("终止原因", "終止原因", "termination")}=${search.termination}` : "",
-      search.frontierComplete !== undefined ? `frontierComplete=${String(search.frontierComplete)}` : "",
-      search.assignmentComplete !== undefined ? `assignmentComplete=${String(search.assignmentComplete)}` : "",
-      search.statesExamined !== undefined ? `statesExamined=${Number(search.statesExamined).toLocaleString()}` : "",
+      coverage.frontierComplete !== undefined ? `frontierComplete=${String(coverage.frontierComplete)}` : "",
+      coverage.assignmentComplete !== undefined ? `assignmentComplete=${String(coverage.assignmentComplete)}` : "",
+      coverage.complete !== undefined ? `complete=${String(coverage.complete)}` : "",
+      search.running !== undefined ? `running=${String(search.running)}` : "",
     ].filter(Boolean).join(" · ")
     : "—";
   const preflight = entry.kind === "inventory"
     ? (witness.executionStatus || l("未标注", "未標示", "Not reported"))
     : (entry.planFeasible ? l("理论方案：无实例可预检", "理論方案：無實例可預檢", "Theoretical plan: no instance to preflight")
       : l("不可实施：套装或库存映射不可达", "無法實施：套裝或庫存映射不可達", "Unmappable: the set/owned mapping cannot reach it"));
+  const totalsModel = totals || getUnifiedTotalsModel(entry);
+  const totalsRows = STATS.map(stat => {
+    const mathematical = Number(totalsModel.mathematical[stat] || 0);
+    const installable = Number(totalsModel.installable[stat] || 0);
+    const projected = Number(totalsModel.projected[stat] || 0);
+    return `<span class="advanced-totals-row"><em style="color:${STAT_COLORS[stat]}">${STAT_LABELS[stat]}</em>`
+      + `<span>${l("数学", "數學", "math")} ${mathematical}</span>`
+      + `<span>${l("升级后", "升級後", "projected")} ${projected}</span>`
+      + `<span class="${installable === mathematical ? "" : "is-blocked"}">${l("可装", "可裝", "installable")} ${installable}</span></span>`;
+  }).join("");
   return `<details class="advanced-details" data-disclosure-key="advanced">
     <summary>${l("高级信息", "進階資訊", "Advanced")}</summary>
     <div class="advanced-list">
@@ -5843,6 +5982,10 @@ function renderAdvancedDetails(entry) {
         <span class="advanced-label">${l("执行预检", "執行預檢", "Execution preflight")}</span>
         <span>${escapeHtml(String(preflight))}</span>
       </div>
+      <div class="advanced-row advanced-totals">
+        <span class="advanced-label">${l("数学 / 升级后 / 可装", "數學 / 升級後 / 可裝", "Math / projected / installable")}</span>
+        <span class="advanced-totals-grid">${totalsRows}</span>
+      </div>
       <details class="advanced-sub" data-disclosure-key="advanced-allocation">
         <summary>${l("属性计算", "數值計算", "Stat allocation")}</summary>
         ${renderAllocationBreakdown(witness)}
@@ -5855,18 +5998,30 @@ function renderAdvancedDetails(entry) {
 function renderSelectedLoadout(entry, index) {
   if (!entry) return "";
   const { metCount, feasible } = getUnifiedEntrySummary(entry);
-  const finalTotals = getUnifiedTotals(entry);
+  const totalsModel = getUnifiedTotalsModel(entry);
+  const finalTotals = totalsModel.installable;
   // A plan whose requested mods cannot all be installed shows lower actual
-  // totals than the solver's projection; say so instead of claiming the
-  // projection is reachable right now.
-  const projected = entry.witness?.finalTotals;
-  const differsFromProjection = importSource === "bungie" && projected
-    && STATS.some(stat => (finalTotals[stat] || 0) !== (projected[stat] || 0));
-  const projectionNote = differsFromProjection
+  // totals than the Solver's arithmetic; say exactly which numbers differ and
+  // why, instead of claiming the projection is reachable right now.
+  const blockedByEnergy = totalsModel.blockedMods.filter(mod => mod.reason === "energy").length;
+  const blockedByOther = totalsModel.blockedMods.length - blockedByEnergy;
+  const projectionNote = totalsModel.mathematicalVsInstallable.length > 0
     ? `<p class="inventory-projection-note">${l(
-      "部分方案模组因能量或插槽限制无法立即安装，已按实际可装值显示；未安装模组不计入六维。",
-      "部分方案模組因能量或插槽限制無法立即安裝，已按實際可裝值顯示；未安裝模組不計入六維。",
-      "Some planned mods cannot be installed right now (energy/socket limits); the stats shown use only installable mods.",
+      `数学结果 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.mathematical[stat]}`).join(" / ")}；当前可实际装备 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.installable[stat]}`).join(" / ")}。`
+        + (totalsModel.blockedMods.length
+          ? `原因：${blockedByEnergy ? `${blockedByEnergy} 个属性模组因能量不足无法安装` : ""}${blockedByEnergy && blockedByOther ? "，" : ""}${blockedByOther ? `${blockedByOther} 个调整模组因插槽或模组不可用被阻止` : ""}。`
+          : "原因：护甲尚未完成大师杰作，升级后的数值见下。")
+        + "未安装的模组不计入六维。",
+      `數學結果 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.mathematical[stat]}`).join(" / ")}；目前可實際裝備 ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.installable[stat]}`).join(" / ")}。`
+        + (totalsModel.blockedMods.length
+          ? `原因：${blockedByEnergy ? `${blockedByEnergy} 個數值模組因能量不足無法安裝` : ""}${blockedByEnergy && blockedByOther ? "，" : ""}${blockedByOther ? `${blockedByOther} 個調校模組因插槽或模組不可用被阻止` : ""}。`
+          : "原因：防具尚未完成大師之作，升級後的數值見下。")
+        + "未安裝的模組不計入六維。",
+      `Mathematical ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.mathematical[stat]}`).join(" / ")}; installable now ${totalsModel.mathematicalVsInstallable.map(stat => `${STAT_LABELS[stat]} ${totalsModel.installable[stat]}`).join(" / ")}. `
+        + (totalsModel.blockedMods.length
+          ? `Reason: ${blockedByEnergy ? `${blockedByEnergy} stat mod(s) blocked by energy` : ""}${blockedByEnergy && blockedByOther ? ", " : ""}${blockedByOther ? `${blockedByOther} tuning mod(s) blocked by socket or plug availability` : ""}.`
+          : "Reason: the armor is not fully masterworked yet; the upgraded values are listed below.")
+        + " Mods that cannot be installed are not counted.",
     )}</p>` : "";
   const ownership = entry.farmCount > 0
     ? l(
@@ -5880,9 +6035,9 @@ function renderSelectedLoadout(entry, index) {
     ? (entry.exact
       ? l("精确解 · 已验证", "精確解 · 已驗證", "Exact solution · verified")
       : l("满足规则 · 已验证", "滿足規則 · 已驗證", "Rules satisfied · verified"))
-    : state.label || searchProofLabel(entry.witness);
+    : state.label || searchProofLabel(entry.witness, entry.search);
   const canExport = entry.farmCount === 0;
-  const searchingNote = entry.witness?.search?.running === true
+  const searchingNote = entry.search?.running === true
     ? `<p class="loadout-note">${l(
       "已找到验证方案，仍在继续搜索更优候选。",
       "已找到驗證方案，仍在繼續搜尋更佳候選。",
@@ -5893,7 +6048,7 @@ function renderSelectedLoadout(entry, index) {
     <header class="loadout-header">
       <div class="loadout-header-main">
         <span class="inventory-result-detail-label">${l(`方案 #${String(index + 1).padStart(2, "0")}`, `方案 #${String(index + 1).padStart(2, "0")}`, `Loadout #${String(index + 1).padStart(2, "0")}`)}</span>
-        <h3 class="loadout-status ${feasible ? "is-met" : "is-short"}" data-proof-label="${escapeHtml(searchProofLabel(entry.witness))}">${escapeHtml(headline)}</h3>
+        <h3 class="loadout-status ${feasible ? "is-met" : "is-short"}" data-proof-label="${escapeHtml(searchProofLabel(entry.witness, entry.search))}">${escapeHtml(headline)}</h3>
         <p class="loadout-subline">${l(`目标达标 ${metCount}/6`, `目標達標 ${metCount}/6`, `${metCount} of 6 targets met`)} · ${ownership}</p>
         ${searchingNote}
         ${projectionNote}
@@ -5908,7 +6063,7 @@ function renderSelectedLoadout(entry, index) {
     ${renderArmorLoadoutTable(entry)}
     ${renderFarmSummary(entry)}
     ${renderFarmingAdvice(entry)}
-    ${renderAdvancedDetails(entry)}`;
+    ${renderAdvancedDetails(entry, totalsModel)}`;
 }
 
 function selectInventorySolution(index) {
@@ -5917,6 +6072,9 @@ function selectInventorySolution(index) {
   selectedUnifiedIndex = index;
   selectedEntryKey = unifiedEntryKey(entry);
   if (entry.kind === "theory") {
+    // `currentSolutionIdx` is the theory solver's own cursor (the legacy
+    // solution nav still reads it). It is never the user's current choice —
+    // Save/DIM/Equip resolve the selection from the unified list instead.
     const solutionIndex = allSolutions.indexOf(entry.plan?.solution);
     if (solutionIndex >= 0) currentSolutionIdx = solutionIndex;
   }
@@ -6048,7 +6206,7 @@ async function copyDimExportLink() {
 }
 
 async function exportInventorySolution(index) {
-  const unified = lastUnifiedLoadouts[index];
+  const unified = resolveUnifiedEntry(index);
   if (!unified) return;
   const witness = unified.witness;
   const messages = document.getElementById('messages');
@@ -6177,36 +6335,93 @@ async function analyzeArmorUpgrades() {
 }
 
 // ============================================================
-// SAVED BUILDS (localStorage)
+// SAVED BUILDS (shared user data, not channel state)
 // ============================================================
+// A Saved Build is split into two very different lifetimes:
+//   input            — the user's targets, fragments, budget, Exotic and set
+//                      constraints. Long-term durable: a future Solver V4/V5
+//                      must still be able to restore it and re-solve.
+//   solutionSnapshot — canonicalId/pieces/assignments/totals plus the raw
+//                      sealed witness as a cache. Convenient, never required:
+//                      when the Solver contract moves on and the snapshot no
+//                      longer re-verifies, the build is *kept* and the reader
+//                      is told to re-solve, instead of losing the loadout.
 
 function getSavedBuilds() {
   return buildRepository.readSavedBuilds();
 }
 
+// Returns false when the write did not land. The caller must surface that:
+// reporting "saved" for a build that was never persisted is how a user loses
+// a loadout without ever being told.
 function saveBuildsToStorage(builds) {
-  buildRepository.writeSavedBuilds(builds);
+  return buildRepository.writeSavedBuilds(builds) === true;
 }
 
-function saveBuild() {
-  if (allSolutions.length === 0) { alert(l('请先求解配装再保存。','請先求解配裝再儲存。','Solve a loadout before saving it.')); return; }
-  const witness = allSolutions[currentSolutionIdx];
-  assertSolutionConsistency(witness.problemSpec, witness);
+function showSavedBuildStatus(message, tone = "info") {
+  const card = document.getElementById('savedCard');
+  const list = document.getElementById('savedBuildsList');
+  if (card) card.style.display = 'block';
+  if (!list) return;
+  let status = document.getElementById('savedBuildStatus');
+  if (!status) {
+    status = document.createElement('div');
+    status.id = 'savedBuildStatus';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.style.marginTop = '8px';
+    list.insertAdjacentElement('afterend', status);
+  }
+  status.innerHTML = `<div class="msg ${tone}">${icon(tone === 'error' ? 'block' : tone === 'warn' ? 'warn' : 'check')}<span>${escapeHtml(message)}</span></div>`;
+}
 
+function clearSavedBuildStatus() {
+  document.getElementById('savedBuildStatus')?.remove();
+}
+
+// Long-term user input, whichever shape the record happens to carry: the new
+// nested `input` block, or the flat fields older versions wrote.
+function readSavedBuildInput(build) {
+  const nested = build?.input && typeof build.input === 'object' ? build.input : {};
+  const pick = (key, fallback) => {
+    if (nested[key] !== undefined) return nested[key];
+    if (build?.[key] !== undefined) return build[key];
+    return fallback;
+  };
+  return {
+    targets: pick('targets', {}),
+    targetMax: pick('targetMax', {}),
+    fragments: pick('fragments', {}),
+    targetLocks: pick('targetLocks', {}),
+    statPriority: pick('statPriority', {}),
+    statFuzzyMode: pick('statFuzzyMode', {}),
+    numPlus5: pick('numPlus5', 0),
+    numPlus10: pick('numPlus10', 0),
+    onlyPlus5Tuning: pick('onlyPlus5Tuning', false),
+    n3Enabled: pick('n3Enabled', false),
+    numPlus3: pick('numPlus3', 0),
+    exotic: pick('exotic', null),
+    setRequirement: pick('setRequirement', null),
+    classFilter: pick('classFilter', null),
+  };
+}
+
+function createSavedBuildId() {
+  const random = Math.random().toString(36).slice(2, 8);
+  return `build-${Date.now().toString(36)}-${random}`;
+}
+
+function buildSavedBuildRecord(entry, name) {
+  const witness = entry.witness;
   const targets = {};
   const fragments = {};
   for (const s of STATS) {
     targets[s] = getVal('target_' + s);
     fragments[s] = getFragVal(s);
   }
-  const name = prompt(l('给这套配装起个名字（留空自动命名）：','為這套配裝命名（留空自動命名）：','Name this loadout (leave blank for an automatic name):')) ||
-    l('配装 ','配裝 ','Loadout ') + new Date().toLocaleDateString(localeCode()) + ' ' + new Date().toLocaleTimeString(localeCode()).slice(0,5);
   const exoticSettings = getExoticSettings();
   const onlyPlus5Tuning = isOnlyPlus5Tuning();
-
-  const build = {
-    name,
-    language: getPageLanguage(),
+  const input = {
     targets,
     targetMax: Object.fromEntries(STATS.map(s => [s, getVal('targetMax_' + s)])),
     fragments,
@@ -6225,91 +6440,196 @@ function saveBuild() {
       secondaryPerkId: exoticSettings.secondaryPerkId,
       priorityOrder: exoticSettings.priorityOrder,
     } : null,
-    result: structuredClone(witness),
-    savedAt: Date.now(),
+    setRequirement: snapshotSetRequirement(),
+    classFilter: importClassFilter || null,
   };
+  const now = Date.now();
+  const snapshot = {
+    canonicalId: witness.canonicalId || createCanonicalId(witness),
+    kind: entry.kind,
+    pieces: (witness.pieces || witness.config || []).map(piece => ({
+      slot: piece?.slot ?? null,
+      sourceId: piece?.sourceId ?? piece?.id ?? null,
+      hash: piece?.hash ?? null,
+      name: piece?.itemName || piece?.name || null,
+      archetypeId: piece?.archetypeId ?? piece?.archetype ?? null,
+      tertiary: piece?.tertiary ?? null,
+      exotic: Boolean(piece?.exotic),
+      setHash: piece?.setHash ?? null,
+    })),
+    tuningAssignments: witness.tuningAssignments || null,
+    modAssignments: witness.modAssignments || null,
+    visibleTotals: witness.visibleTotals || null,
+    armorTotals: witness.armorTotals || null,
+    certificateStatus: witness.certificate?.status || null,
+    solverVersion: SOLVER_V3_SCHEMA_VERSION,
+  };
+  return {
+    schemaVersion: SAVED_BUILD_SCHEMA_VERSION,
+    id: createSavedBuildId(),
+    name,
+    createdAt: now,
+    updatedAt: now,
+    // Ordering field older versions wrote and this one still reads.
+    savedAt: now,
+    language: getPageLanguage(),
+    kind: entry.kind,
+    input,
+    solutionSnapshot: snapshot,
+    // Cache only. Its absence, or a future contract change that makes it
+    // fail re-verification, must never delete the build.
+    result: structuredClone(witness),
+  };
+}
+
+function saveBuild() {
+  const entry = getSelectedUnifiedEntry();
+  if (!entry) {
+    alert(l('请先求解配装再保存。', '請先求解配裝再儲存。', 'Solve a loadout before saving it.'));
+    return;
+  }
+  const witness = entry.witness;
+  assertSolutionConsistency(witness.problemSpec, witness);
+
+  const name = prompt(l('给这套配装起个名字（留空自动命名）：', '為這套配裝命名（留空自動命名）：', 'Name this loadout (leave blank for an automatic name):')) ||
+    l('配装 ', '配裝 ', 'Loadout ') + new Date().toLocaleDateString(localeCode()) + ' ' + new Date().toLocaleTimeString(localeCode()).slice(0, 5);
 
   const builds = getSavedBuilds();
-  builds.unshift(build);
-  if (builds.length > 255) builds.length = 255;
-  saveBuildsToStorage(builds);
+  builds.unshift(buildSavedBuildRecord(entry, name));
+  if (builds.length > SAVED_BUILD_LIMIT) builds.length = SAVED_BUILD_LIMIT;
+
+  if (!saveBuildsToStorage(builds)) {
+    showSavedBuildStatus(l(
+      `保存失败：浏览器存储不可用或已满，方案「${name}」没有写入。请清理站点存储后重试。`,
+      `儲存失敗：瀏覽器儲存空間無法使用或已滿，方案「${name}」沒有寫入。請清理網站儲存空間後重試。`,
+      `Save failed: browser storage is unavailable or full, so "${name}" was not written. Free up site storage and try again.`,
+    ), 'error');
+    return;
+  }
+  clearSavedBuildStatus();
   renderSavedBuilds();
 }
 
-function loadBuild(build) {
-  const buildLanguage = build.language || build.exotic?.language;
-  if (['zh-chs', 'zh-cht', 'en'].includes(buildLanguage) && buildLanguage !== getPageLanguage()) {
-    document.getElementById('pageLanguage').value = buildLanguage;
-    changePageLanguage();
-  }
-  statPriority = {};
-  statFuzzyMode = {};
+// Restores the durable input half of a build. Always safe: it touches only
+// form state, so a build whose snapshot cannot be re-verified still loads its
+// constraints and can be re-solved with the current algorithm.
+function applySavedBuildInput(build) {
+  const input = readSavedBuildInput(build);
+  statPriority = { ...(input.statPriority || {}) };
+  statFuzzyMode = { ...(input.statFuzzyMode || {}) };
   for (const s of STATS) {
-    document.getElementById('target_' + s).value = build.targets[s];
+    document.getElementById('target_' + s).value = input.targets?.[s] ?? 0;
     const maxEl = document.getElementById('targetMax_' + s);
-    if (maxEl) maxEl.value = build.targetMax?.[s] ?? 0;
-    if (build.statPriority?.[s]) statPriority[s] = build.statPriority[s];
-    if (build.statFuzzyMode?.[s]) statFuzzyMode[s] = build.statFuzzyMode[s];
+    if (maxEl) maxEl.value = input.targetMax?.[s] ?? 0;
     const lockEl = document.getElementById('targetLock_' + s);
-    if (lockEl) lockEl.checked = build.targetLocks?.[s] || false;
+    if (lockEl) lockEl.checked = input.targetLocks?.[s] || false;
     const el = document.getElementById('fragVal_' + s);
-    if (el) { el.textContent = build.fragments[s]; el.style.color = build.fragments[s] !== 0 ? STAT_COLORS[s] : ''; }
+    if (el) {
+      const value = input.fragments?.[s] ?? 0;
+      el.textContent = value;
+      el.style.color = value !== 0 ? STAT_COLORS[s] : '';
+    }
   }
   for (const s of STATS) {
     syncPriorityUI(s);
     syncStatModeUI(s);
   }
-  document.getElementById('numPlus5').value = build.numPlus5;
-  document.getElementById('numPlus10').value = build.numPlus10;
-  document.getElementById('onlyPlus5Tuning').checked = build.onlyPlus5Tuning === true;
-  document.getElementById('usePlus3').checked = !build.onlyPlus5Tuning && !!build.n3Enabled;
-  if (build.n3Enabled) {
-    document.getElementById('plus3CountVal').textContent = build.numPlus3;
+  document.getElementById('numPlus5').value = input.numPlus5;
+  document.getElementById('numPlus10').value = input.numPlus10;
+  document.getElementById('onlyPlus5Tuning').checked = input.onlyPlus5Tuning === true;
+  document.getElementById('usePlus3').checked = !input.onlyPlus5Tuning && !!input.n3Enabled;
+  if (input.n3Enabled) {
+    document.getElementById('plus3CountVal').textContent = input.numPlus3;
   }
   syncPlus3PreferenceUI();
-  document.getElementById('useExoticMode').checked = !!build.exotic?.enabled;
+  document.getElementById('useExoticMode').checked = !!input.exotic?.enabled;
   toggleExoticMode();
-  if (build.exotic?.enabled) {
-    if (build.exotic.classId && EXOTIC_CLASSES[build.exotic.classId]) {
-      document.getElementById('exoticClass').value = build.exotic.classId;
+  if (input.exotic?.enabled) {
+    if (input.exotic.classId && EXOTIC_CLASSES[input.exotic.classId]) {
+      document.getElementById('exoticClass').value = input.exotic.classId;
       updateExoticPerkOptions();
     }
-    if (build.exotic.primaryPerkId) document.getElementById('exoticPrimaryPerk').value = build.exotic.primaryPerkId;
-    if (build.exotic.secondaryPerkId) document.getElementById('exoticSecondaryPerk').value = build.exotic.secondaryPerkId;
+    if (input.exotic.primaryPerkId) document.getElementById('exoticPrimaryPerk').value = input.exotic.primaryPerkId;
+    if (input.exotic.secondaryPerkId) document.getElementById('exoticSecondaryPerk').value = input.exotic.secondaryPerkId;
     updateExoticFramework();
   }
-  updateBudget();
-  if (build.result) {
-    try { assertSolutionConsistency(build.result.problemSpec, build.result); }
-    catch {
-      document.getElementById('messages').innerHTML = '<div class="msg warn">UNVERIFIED: ' + l('旧方案缺少校验数据，请重新求解。', '舊方案缺少驗證資料，請重新求解。', 'This saved plan is missing verification data. Solve it again.') + '</div>';
-      return;
-    }
-    allSolutions = [build.result];
-    allSolutions.status = build.result.certificate?.status || 'SEARCH_LIMIT_REACHED';
-    allSolutions.certificate = build.result.certificate;
-    currentSolutionIdx = 0;
-    lastTargets = build.targets;
-    lastFragments = build.fragments;
-    lastNumPlus5 = build.numPlus5;
-    lastNumPlus10 = build.numPlus10;
-    lastNumPlus3 = build.onlyPlus5Tuning || !build.n3Enabled ? 0 : build.numPlus3;
-    lastExoticSettings = getExoticSettings();
-    displayAllResults(build.result, build.targets, build.fragments);
+  if (input.setRequirement?.type) {
+    setRequirement = snapshotSetRequirement(input.setRequirement);
+    invalidateOwnedPlanCache();
+    renderSetEffects();
   }
+  updateBudget();
+  return input;
+}
+
+function loadBuild(build) {
+  const input = applySavedBuildInput(build || {});
+  const buildLanguage = build?.language || build?.exotic?.language;
+  if (['zh-chs', 'zh-cht', 'en'].includes(buildLanguage) && buildLanguage !== getPageLanguage()) {
+    document.getElementById('pageLanguage').value = buildLanguage;
+    changePageLanguage();
+  }
+  // Snapshot half. A missing or no-longer-verifiable witness degrades to
+  // "re-solve with the current solver" — it never removes the build.
+  const cached = build?.result || null;
+  if (!cached) {
+    document.getElementById('messages').innerHTML = '<div class="msg warn">' + l(
+      '旧版本方案：已载入目标与约束，请重新求解。',
+      '舊版本方案：已載入目標與限制，請重新求解。',
+      'This saved plan predates the current format. Its targets and constraints are loaded — solve again.',
+    ) + '</div>';
+    return;
+  }
+  try {
+    assertSolutionConsistency(cached.problemSpec, cached);
+  } catch {
+    document.getElementById('messages').innerHTML = '<div class="msg warn">UNVERIFIED: ' + l(
+      '旧版本方案，需要重新求解。目标与约束已载入。',
+      '舊版本方案，需要重新求解。目標與限制已載入。',
+      'Saved with an older solver version; solve again. Targets and constraints are loaded.',
+    ) + '</div>';
+    return;
+  }
+  allSolutions = [cached];
+  allSolutions.status = cached.certificate?.status || 'SEARCH_LIMIT_REACHED';
+  allSolutions.certificate = cached.certificate;
+  currentSolutionIdx = 0;
+  lastTargets = input.targets;
+  lastFragments = input.fragments;
+  lastNumPlus5 = input.numPlus5;
+  lastNumPlus10 = input.numPlus10;
+  lastNumPlus3 = input.onlyPlus5Tuning || !input.n3Enabled ? 0 : input.numPlus3;
+  lastExoticSettings = getExoticSettings();
+  displayAllResults(cached, input.targets, input.fragments);
 }
 
 function deleteBuild(idx) {
-  if (!confirm(l('确定删除这套配装？','確定刪除這套配裝？','Delete this loadout?'))) return;
+  if (!confirm(l('确定删除这套配装？', '確定刪除這套配裝？', 'Delete this loadout?'))) return;
   const builds = getSavedBuilds();
   builds.splice(idx, 1);
-  saveBuildsToStorage(builds);
+  if (!saveBuildsToStorage(builds)) {
+    showSavedBuildStatus(l(
+      '删除失败：浏览器存储不可用或已满，方案仍然保留。',
+      '刪除失敗：瀏覽器儲存空間無法使用或已滿，方案仍然保留。',
+      'Delete failed: browser storage is unavailable or full. The loadout is still saved.',
+    ), 'error');
+    return;
+  }
+  clearSavedBuildStatus();
   renderSavedBuilds();
 }
 
 function clearAllBuilds() {
-  if (!confirm(l('确定清空全部已保存配装？此操作不可撤销。','確定清除全部已儲存配裝？此操作無法復原。','Clear all saved loadouts? This cannot be undone.'))) return;
-  buildRepository.clearSavedBuilds();
+  if (!confirm(l('确定清空全部已保存配装？此操作不可撤销。', '確定清除全部已儲存配裝？此操作無法復原。', 'Clear all saved loadouts? This cannot be undone.'))) return;
+  if (!buildRepository.clearSavedBuilds()) {
+    showSavedBuildStatus(l(
+      '清空失败：浏览器存储不可用。',
+      '清除失敗：瀏覽器儲存空間無法使用。',
+      'Clear failed: browser storage is unavailable.',
+    ), 'error');
+    return;
+  }
+  clearSavedBuildStatus();
   renderSavedBuilds();
 }
 
@@ -6318,21 +6638,27 @@ function renderSavedBuilds() {
   const card = document.getElementById('savedCard');
   const list = document.getElementById('savedBuildsList');
   if (builds.length === 0) {
-    card.style.display = 'none';
+    // Keep the card up when it is showing a storage-failure message: the
+    // reader must still see that nothing was saved.
+    const status = document.getElementById('savedBuildStatus');
+    card.style.display = status ? 'block' : 'none';
+    if (list) list.innerHTML = '';
     return;
   }
   card.style.display = 'block';
   let html = '';
   builds.forEach((b, i) => {
-    const d = new Date(b.savedAt);
+    const savedAt = Number(b.savedAt || b.updatedAt || b.createdAt) || 0;
+    const d = new Date(savedAt);
     const dateStr = d.toLocaleString(localeCode(), { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    const input = readSavedBuildInput(b);
     const statSummary = STATS
-      .map(stat => `${STAT_LABELS[stat]}${b.targets?.[stat] ?? 0}`)
+      .map(stat => `${STAT_LABELS[stat]}${input.targets?.[stat] ?? 0}`)
       .join(' | ');
     const deleteLabel = l('删除', '刪除', 'Delete') + ' ' + b.name;
     html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);font-size:12px;">' +
       '<button onclick="loadBuild(getSavedBuilds()[' + i + '])" style="flex:1;min-width:0;cursor:pointer;border:none;background:none;color:var(--accent);font-weight:600;font-size:12px;line-height:1.6;font-family:inherit;text-align:left;">' +
-      b.name +
+      escapeHtml(String(b.name ?? '')) +
       ' <span style="color:var(--text-dim);font-weight:400;">' + dateStr + ' | ' + statSummary + '</span>' +
       '</button>' +
       '<button class="icon-btn" onclick="deleteBuild(' + i + ')" style="cursor:pointer;border:none;background:none;color:var(--health);font-size:14px;padding:0 4px;" title="' + deleteLabel + '" aria-label="' + deleteLabel + '">' + icon('close') + '</button>' +
@@ -6378,6 +6704,8 @@ Object.assign(window, {
   clearOwnedGear,
   deleteBuild,
   getSavedBuilds,
+  getSelectedUnifiedEntry,
+  getSelectedUnifiedWitness,
   handleDimCsvFile,
   handleUpgradeDragEnd,
   handleUpgradeDragStart,

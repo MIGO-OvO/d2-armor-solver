@@ -56,6 +56,20 @@ try {
   page.once("dialog", dialog => dialog.accept("Desktop regression"));
   await page.locator("#saveBuildButton").click();
   await page.locator("#savedBuildsList").getByRole("button", { name: /^Desktop regression/ }).waitFor();
+  // A write that does not land must be reported, never silently swallowed.
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function blocked() {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    };
+    window.__restoreSetItem = () => { Storage.prototype.setItem = original; };
+  });
+  page.once("dialog", dialog => dialog.accept("Desktop quota failure"));
+  await page.locator("#saveBuildButton").click();
+  await page.locator("#savedBuildStatus .msg.error").waitFor();
+  assert.equal(await page.locator("#savedBuildsList").getByRole("button", { name: /^Desktop quota failure/ }).count(), 0,
+    "a failed save must not appear as a saved loadout");
+  await page.evaluate(() => window.__restoreSetItem());
   await page.reload();
   await page.locator(".desktop-nav button:not([disabled])").first().waitFor();
   await page.locator("#savedBuildsList").getByRole("button", { name: /^Desktop regression/ }).click();

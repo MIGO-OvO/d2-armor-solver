@@ -1824,8 +1824,21 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   font-size: .6875rem;
   overflow-wrap: anywhere;
 }
-.advanced-sub { border-top: 1px solid var(--border-subtle); padding-top: 6px; }
-.advanced-sub > summary {
+/* Three totals, three meanings: what the Solver proved, what the plan becomes
+   once the armor is masterworked, and what the instances can accept right now.
+   Only the last one is highlighted, and only when it differs from the math. */
+.advanced-totals-grid { display: grid; gap: 2px; }
+.advanced-totals-row {
+  display: grid;
+  grid-template-columns: 3.4rem repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.advanced-totals-row em { font-style: normal; color: var(--text-dim); }
+.advanced-totals-row > span { color: var(--text-dim); }
+.advanced-totals-row .is-blocked { color: var(--warning); font-weight: 650; }
+
+.advanced-sub { border-top: 1px solid var(--border-subtle); padding-top: 6px; }.advanced-sub > summary {
   padding: 4px 0;
   color: var(--text-dim);
   font-size: .75rem;
