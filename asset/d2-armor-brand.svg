@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1672" height="941" viewBox="0 0 1672 941">
+<title>D2 Armor Solver — reconstructed vector brand artwork</title>
+<desc>Editable vector reconstruction of the supplied reference, with geometric orbital diagram and monochrome typography.</desc>
+<defs>
+ <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency=".64" numOctaves="3" seed="13"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".035"/></feComponentTransfer><feBlend in="SourceGraphic" mode="multiply"/></filter>
+ <radialGradient id="bg"><stop stop-color="#fbfbf9"/><stop offset="1" stop-color="#f8f8f6"/></radialGradient>
+ <g id="node"><circle r="24" fill="#fafaf8" fill-opacity=".7" stroke="#131516" stroke-width="1.15"/><circle r="10.6" fill="#030505"/></g>
+ <g id="facet">
+  <path d="M-40-180 -122-129 -87-101Z" fill="#d1d1ce"/>
+  <path d="M-40-180 -105-130 -87-101Z" fill="#bdbdb9"/>
+  <path d="M-40-180 -122-129 -105-130Z" fill="#e3e3df"/>
+  <path d="M-105-130 -87-101 -100-137Z" fill="#c6c6c2"/>
+ </g>
+ <g id="star">
+  <path d="M0-58 17-18 55 0 17 17 0 58-17 18-55 0-18-18Z" fill="#bbbcb8"/>
+  <path d="M0-58 0 0-18-18Z" fill="#777975"/><path d="M0-58 17-18 0 0Z" fill="#b9bab6"/>
+  <path d="M55 0 0 0 17-18Z" fill="#949691"/><path d="M55 0 17 17 0 0Z" fill="#747672"/>
+  <path d="M0 58 0 0 17 17Z" fill="#8b8d88"/><path d="M0 58-17 18 0 0Z" fill="#b8b9b4"/>
+  <path d="M-55 0 0 0-17 18Z" fill="#90928d"/><path d="M-55 0-18-18 0 0Z" fill="#c7c8c3"/>
+  <path d="M0-58V58M-55 0H55" stroke="#f3f3ef" stroke-width=".8"/><circle r="9.5" fill="#fafaf7"/>
+ </g>
+ <style>
+ .micro{font-family:Arial,sans-serif;font-size:10.5px;font-weight:500;letter-spacing:3.2px;fill:#101213}
+ .hair{fill:none;stroke:#818589;stroke-width:1}
+ .black{fill:none;stroke:#111516;stroke-width:1.5}
+ </style>
+</defs>
+<rect width="1672" height="941" fill="url(#bg)"/>
+<g class="black">
+ <path d="M25 41V21H45M1627 21h20v20M25 899v21h20M1627 920h20v-21"/>
+ <path d="M207 60H431M457 48V72" stroke-width="1.8"/><path d="M457 48V72" stroke-width="3.4"/>
+ <path d="M35 135V167M35 260V292M35 611V638M1637 204V229M1637 634V655"/>
+ <path d="M1420 51h41M1440 31v40"/>
+ <path d="M323 885H624"/>
+</g>
+<g class="micro">
+ <text x="73" y="66" font-size="18" font-weight="700" letter-spacing="4">MIGO / 03</text>
+ <text x="73" y="88" font-size="12" letter-spacing="4.6">ARMOR OPTIMIZATION SYSTEM</text>
+ <text x="73" y="143"><tspan x="73">IMPORT</tspan><tspan x="73" dy="17">FILTER</tspan><tspan x="73" dy="17">OPTIMIZE</tspan><tspan x="73" dy="17">BUILD</tspan></text>
+ <text transform="translate(41 591) rotate(-90)" font-size="10.5" letter-spacing="3.4">BUILD BETTER. PLAY YOUR WAY.</text>
+ <text x="1508" y="61"><tspan x="1508">SEARCH</tspan><tspan x="1508" dy="16">OPTIMIZE</tspan><tspan x="1508" dy="16">VERIFY</tspan></text>
+ <text x="1404" y="184"><tspan x="1404">LOADOUTS</tspan><tspan x="1404" dy="17">STAT TARGETS</tspan><tspan x="1404" dy="17">CONSTRAINTS</tspan><tspan x="1404" dy="17">OPTIMAL SOLUTIONS</tspan></text>
+ <text x="743" y="63">0.0000°</text><text x="864" y="63">0.0000°</text>
+ <text x="73" y="792" font-size="10"><tspan x="73">DATA DRIVEN</tspan><tspan x="73" dy="16">PLAYER OWNED</tspan><tspan x="73" dy="16">OPEN SOURCE</tspan></text>
+ <text x="73" y="889">34.0522° N　 118.2437° W</text>
+ <text x="811" y="813"><tspan x="811">SEARCH</tspan><tspan x="814" dy="17">SCORE</tspan><tspan x="814" dy="17">VERIFY</tspan><tspan x="814" dy="17">EQUIP</tspan></text>
+ <text x="1399" y="805" font-size="14" font-weight="700" letter-spacing="3"><tspan x="1399">ARMOR 3.0</tspan><tspan x="1399" dy="21">SOLVER V3</tspan><tspan x="1399" dy="21">LOCAL COMPUTATION</tspan></text>
+ <text x="1569" y="889" font-weight="700">+++</text>
+</g>
+<g class="black" stroke-width="1"><path d="M73 209h18M1508 108h17M1404 246h17M73 763h17M73 840h17M827 878h17M1399 863h17"/></g>
+<g fill="#030404" font-family="'Arial Black',Arial,sans-serif" font-weight="900">
+ <text x="151" y="372" font-size="191" letter-spacing="-10" textLength="286" lengthAdjust="spacingAndGlyphs">D2</text>
+ <text x="145" y="499" font-size="154" letter-spacing="-10" textLength="558" lengthAdjust="spacingAndGlyphs">ARMOR</text>
+ <text x="143" y="624" font-size="154" letter-spacing="-10" textLength="583" lengthAdjust="spacingAndGlyphs">SOLVER</text>
+</g>
+<path d="M150 653h25" stroke="#090c0d" stroke-width="3"/>
+<text x="149" y="692" class="micro" font-size="16" style="font-size:16px;letter-spacing:5.2px" textLength="585" lengthAdjust="spacingAndGlyphs">OPTIMIZE YOUR STATS. PERFECT YOUR BUILD.</text>
+<g class="hair"><path d="M835 21v17M835 94v38M835 171v32M835 706v29M835 758v27"/><path d="M835 133v38M835 672v34M1357 133V707" stroke-dasharray="1 2" stroke-width=".65"/></g>
+<path d="M835 53l-7 12h14Z" fill="none" stroke="#151819" stroke-width="1.3"/>
+<g transform="translate(1097.5 415.7)">
+ <g class="hair">
+  <circle r="322" stroke-dasharray="2.4 6"/><circle r="275" stroke="#111516" stroke-width="1.3" stroke-dasharray="2.7 5"/>
+  <path d="M0-395V502M-375 0H398"/>
+  <path d="M-337-196 337 198M-337 196 337-197"/>
+  <path d="M-285-150-238-138M237-138l48-11M-286 151l48-13M237 138l47 11" stroke-width=".7"/>
+  <circle r="105" stroke-dasharray="2 4" stroke-width=".5"/><circle r="133" stroke="#c2c4c1" stroke-width=".4"/>
+ </g>
+ <g fill="none" stroke="#b5b7b4" stroke-width=".45" opacity=".65">
+  <path d="M0-244 206-122 206 121 0 244-207 121-207-122Z"/>
+  <path d="M0-244 206 121-207 121ZM0 244-207-122 206-122Z"/>
+  <path d="M-207-122 0-149 206-122 144 0 206 121 0 152-207 121-145 0Z"/>
+  <path d="M-207-122 144 0-207 121M206-122-145 0 206 121"/>
+  <path d="M0-244-244 0 0 244 244 0Z"/>
+ </g>
+ <g opacity=".82"><use href="#facet"/><use href="#facet" transform="scale(-1 1)"/><use href="#facet" transform="scale(1 -1)"/><use href="#facet" transform="scale(-1 -1)"/>
+ <path d="M-218-99-246 0-218 99Z" fill="#d3d3ce"/><path d="M-218-99-233 0-218 99Z" fill="#bdbdb8"/>
+ <path d="M218-99 244 0 218 99Z" fill="#d1d1cc"/><path d="M218-99 231 0 218 99Z" fill="#bfbfba"/>
+ </g>
+ <g fill="none" stroke="#777d80" stroke-width=".65">
+  <path d="M-184-157-58-240-28-279M28-279 57-240 183-157M-184 158-57 240-28 279M28 279 58 240 184 158"/>
+ </g>
+ <path d="M0-244 206-122V121L0 244-207 121V-122Z" fill="none" stroke="#101415" stroke-width="1.8"/>
+ <path d="M0-244V244M-275 0H275" stroke="#161a1b" stroke-width="1.3"/>
+ <circle r="78" fill="#fafaf7" fill-opacity=".86" stroke="#121617" stroke-width="1.1"/>
+ <circle r="55" fill="none" stroke="#d6d8d2" stroke-width=".45" stroke-dasharray="1 2"/>
+ <use href="#star"/>
+ <g fill="#080b0c">
+  <circle cx="0" cy="-149" r="4.5"/><circle cx="0" cy="152" r="4.5"/><circle cx="-145" r="4.5"/><circle cx="144" r="4.5"/>
+  <circle cx="-238" cy="-138" r="4.3"/><circle cx="238" cy="-138" r="4.3"/><circle cx="-238" cy="138" r="4.3"/><circle cx="237" cy="138" r="4.3"/>
+  <circle cx="-102.5" cy="-99" r="2.2"/><circle cx="102" cy="-99" r="2.2"/><circle cx="-102.5" cy="101" r="2.2"/><circle cx="102" cy="101" r="2.2"/>
+  <rect x="-329" y="-8" width="15" height="15"/><rect x="314" y="-8" width="15" height="15"/><rect x="-6" y="-334" width="12" height="11"/>
+  <path d="M0-299-12-278H12ZM0 305-12 285H12ZM0 352-12 331H12Z"/>
+  <path d="M-275-11-264 0-275 11-286 0ZM275-11 286 0 275 11 264 0Z"/>
+  <circle cx="397" r="3.5"/><circle cy="418" r="3.5"/>
+ </g>
+ <g fill="none" stroke="#101415" stroke-width="1.9">
+  <path d="M-215.7-173a276 276 0 0 1 49-51M166-224a276 276 0 0 1 50 51M-216 171a276 276 0 0 0 50 51M166 222a276 276 0 0 0 50-51"/>
+ </g>
+ <g fill="#090c0d"><circle cx="-216" cy="-173" r="3.3"/><circle cx="216" cy="-173" r="3.3"/><circle cx="-159.5" cy="-230" r="3.6"/><circle cx="159" cy="-230" r="3.6"/><circle cx="-216" cy="171" r="2.8"/><circle cx="216" cy="171" r="2.8"/><circle cx="-159.5" cy="227" r="3.6"/><circle cx="159" cy="227" r="3.6"/></g>
+ <use href="#node" y="-244"/><use href="#node" x="-207" y="-122"/><use href="#node" x="206" y="-122"/><use href="#node" x="-207" y="121"/><use href="#node" x="206" y="121"/><use href="#node" y="244"/>
+</g>
+<g transform="translate(1328.5 833)" fill="none" stroke="#101415" stroke-width="1.4"><path d="M-27 0H27M0-33V30"/><circle r="14"/><circle r="6"/><circle r="2" fill="#101415"/></g>
+<rect width="1672" height="941" fill="transparent" filter="url(#paper)" pointer-events="none"/>
+</svg>

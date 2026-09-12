@@ -1,406 +1,227 @@
-# Destiny 2 Armor Solver v2
-
-[English](README.en.md) · [简体中文](README.md)
-
-[![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
-[![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
-[![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Deploy GitHub Pages](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml)
-[![GitHub Pages](https://img.shields.io/badge/在线使用-GitHub%20Pages-222?logo=github)](https://migo-ovo.github.io/d2-armor-solver/)
-[![Release](https://img.shields.io/github/v/release/MIGO-OvO/d2-armor-solver?display_name=tag&sort=semver)](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-
-## Overview / 项目概览
-
-面向《命运 2》Armor 3.0 的六维属性配装求解器。可以只算理论框架，看目标属性是否可达；也可以导入 DIM 护甲清单，或者登录 Bungie 直接读取库存，从已有装备里挑出最佳组合、守住套装约束，并列出还需刷取的护甲。
-
-纯静态的浏览器应用，不需要注册本项目账号，也不需要后端。根路径是门户，提供在线和离线两个入口；求解器在 `app/` 子路径。目标属性、DIM 清单和保存的方案都只存在当前浏览器里。登录 Bungie 只是用来读取真实库存；方案完全由已有装备组成时，可以直接一键装备到游戏里。
-
-## Solver V3 结果语义
-
-四条求解入口共享同一整数约束模型、canonical 比较器与结果证书。`EXACT_TARGET_PROVEN` 表示返回的 config、Tuning 和属性模组可重算出精确目标；`RULE_FEASIBLE_PROVEN` 表示 witness 已满足所有硬规则；`INFEASIBLE_PROVEN` 只会在穷尽搜索后出现；`SEARCH_LIMIT_REACHED` 仅表示当前最佳 witness，不能解读为“没有精确方案”或“全局最接近”。展示数量限制只在正确性结论产生后应用。
-
-执行能力单独标记：socket、能量、plug 与固定 Tuning 都有完整证据时为 `VERIFIED`；资料不完整为 `UNVERIFIED`；已有实例或插槽预检失败为 `BLOCKED`。算法可行不等于可以一键装备，页面会同时展示这两个结论。
-
-## Live Site / 在线使用
-
-门户：[https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)
-
-直接进入求解器：[https://migo-ovo.github.io/d2-armor-solver/app/](https://migo-ovo.github.io/d2-armor-solver/app/)
-
-开发测试版：[https://migo-ovo.github.io/d2-armor-solver/dev/app/](https://migo-ovo.github.io/d2-armor-solver/dev/app/)
-
-> `main` 对应稳定版，`develop` 对应开发测试版。两个在线版本共用语言偏好和已保存方案，但草稿与 Bungie 登录状态使用独立存储键，不会互相覆盖；其他部署来源之间也不会自动迁移浏览器数据。
-
-![Destiny 2 Armor Solver 配装工作台](./asset/web-input.png)
-
-## 离线使用 / Offline Use
-
-Release 的离线包是 [Windows 10/11 x64 安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe)。下面的浏览器免安装 ZIP 不再随 Release 分发，可从任意一次 push 的 [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) 工件获取（保留 14 天）。
-
-浏览器免安装 ZIP 是完全离线的独立构建，无需 Node、npm 或服务器：
-
-1. 从 Actions 工件下载 `d2-armor-solver-offline.zip`，或本地运行 `npm run build:offline` 生成。
-2. 解压后双击 `index.html`，通过 `file://` 协议在浏览器中打开即可使用。
-
-离线包和在线版功能一致，只有一处不同：构建时不注入 Bungie secrets，登录入口因此是隐藏的。DIM CSV 导入、求解、保存方案都能完全离线跑；DIM Loadout 导出链接只是一段 URL，打开它仍然要联网。
-
-浏览器支持：
-
-- Chrome / Edge 完全支持。
-- Firefox 通过 `file://` 打开时 `localStorage` 不可用，草稿和已保存方案不会在刷新后保留，应用其余功能不受影响。
-
-离线构建走主线程（`__OFFLINE_MODE__` 下不会启动 Web Worker），重型库存求解时界面可能短暂卡住，属预期行为。数据 100% 留在本机，和在线版一样；离线版不访问任何 CDN。
-
-## Changelog / 更新日志
-
-### v3.1.0（最新版）
-
-- 求解器 V3.1：精确目标原像查询改用六维护甲区间直接访问规则区间 Oracle，混合调整模式在笛卡尔积之前按目标残差预筛，调整 DP 改用整数键并复用有界稠密缓存；Fast / Balanced 的搜索预算不再被上层覆盖。1300 件合成库存下，「库存硬规则首个可行解」中位数从 1610.8 ms 降到 145.3 ms，从零求解的精确 Oracle 中位数从 593.0 / 539.7 ms 降到 66.1 / 39.1 ms，见证结果不变。
-- 库存证明与全局搜索状态分离：库存证明独立于完成度、搜索上限与取消状态；被动取消的可达性探测不再显示为失败。
-- 三层总量分离：主六维条只显示 mathematical 总量，projected 作为执行与求解器之间的一致性桥梁，installable 只出现在高级诊断与执行提示里，不再反向覆盖主六维；一处计划写入被证明受阻时保留该件已安装的模组。
-- 新增真实 DIM 导出回归：同一份上报库存恢复出两份物理精确配装且不修改已安装模组；库存自动属性模组与 CSV 已安装件数解耦；显式预算优先；零已安装模组的大库存不被已安装预算剪枝。并行库存求解按物理候选分片，未完成的分片结果保持「不完整」标记。
-- Unified Plan 与结果工作区：两条求解路径的结果合入同一列表并按「先达标、再拥有度」排序；结果页重建为「方案列表 + 方案详情」两栏；Plan Browser 变成有界的内容自适应 sticky 工作区；命令栏高度改为实测。
-- UI 信息架构与响应式：统一全应用宽度（求解前后逐像素一致），宽屏六维/目标输入 6 列、五件摘要 5 列、已有护甲与约束面板两列、替换路径三 lane，窄屏逐级回落；护甲表、刷取计划与六维格改用容器查询。
-- 已有护甲与替换路径：高级约束默认折叠，五件编辑器同时只展开一件；替换路径按步骤给出「当前 / → 目标 / 执行」三条 lane，长文案收进可展开区域；刷取计划只统计真正的刷取项。
-- 已保存方案（Saved Builds）：保存的方案改为跨渠道共用，草稿、计算模式与 Bungie 登录状态仍按渠道隔离；新增已保存方案抽屉，支持搜索、载入、重命名与带撤销的删除；快照失效只提示重新求解，不会删除方案。
-- 新增独立三语使用说明（`/guide/`，简体中文 / 繁體中文 / English），三语共用稳定锚点，覆盖从导入库存、设置规则到结果各栏与保存方案，并替换旧的帮助抽屉。
-- Web / 离线 / Windows 桌面跟随本版更新；Windows 安装包仍由 Release 触发构建并作为附件发布，浏览器免安装 ZIP 继续只作 Actions 工件。
-- 发布验证：413 项 Node 测试、lint、upgrade 计划验证、`benchmark:v3`、浏览器 smoke（含 1920/1440/1280 几何回归）、`file://` 离线验证与桌面前端契约全部通过。完整说明见 [v3.1.0 Release Notes](./docs/release-notes-v3.1.0.md)。
-
-### v3.0.1
-
-- 修复 Upgrade Search 在可见属性 0/200 边界下的可行解漏检：被钳制为「至多 0」「至少 200」的精确可见规则现在按精确可见目标处理，与从零求解共用同一套钳制原像，不再退回有界启发式搜索而错过预算内可行的精确方案。
-- 修复搜索预算下的可行解漏检：先在交互预算内建立并发布一份经过验证的可行替换方案，再在剩余预算里最小化替换件数；预算耗尽时如实标注为「可行上界」，而不是把可行方案藏起来。
-- 修复库存交互状态：重排库存方案时保留已展开的折叠区与正在查看的方案，被动的 Bungie 库存刷新不再打断正在进行的下拉选择。
-- 修复 planned tuning 展示：已有护甲同时显示方案要求的调整方向与当前实际安装的调整模组，需要更换时明确提示，且不覆盖库存真实数据。
-- 修复未拥有异域预留：选择「任意异域（待获取）」后，该部位不再被已有传说或其他异域顶替，方案会列出待获取的属性要求，预留状态随草稿恢复。
-- 修复职业套装计数：套装选择器的「已拥有」件数只统计当前所选职业的护甲。
-- 发布验证：322 项 Node 测试、浏览器 smoke、upgrade 计划验证、离线构建验证与 1300 件 benchmark 矩阵全部通过。完整说明见 [v3.0.1 Release Notes](./docs/release-notes-v3.0.1.md)。
-
-### v3.0.0
-
-- Solver V3 正式稳定版：四条求解入口共享同一整数约束模型与结果证书，witness 校验与封印使证书成为数学结果的唯一真值，UI 只依据证书展示正确性结论，不再依赖 legacy heuristic 判断结果是否真实满足规则。
-- 分阶段搜索 Fast / Balanced / Deep：解决的是同一个数学问题，只改变搜索预算与证明深度，不改变任何游戏规则。Fast 未找到解时不会错误声称不可行；预算耗尽只会产生 `SEARCH_LIMIT_REACHED`，只有完整可信证明才会产生 `INFEASIBLE_PROVEN`。
-- 大型库存搜索优化：retained states / nodes / evaluations 分离，Deep 真正获得更大的搜索预算；1300 件库存 benchmark 场景与 exact witness 独立重建回归通过。大型库存仍是有预算上限的搜索，只有实际完成整个搜索域时才拥有 exhaustive proof。
-- Progressive Search / Worker：结果逐步验证发布、支持取消与 generation 隔离，过期 Worker 结果不会污染界面；Reachability 协作取消保持证明完整性；Upgrade / fallback 使用同一 V3 correctness boundary。
-- Bungie 单件护甲操作：单件已拥有护甲的拉取 / 装备与目标选择，写入后回读核对，不确定的写入不盲目重复执行。
-- 发布验证：318 项 Node 测试、浏览器 smoke、upgrade verification、offline verification 与 1300 项 benchmark matrix 全部通过。完整说明见 [v3.0.0 Release Notes](./docs/release-notes-v3.0.0.md)。
-
-### v2.0.7
-
-- 优化真实库存搜索：按目标属性质量优先排序，扩大并改进大库存候选搜索，避免因为早期局部评分或“少刷几件”而错过精确可达的配装。
-- 统一“优化现有配装”与从零配装的精确规则；当快速替换搜索找不到精确方案时，由独立的精确目标查询提供可行 witness，同时保留传说护甲固定 `+5` 与异域护甲自由调整的正确语义。
-- 修复异域职业物品右栏特性的第三属性优先级，纠正虫骸、医疗设备、星火、虫群与和谐之灵相关的 8 个错误 `30/25/20` 组合；新增覆盖三职业全部 192 个特性组合的回归测试。
-
-### v2.0.6
-
-- 修复“优化现有配装”的属性规则：至多 / 至少 / 区间 / 精确与从零配装一致生效。上限类规则按“上限”语义判定达标（≤上限即达标、低不欠点、超过显示超上限而非达标），搜索不再把上限当目标把属性顶到上限，库存“无需刷取”结果的达标标记与指标保持一致。
-
-### v2.0.5
-
-- 修复属性“至多 / 区间上限”规则：当目标总和低于预算、必须把溢出点数分配到别处时，被限制的属性不再被当作“差额最小”的倾倒目标，上限约束严格生效。
-- 修复 2+2 双护甲套装加成约束：两个套装选择器改为各自的选项，“另一个套装”的选择在重新渲染后保持不变，可以正常选择第二个护甲套装加成。
-
-### v2.0.4
-
-- 修复目标属性规则执行：优先级与模糊约束（精确 / 至少 / 至多 / 区间）严格生效，替换规划优先把可刷护甲分配给必须达标属性，且不会为减少替换件数而破坏必须达标约束。
-- 修复调整模组匹配：传说护甲的 `+5` 调整必须与方案一致，不一致时降级为待刷；异域护甲的 `+5` 方向仍可自由选择。
-- 修复 Bungie 一键装备：角色栏位已满时自动把非方案装备移开；逐件装备失败按单件记录而非整体中止，逐插槽写入失败软处理；应用后回读档案校验实际插槽。
-
-### v2.0.3
-
-- 新增门户首页，求解器迁移到 `app/` 子路径；根路径门户提供在线 / 离线双入口与三语切换。
-- 新增 Bungie OAuth 登录与真实库存：跨平台存档解析、护甲目录预生成与库存去重，完全由已有实例组成的方案可一键装备到游戏。
-- 从零配装为六维目标新增优先级（高 / 中 / 低）与模糊约束（精确 / 至少 / 至多 / 区间），按优先级顺序最大化可达值并兼顾其余属性。
-- 重构属性模式控件：符号徽章改为带标签的优先级 / 规则控件，库存同步移出账号菜单并每 10 秒自动刷新。
-- 修复 Bungie 库存的模组重复计数、实际总属性与 DIM 导出对齐、跳过模组、单异域约束与保险库栏位恢复等问题。
-
-### v2.0.2 算法优化
-
-- 优化已有配装替换规划：必须达标属性满足后，优先选择更少替换件的方案。
-- 规划种子保留已有护甲，确保精确替换组合能被找到。
-- 新增“仅 +5/-5 调整”选项。
-
-### v2.0.1 优化版
-
-- 更名“命运2 T5配装求解器·优化版”，更新页脚署名（Ver 2.0.1）。
-- 修复 DIM 导入：无调整 / 属性模组的裸护甲正确解析固定 +5 属性。
-- 异域职业物品按固定 `30/25/20` 框架（框架 + 第三属性）识别。
-- 规划匹配不再因 +5 属性差异拒绝已有件；以整组可行性判定（固定 +5、自由 -5、自由模组）决定匹配，不可行件降级为待刷。
-
-### v2.0.0 库存规划
-
-v2 围绕“真实库存配装”做了大幅升级：
-
-- 支持导入 DIM Armor CSV，识别职业、栏位、Tier、异域、当前穿戴、基础属性、套装和大师杰作等级。
-- 从 DIM 显示属性中推断已安装的 `+3` / `+5/-5` 调整与 `+5` / `+10` 属性模组。
-- 新增已有护甲求解：优先使用库存中的精确匹配件，并明确显示仍需刷取的栏位、框架和调整方向。
-- 支持普通异域固定、异域职业物品，以及同名异域多件之间的最接近属性比较。
-- 支持指定套装 `4 件套`、`2 件套` 和 `2+2` 双套装约束；内置 56 组 Bungie Manifest 套装数据。
-- 套装选择器覆盖全部 56 组效果组，按活动分类（世界/遗失区域、先锋/智谋、熔炉/PvP、地牢、突袭）分组，标注清单中已拥有的件数，并预览所选套装的 2 件 / 4 件效果与获取来源。
-- 已有护甲方案可导出为 DIM 配装链接，并携带护甲实例、属性模组和调整模组设置。
-- “优化现有配装”支持必须达标属性、真实护甲分布、固定件和按收益排序的替换计划。
-- 重做 DIM 导入、库存结果和替换规划界面，完善桌面端、390px 窄屏、键盘焦点和状态反馈。
-- 求解、可达范围、库存搜索和替换分析均通过 Web Worker 执行，避免阻塞主界面。
-
-完整版本说明见 [v2.0.0 Release](https://github.com/MIGO-OvO/d2-armor-solver/releases/tag/v2.0.0)。
-
-## 核心功能
-
-### 从零配装
-
-- 设置生命、近战、手雷、超能、职业和武器六维目标。
-- 为每个属性设置优先级（高 / 中 / 低）与模糊约束（精确 / 至少 / 至多 / 区间），求解器按优先级顺序最大化可达值并兼顾其余属性。
-- 应用碎片属性变化、`+5` / `+10` 属性模组和 `+3` / `+5/-5` 调整。
-- 可锁定目标，或限定方案只使用 `+5/-5` 调整。
-- 枚举五件护甲框架，显示目标差值、理论可达范围和刷取需求。
-- 支持异域职业物品的职业、左右栏特性及固定 `30/25/20` 框架。
-
-### DIM 库存规划
-
-- 按职业和 Tier 5 筛选已导入护甲。
-- 优先匹配已有护甲，再按刷取件数和属性接近程度排序方案。
-- 固定普通异域的部位与名称；同名多件会自动比较框架、第三属性和调整。
-- 为目标方案指定套装要求，并确保库存组合或刷取建议满足件数约束。
-- 查看完全由已有护甲组成的方案，或查看“已有 + 待刷”的混合规划。
-
-### 优化现有配装
-
-- 从 DIM 当前穿戴自动填入五件护甲，也可以逐件手动配置。
-- 异域或不希望替换的装备可固定保留。
-- 为关键属性勾选“必须达标”，优先满足硬约束后再比较总缺口。
-- 输出当前状态、替换后六维、逐步替换顺序、调整分配和属性模组分配。
-- 当现有装备已经足够时，会明确给出无需刷取的保留方案。
-
-### Bungie 一键装备（在线版）
-
-- Bungie 登录并导入真实库存后，完全由已有实例组成的方案会显示“装备到游戏”。同职业有多个角色时可选择目标角色。
-- 点击前会检查五件实例、职业、异域职业物品词条、模组解锁状态、精确插槽和护甲能量；能量不足的属性模组会明确列为跳过项。
-- 自定义求解结果按 `TransferItem → EquipItems → InsertSocketPlugFree` 应用。Bungie 公共 API 不提供创建任意游戏内配装的端点；`EquipLoadout` 仅用于直接应用玩家已经在游戏内保存的配装。
-- 游戏内已保存配装会从 `CharacterLoadouts` 读入，可直接应用，也可把其中的护甲、模组与碎片属性载回优化器编辑。
-- 自定义方案会保持目标角色当前的分支职业、星相和碎片。当前 UI 只保存碎片属性总和，无法无歧义反推出具体碎片，因此仅当总和与该角色当前精确配置一致时允许直装；需要完整切换分支职业配置时请直接应用游戏内已保存配装。
-
-使用限制：
-
-- 角色必须在轨道、社交空间或离线；活动中 Bungie 会拒绝装备写入。
-- 写操作依赖 Bungie 应用后台启用 `MoveEquipDestinyItems`。Bungie OAuth URL 不接受 `scope` 参数，权限由应用注册固定。
-- 能量不足时对应模组会被跳过并显示数量；应用不会主动更换护甲元素，也不会承诺涉及材料消耗的操作成功。
-- 异域职业物品只能穿戴词条完全匹配的现有实例，不能改写随机词条。
-- 只处理五个护甲槽与护甲模组，不处理武器、幽灵等其他槽位。手动序列中若中途发生 API 错误，界面会明确提示可能已经完成部分转移或穿戴，避免误报为整套成功。
-
-### 其他能力
-
-- 简体中文、繁体中文和 English 界面。
-- 草稿、语言、模式和命名方案自动保存在 `localStorage`。
-- Armor Archetype 使用稳定的 English ID / Bungie Manifest hash 作为内部身份；旧草稿中的“壁垒”等历史名称会就地迁移，不会清空用户数据。
-- 官方术语集中维护；具有 Manifest hash 的游戏专有名称只采用 Bungie Manifest 三语言 `displayProperties`，DIM / light.gg 仅用于输入兼容或交叉验证，不使用简繁自动转换生成专有名词。
-- 支持减少动态效果、键盘操作、清晰焦点和 `aria-live` 状态播报。
-- GitHub Pages 与 Cloudflare Workers Static Assets 使用同一份生产构建。
-
-## Usage / 导入与导出 DIM
-
-网站教程位于 [`guide/index.html`](guide/index.html)，随 Vite 多页面构建发布到 `dist/guide/index.html`。从求解器右上角「使用说明」打开，可阅读简中、繁中和英文教程。正式版 `/app/` 链接到 `/guide/`，开发版 `/dev/app/` 链接到 `/dev/guide/`；两者均使用相对链接，兼容仓库子路径部署。教程内容独立维护在 `src/guide-content.mjs`。
-
-离线 ZIP 与桌面版也打包同一份教程，无需联网阅读。
-
-### 导入护甲清单
-
-在 DIM 中依次进入：
-
-```text
-DIM → Settings → Spreadsheets → Armor → Export CSV
-```
-
-回到求解器后点击“选择 DIM CSV”。文件仅在浏览器内解析，不会上传到服务器。
-
-导入后建议依次完成：
-
-1. 选择职业并决定是否只使用 Tier 5 护甲。
-2. 如需固定普通异域，选择异域部位和名称。
-3. 设置六维目标、碎片和套装约束。
-4. 运行求解，比较已有件和待刷件。
-
-### 导出 DIM 配装
-
-完全由已有护甲组成的方案可以生成 DIM Loadout 链接。链接包含 DIM 实例 ID、属性模组和调整模组；打开前请确保浏览器已经登录 DIM。
-
-DIM 会忽略账号未拥有的模组，应用模组前护甲也需要满足游戏内能量与大师杰作等级要求。
-
-## Getting Started / 本地运行
-
-### Windows 10/11 桌面安装包
-
-[下载桌面离线安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe)（x64，约 2.22 MB）。目前通过 DIM CSV 导入库存，桌面版尚未接入 Bungie 登录。该安装包是 Release 的唯一离线包；网页版与浏览器免安装 ZIP 的构建方式保留，ZIP 改从 Actions 工件获取。
-
-新增 Rust + Tauri 2 + React + TypeScript 离线桌面入口，采用横向参数/结果工作台，保留现有在线版及离线 ZIP。开发运行 `npm run desktop:dev`，构建 x64 安装包运行 `npm run desktop:build`。需要 Rust MSVC、C++ Build Tools 和 Windows SDK；轻量安装包不包含或自动下载 WebView2，目标电脑须已安装 WebView2 Runtime（建议 120 或更新版本）。
-
-详细架构、存储边界、输出位置与验证步骤见 [桌面版说明](docs/desktop.md)。
-
-### 环境要求
-
-- Node.js `22.13.0` 或更高版本
-- npm
-- 可选：Chrome 或 Edge，用于浏览器回归测试
-
-### Installation / 安装
+![D2 Armor Solver — Optimize your stats. Perfect your build.](./asset/d2-armor-brand.svg)
+
+# Destiny 2 Armor Solver
+
+[简体中文](README.md) · [English](README.en.md)
+
+[![Release](https://img.shields.io/github/v/release/MIGO-OvO/d2-armor-solver?sort=semver)](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest)
+[![Checks](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/validate.yml)
+[![Vite 8](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
+[![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&logoColor=white)](https://v2.tauri.app/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+面向《命运 2》Armor 3.0 的 T5 护甲配装工具：从六维目标推导护甲框架，从真实库存寻找组合，
+或在现有配装上规划替换路径。支持生命、近战、手雷、超能、职业、武器六项属性，
+并将碎片、调整模组、属性模组、异域与套装约束纳入同一求解模型。
+
+**免费使用，无需注册本项目账号。如果你付费购买，说明你被骗了。**
+求解在本机执行；Bungie 登录是在线版的可选功能，不是使用求解器的前提。
+
+[开始配装](https://migo-ovo.github.io/d2-armor-solver/app/) ·
+[使用说明](https://migo-ovo.github.io/d2-armor-solver/guide/) ·
+[下载 Windows 版](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest) ·
+[项目门户](https://migo-ovo.github.io/d2-armor-solver/)
+
+## 选择使用方式
+
+| 版本 | 如何获取 | 库存来源 | 运行要求 |
+| --- | --- | --- | --- |
+| 在线稳定版 | [直接打开](https://migo-ovo.github.io/d2-armor-solver/app/) | DIM CSV；配置好登录的部署支持 Bungie 同步 | 现代浏览器 |
+| 在线开发版 | [预览 develop](https://migo-ovo.github.io/d2-armor-solver/dev/app/) | DIM CSV / Bungie | 用于验证新改动，可能不稳定 |
+| Windows 桌面版 | [下载 x64 安装包](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe) | DIM CSV，不提供 Bungie 登录 | Windows 10/11 x64，预装 WebView2 |
+| 浏览器离线包 | [Actions 工件](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml)，或本地构建 | DIM CSV，不提供 Bungie 登录 | 解压后打开 `index.html`，推荐 Chrome / Edge |
+
+Windows 安装包不需要 Node.js、Rust 或本地服务器；不捆绑或自动安装 WebView2。
+建议使用 WebView2 120 或更新版本。安装器未签名，Windows 可能提示未知发布者；
+请只从本仓库 Release 下载。桌面版没有自动更新器，升级需重新下载安装包。
+更多要求见 [桌面版说明](docs/desktop.md)。
+
+浏览器免安装 ZIP **不是当前 Release 附件**：push 构建生成的 Actions 工件保留 14 天，
+下载通常需要登录 GitHub。解压工件中的 ZIP 后，用 `file://` 打开入口即可。
+该版本不启动 Worker，大型库存搜索可能短暂阻塞界面；Firefox 的 `file://` 存储限制
+可能导致草稿和保存方案无法持久保留。DIM 导出链接可以离线生成，但打开 DIM 等外链需要联网。
+
+## 快速上手
+
+1. 选择职业。可直接进行理论求解，也可从 DIM 导出 Armor CSV 后导入；在线版还可登录 Bungie 同步库存。
+2. 选择「从零配装」或「优化现有配装」。后者可读取当前穿戴，也支持手动编辑五件护甲并固定不想替换的装备。
+3. 设置六维目标、每项的优先级与规则：精确、至少、至多或区间；填入碎片属性变化与模组预算。
+4. 按需要设置普通异域、异域职业物品特性和套装要求，再选择 Fast / Balanced / Deep 搜索。
+5. 查看方案列表与详情，区分已拥有和待刷取的护甲，核对每件的调整、模组及替换步骤。
+6. 保存方案，或导出 DIM 配装链接。在线 Bungie 库存方案只有满足执行条件时才可装备到游戏。
+
+完整操作、结果栏解释和 FAQ 见 [三语使用说明](https://migo-ovo.github.io/d2-armor-solver/guide/)
+（简体中文 / 繁體中文 / English）。
+
+## 当前能力
+
+- **从零配装**：推导五件护甲框架，计算可达范围、调整与模组分配，并展示目标差值。
+- **库存规划**：解析 DIM 实例与已安装调整/模组，比较同名异域的不同实例，生成已有组合或「已有 + 待刷」方案。
+- **异域与套装**：支持普通异域固定、待获取异域预留、异域职业物品特性，以及 2 件、4 件和 2+2 套装约束。
+- **替换规划**：保留固定件，在硬规则约束下寻找替换路径；已经满足目标时可保留现有护甲。
+- **统一结果工作区**：方案按达标情况与拥有度排序，提供五件详情、刷取需求、逐步替换和高级诊断。
+- **已保存方案**：搜索、载入、重命名与可撤销删除；过期快照提示重新求解，不自动删除方案。
+- **分阶段搜索**：支持进度、取消与预算选择；在线和桌面版通过 Web Worker 执行求解。
+- **三语界面**：简体中文、繁體中文、English，配套独立指南和响应式布局。
+
+## 如何理解求解结果
+
+V3.1 复用 Solver V3 的整数约束模型与结果证书。
+Fast / Balanced / Deep 只改变搜索预算和证明深度，不改变游戏规则。
+**找到可行方案，不等于证明全局最优；搜索用尽预算，也不等于无解。**
+
+| 结果状态 | 含义 |
+| --- | --- |
+| `EXACT_TARGET_PROVEN` | 返回方案的具体护甲、调整与模组可重算出精确目标 |
+| `RULE_FEASIBLE_PROVEN` | 返回方案已满足所有硬规则 |
+| `INFEASIBLE_PROVEN` | 已完成可信的搜索域证明，当前约束不可行 |
+| `SEARCH_LIMIT_REACHED` | 搜索未穷尽；可能已有可行方案，但不能据此声称无解或全局最优 |
+| `INVALID_INPUT` | 输入不符合模型要求，需要修正 |
+
+数学证明和游戏内执行状态分别展示：
+`VERIFIED` 表示执行证据完整且通过预检，`UNVERIFIED` 表示资料不足，
+`BLOCKED` 表示实例或插槽等预检受阻，`NOT_APPLICABLE` 用于不适用执行检查的理论结果。
+主六维展示数学总量；可安装总量属于执行诊断，不会覆盖数学结果。
+库存证明与全局搜索完成度也独立记录。
+
+模型、证明边界和搜索限制见 [架构说明](docs/architecture.md)、
+[一致性审计](docs/v3-consistency-audit.md) 与 [分阶段搜索](docs/staged-search.md)。
+
+### Bungie 装备到游戏的边界
+
+- 需要在线登录、可用的实际护甲实例与应用写入权限；CSV 或理论框架本身不提供完整执行证据。
+- 执行前核对职业、插槽、模组可用性、能量与固定调整；能量不足或不可写入的模组会提示跳过或受阻。
+- 自定义方案使用转移、穿戴、写入模组的 API 序列；中途失败可能已完成部分操作，并非整套原子事务。
+- 自定义方案保留当前分支职业、星相与碎片；只有碎片属性总和与角色当前配置一致时才允许直装。
+- 仅处理护甲与护甲模组，不处理武器；异域职业物品需要特性匹配的真实实例，不能改写随机词条。
+- 可读取并应用游戏内已保存配装；这不等于创建任意新的游戏内配装。
+- 活动中 Bungie 可能拒绝写入，请在轨道、社交空间或离线状态操作；最终以预检、API 响应与回读结果为准。
+
+## 本地开发
+
+需要 **Node.js 22.13.0 或更新版本**与 npm；CI 使用 Node.js 22，依赖以 `package-lock.json` 为准。
 
 ```bash
 git clone https://github.com/MIGO-OvO/d2-armor-solver.git
 cd d2-armor-solver
 npm ci
-```
-
-### 开发服务器
-
-```bash
 npm run dev
 ```
 
-根据终端提示打开本地地址。Windows 用户也可以运行 `start_windows.bat`，脚本会安装缺失依赖并打开浏览器。
-
-### 常用命令
+打开终端给出的地址：根路径是门户，`/app/` 是求解器，`/guide/` 是使用说明。
+未配置 Bungie 环境变量也可开发和求解，只是不显示登录入口。
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm run dev` | 启动 Vite 开发服务器 |
-| `npm run build` | 生成 `dist/` 生产构建 |
-| `npm run build:offline` | 生成只含求解器的 `dist-offline/` 离线构建 |
-| `npm run preview` | 本地预览生产构建 |
-| `npm run lint` | 运行 ESLint |
-| `npm test` | 运行确定性算法测试 |
-| `npm run test:upgrade` | 运行随机替换规划回归测试 |
-| `npm run test:browser` | 使用本机 Chrome/Edge 验证 Worker、交互和 390px 布局 |
-| `npm run verify:offline` | 构建并通过 `file://` 验证离线版 |
-| `npm run check` | 依次执行 lint、测试、替换回归和构建 |
-| `npm run deploy` | 使用 Wrangler 部署 Cloudflare 静态资源 |
+| `npm run build` / `npm run preview` | 构建到 `dist/` / 预览生产构建 |
+| `npm run build:offline` | 构建到 `dist-offline/`，入口可通过 `file://` 打开 |
+| `npm run check` | ESLint、Node 测试、替换规划回归、生产构建 |
+| `npm run test:consistency` | 见证一致性与 V3 差分测试 |
+| `npm run test:browser` | 构建并运行浏览器 smoke 与布局回归 |
+| `npm run verify:offline` | 构建并验证 `file://` 离线版本 |
+| `npm run benchmark:v3` / `npm run benchmark:inventory` | V3 / 真实规模合成库存性能测试 |
+| `npm run desktop:dev` | 启动 Tauri 桌面开发环境 |
+| `npm run desktop:test` | 桌面前端构建与浏览器契约验证 |
+| `npm run desktop:build` | 构建 Windows x64 NSIS 安装包 |
+
+浏览器测试需要本机 Chrome / Edge；无法自动发现时设置 `CHROME_PATH`。
+桌面原生构建还需要 Rust stable MSVC、Visual Studio C++ Build Tools 与 Windows SDK。
+安装包输出到 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`；
+原生检查和断网验收步骤见 [桌面版说明](docs/desktop.md)。
 
 ## 项目结构
 
 ```text
 d2-armor-solver/
-├─ .github/workflows/        # GitHub Pages 持续部署
-├─ app/
-│  └─ index.html             # 在线求解器页面（/app/）
-├─ asset/                    # 图标源文件与 README 配图
-├─ docs/architecture.md      # 模块、Worker 与存储边界说明
-├─ scripts/
-│  ├─ build.mjs              # 生产构建与静态资源处理
-│  ├─ build-offline.mjs      # 单入口、可通过 file:// 运行的离线构建
-│  ├─ verify-offline.mjs     # 离线包浏览器验证
-│  ├─ browser-smoke.mjs      # 浏览器端回归检查
-│  └─ fetch-armor-mod-data.mjs
-├─ src/
-│  ├─ portal.mjs             # 门户三语切换
-│  ├─ app.mjs                # 浏览器工作台与界面编排
-│  ├─ core/
-│  │  ├─ armor-engine.mjs    # 求解器统一接口
-│  │  ├─ dim-csv.mjs         # DIM CSV 解析与模组推断
-│  │  ├─ inventory-solver.mjs # 已有护甲组合搜索
-│  │  ├─ inventory-plan.mjs  # 已有/待刷混合规划
-│  │  ├─ bungie-api.mjs      # OAuth、请求、限流与错误分类
-│  │  ├─ bungie-inventory.mjs # Bungie 库存与实例/插槽映射
-│  │  ├─ bungie-loadout.mjs  # 装备预检、写入序列与已保存配装
-│  │  ├─ armor-sets.mjs      # 套装目录与激活规则
-│  │  └─ upgrade-optimizer.mjs
-│  ├─ workers/               # 非阻塞算法 Worker
-│  └─ styles/
-│     ├─ portal.css          # 门户视觉与响应式样式
-│     └─ app.css             # 求解器响应式界面样式
-├─ tests/                    # 算法、DIM、库存和结构测试
-├─ index.html                # 根路径门户页面
-└─ package.json
+├── index.html              # 门户入口
+├── app/                    # 共享求解器 HTML 模板
+├── guide/                  # 独立使用说明入口
+├── src/
+│   ├── app.mjs             # 界面状态与结果编排
+│   ├── core/               # 约束、求解、DIM、Bungie、存储与内置数据
+│   ├── workers/            # Worker 执行入口
+│   └── styles/             # 门户、工作台与指南样式
+├── desktop/                # React + TypeScript 桌面壳与共享界面桥接
+├── src-tauri/              # Rust + Tauri 2、权限与安装器配置
+├── asset/                  # SVG 品牌开屏、图标和静态资源
+├── scripts/                # 构建、数据生成、回归与性能测量
+├── tests/                  # 算法、库存、执行契约与测试样本
+├── docs/                   # 架构、算法审计、基准与发布说明
+└── .github/workflows/      # 校验、双渠道 Pages 与 Windows 发布
 ```
 
-更详细的模块关系见 [架构说明](./docs/architecture.md)。
+网页版是原生 JavaScript / HTML / CSS + Vite 静态应用。
+桌面版使用 React 外壳挂载共享模板与求解模块，不是另一套算法，也没有将求解迁移到 Rust。
 
-## 部署
+## 部署与分支
 
-推送后，[Deploy stable and development Pages](.github/workflows/deploy-pages.yml) 会：
+日常开发在 `develop`，稳定版本在 `main`。
+[Pages 工作流](.github/workflows/deploy-pages.yml) 在这两个分支 push 时分别校验、构建，
+将稳定版放在根路径、开发版放在 `/dev/`，合并发布到同一个 GitHub Pages 站点。
+每个分支的 push 还生成浏览器离线 ZIP 工件，保留 14 天。
 
-1. 每个分支的 push 都构建离线 zip，并作为保留 14 天的 Actions 工件上传，供抢先体验。
-2. `main` 与 `develop` 分别安装锁定依赖并执行 `npm run check`，构建时注入各自的通道名和提交号。
-3. 将 `main` 的门户与求解器放在根路径和 `/app/`，将 `develop` 的完整构建放在 `/dev/`；门户的“在线使用”始终指向稳定版，并额外提供开发测试版入口。
-4. 验证两套入口、兼容跳转、静态资源与 `versions.json` 后，将组合产物发布到同一个 GitHub Pages 站点；发布 Release 时，离线 zip 会自动附加到该 Release。
+[Windows 工作流](.github/workflows/desktop-windows.yml) 在相关代码改动、PR 或手动触发时构建，
+并在 Release 发布时附加 Windows 安装包。**Release 不会通过 Pages 工作流附加浏览器 ZIP。**
+[校验工作流](.github/workflows/validate.yml) 覆盖 check、V3 benchmark、浏览器、离线与桌面前端验证。
 
-分支约定：日常开发提交到 `develop`，实机验证通过后再合并到 `main`。任一通道发布失败时，GitHub Pages 会继续保留上一次成功部署，不会用不完整产物覆盖在线版本。
+其他静态托管可使用 `npm run build` 的 `dist/`。
+仓库也提供 Cloudflare Static Assets 配置，运行 `npx wrangler login` 后可用 `npm run deploy` 发布；
+未配置和登记对应来源时不启用 Bungie 登录。
 
-Cloudflare 部署使用：
+### Bungie 部署配置与安全注意事项
 
-```bash
-npx wrangler login
-npm run deploy
-```
+当前构建读取 `BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、
+`BUNGIE_OAUTH_CLIENT_SECRET`；Pages 工作流从同名 GitHub Actions Secrets 注入。
+Bungie 应用需要登记实际 Origin 和回调路径，并为装备操作启用 `MoveEquipDestinyItems`。
+稳定站点回调为 `https://migo-ovo.github.io/d2-armor-solver/app/`；
+本地开发回调为 `http://localhost:5173/app/`。
+Origin 只包含协议、主机与端口，不含路径。
 
-`dist/`、`node_modules/`、Wrangler 本地状态和 Agent 工作文件均被排除在版本控制之外。
+双渠道发布共用配置：开发版授权通过稳定回调转发到 `/dev/app/`，并继续校验 OAuth state。
+离线与桌面构建不启用这些凭证。
 
-## 数据来源、隐私与免责声明
+**安全限制：当前实现将 OAuth client secret 编译进静态前端，访问者能够读取它。**
+GitHub Secrets 只能保护构建前的值，不能让已发布的浏览器代码保密。
+不要将这个部署方式视为能保守 confidential client secret 的架构；
+生产部署应先评估 OAuth 安全方案，需要保密的令牌交换应放在可信服务端。
+不要向源码、Issue 或日志提交真实凭证、授权码或访问令牌。本次文档说明不改变现有认证实现。
 
-- 护甲套装、物品哈希和模组数据来自 Bungie Manifest；生成后的静态数据随版本发布。
-- 套装数据由 `scripts/fetch-armor-set-data.mjs` 从官方 Manifest（`DestinyEquipableItemSetDefinition` + `DestinySandboxPerkDefinition`，简中/繁中/英文）生成，并合并 `scripts/armor-sets-meta.json` 中人工整理的活动分类、获取来源与职业命名差异（2026-08-26 清单审计口径，light.gg / GamesRef 交叉核对）。
-- Destiny、Destiny 2、相关名称、商标和游戏美术资源归 Bungie 及其权利人所有。
-- 本项目与 Bungie、Destiny Item Manager 没有隶属或官方认可关系。
-- 应用运行时不会把目标、清单或配装发送到项目服务器。
-- 清除当前站点的浏览器数据会同时删除草稿和已保存方案。
+## 数据与隐私
 
-## Bungie 登录设置
+- 求解在本机运行，不向本项目服务器上传目标、CSV 或方案；Bungie 登录、同步与装备会访问 Bungie 服务。
+- 草稿、偏好与已保存方案使用本地存储。**清除站点或桌面应用数据会丢失这些内容。**
+- 同源的稳定版与开发版共享语言偏好和已保存方案，草稿、计算模式与 OAuth 状态按渠道隔离。
+- 桌面 WebView、不同浏览器与其他部署来源不自动共享或迁移数据。
+- 护甲、模组、套装与碎片目录来自 Bungie Manifest，静态数据随项目版本更新，不保证即时跟随游戏热修。
 
-Bungie 登录（OAuth）用于获取真实库存，需要部署侧预先配置。注册与配置由仓库维护者手动完成，步骤如下：
+## 版本与技术文档
 
-1. 打开 [bungie.net/en/Application](https://www.bungie.net/en/Application) 创建 Bungie 应用：
-   - 客户端类型选择 `Confidential`。
-   - Redirect URL 注册 `https://migo-ovo.github.io/d2-armor-solver/app/` 与 `http://localhost:5173/app/`。
-   - Origin 注册 `https://migo-ovo.github.io` 与 `http://localhost:5173`。Origin 只包含协议、主机和端口，不包含 `/d2-armor-solver/app/` 路径；浏览器发起请求时的 Origin 必须与登记值一致（不支持通配符），否则 Bungie 会以 CORS 拒绝。
-   - 从旧版升级时，必须把原先指向仓库根路径的 Redirect URL 改为上述 `app/` 子路径，否则 OAuth 回调会落到门户而无法完成登录。
-2. 从应用页面取得三件套：`API Key`、`OAuth Client ID`、`OAuth Client Secret`。
-3. 在应用后台启用 `MoveEquipDestinyItems` 权限；未启用时库存读取仍可成功，但转移、穿戴和写入模组会返回权限错误。修改权限后让玩家重新登录。
-4. 在 GitHub 仓库 → `Settings → Secrets and variables → Actions` 添加稳定版 secrets：`BUNGIE_API_KEY`、`BUNGIE_OAUTH_CLIENT_ID`、`BUNGIE_OAUTH_CLIENT_SECRET`。
-5. 开发测试版复用上述 Bungie 应用与 GitHub Secrets。Bungie 仍回调已登记的稳定路径 `/app/`；组合发布产物会识别带 `develop.` 前缀的 OAuth state，并立即把授权码与 state 原样转发到 `/dev/app/`，再由开发版完成原有 state 校验。稳定版 state 不会被转发。
-6. Cloudflare 部署默认不启用 Bungie 登录（该来源未在门户注册）。构建未配置对应 secrets 时仍然成功，登录与“装备到游戏”入口自动隐藏；离线构建会强制清空这些配置。
+当前源码版本为 **v3.1.0**：精确目标区间查询、库存搜索优化、统一方案工作区、
+跨渠道保存方案与独立三语指南已落地。
 
-> 请勿在仓库、Issue 或任何文档中提交真实 secret 值；GitHub Secrets 只在 Actions 运行期间注入构建过程。
+- [v3.1.0 发布说明](docs/release-notes-v3.1.0.md) · [全部 Release](https://github.com/MIGO-OvO/d2-armor-solver/releases)
+- [V3.1 优化与测量方法](docs/solver-v31-optimization.md) · [原始基准数据](docs/benchmarks/solver-v31.json)
+- [算法优化说明](docs/algorithm-optimization.zh-CN.md) · [并行库存验证](docs/parallel-inventory-validation.md)
 
-## 质量保证
+基准结果用于比较特定数据集与设备上的实现，不代表所有库存的响应时间或全局最优保证。
 
-发布前质量门禁覆盖：
+## 反馈与贡献
 
-- 护甲规则、预算平衡、可达范围和替换规划。
-- DIM CSV 的 BOM、引号、CRLF、多语言字段和真实属性推断。
-- 套装成员、`2 件 / 4 件 / 2+2` 约束和固定异域。
-- 同哈希不同实例、已有件优先级和待刷建议。
-- Worker 请求、模式切换、目标同步和 390px 响应式布局。
-- Bungie 写入请求体、部分应用错误、能量跳过、已保存配装，以及浏览器端写入路由 mock。
+通过 [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues) 报告问题。
+计算问题请提供版本/渠道、浏览器与系统、六维目标和规则、碎片与模组预算、
+异域/套装/固定件设置，以及预期与实际结果。可附脱敏的最小 CSV 样本，**不要附 OAuth 令牌或完整认证响应**。
 
-## Issues and Contributing / 反馈与贡献
+贡献前运行 `npm run check` 和 `npm run test:browser`；
+涉及离线或桌面功能时补跑对应验证。建议以 `develop` 为目标分支提交 PR。
 
-欢迎通过 [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues) 报告问题或提出建议。计算错误请尽量附上：
+维护者：[@MIGO-OvO](https://github.com/MIGO-OvO) · 反馈群：1104108070。
 
-- 六维目标与碎片变化
-- 模组、异域和套装设置
-- DIM CSV 中相关装备的栏位与属性
-- 预期结果和实际结果
-- 浏览器与操作系统版本
+## 许可与致谢
 
-提交 Pull Request 前请运行：
+代码采用 [MIT License](LICENSE)。
+感谢 [liheng-Huang](https://github.com/liheng-Huang/d2-armor-solver) 提供原始项目，
+[Destiny Item Manager](https://destinyitemmanager.com/) 提供 CSV 导出与配装工作流，
+以及 Bungie 提供 Manifest 与游戏数据 API。
 
-```bash
-npm run check
-npm run test:browser
-```
-
-## License
-
-本项目使用 [MIT License](./LICENSE) 发布。
-
-## Acknowledgements / 致谢
-
-- [liheng-Huang](https://github.com/liheng-Huang) 提供初始版本与源仓库。
-- [MIGO-OvO](https://github.com/MIGO-OvO) 维护当前 fork 与后续版本。
-- [Destiny Item Manager](https://destinyitemmanager.com/) 提供护甲清单导出与 Loadout 工作流。
-- Bungie 提供 Destiny 2 Manifest 与游戏数据接口。
-
-## Contact / 联系方式
-
-维护者：[@MIGO-OvO](https://github.com/MIGO-OvO)
-
-功能和计算规则讨论请优先使用 [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues)。
+Destiny、Destiny 2、相关商标和游戏美术归 Bungie 及相应权利人所有。
+本项目为社区工具，与 Bungie 或 DIM 无隶属关系，也未获其官方认可。

@@ -1,401 +1,250 @@
-# Destiny 2 Armor Solver v2
+![D2 Armor Solver — Optimize your stats. Perfect your build.](./asset/d2-armor-brand.svg)
 
-[English](README.en.md) · [简体中文](README.md)
+# Destiny 2 Armor Solver
 
-[![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
-[![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
-[![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Deploy GitHub Pages](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml)
-[![GitHub Pages](https://img.shields.io/badge/Use%20online-GitHub%20Pages-222?logo=github)](https://migo-ovo.github.io/d2-armor-solver/)
-[![Release](https://img.shields.io/github/v/release/MIGO-OvO/d2-armor-solver?display_name=tag&sort=semver)](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[简体中文](README.md) · [English](README.en.md)
 
-## Overview
+[![Release](https://img.shields.io/github/v/release/MIGO-OvO/d2-armor-solver?sort=semver)](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest)
+[![Checks](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/validate.yml)
+[![Vite 8](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
+[![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&logoColor=white)](https://v2.tauri.app/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A six-stat armor solver for Destiny 2 Armor 3.0. You can work out whether a target is reachable from the theory alone, or import a DIM armor list, or log into Bungie to read your real inventory; from there it picks the best combination from gear you own, holds your set constraints, and lists what you still need to farm.
+A Tier 5 armor planner for Destiny 2 Armor 3.0. Build a theoretical loadout from six stat targets,
+find combinations in your inventory, or plan replacements for your current armor.
+Health, Melee, Grenade, Super, Class, and Weapons share one constraint model with Fragment bonuses,
+Tuning, stat mods, Exotics, and armor sets.
 
-It's a fully static browser app: no backend, and no signup for this project. The root path is a portal with online and offline entry points, and the solver lives under `app/`. Stat targets, DIM lists, and saved builds stay in the current browser. Bungie login only reads your real inventory; when a build is made entirely of items you own, you can equip it in game in one click.
+**Free to use. No project account required. If you paid for this tool, you were scammed.**
+Computation runs locally. Bungie sign-in is optional and only available in configured online deployments.
 
-## Solver V3 result semantics
+[Open solver](https://migo-ovo.github.io/d2-armor-solver/app/) ·
+[User guide](https://migo-ovo.github.io/d2-armor-solver/guide/) ·
+[Download for Windows](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest) ·
+[Project portal](https://migo-ovo.github.io/d2-armor-solver/)
 
-All four solving paths share one integer constraint model, canonical comparator, and result certificate. `EXACT_TARGET_PROVEN` means the returned config, Tuning, and stat mods recompute to the exact target; `RULE_FEASIBLE_PROVEN` means the witness satisfies every hard rule; `INFEASIBLE_PROVEN` is emitted only after exhaustive search; and `SEARCH_LIMIT_REACHED` means current-best witness only, never “no exact solution” or “globally closest.” Presentation limits are applied only after the correctness conclusion.
+## Choose a version
 
-Execution capability is separate. Complete socket, energy, plug, and fixed-Tuning evidence is `VERIFIED`; incomplete evidence is `UNVERIFIED`; a missing owned instance or failed socket preflight is `BLOCKED`. Algorithmic feasibility does not by itself promise one-click equip, so the UI reports both conclusions.
+| Version | Access | Inventory | Requirements |
+| --- | --- | --- | --- |
+| Stable web | [Open main](https://migo-ovo.github.io/d2-armor-solver/app/) | DIM CSV; Bungie sync when configured | Modern browser |
+| Development web | [Preview develop](https://migo-ovo.github.io/d2-armor-solver/dev/app/) | DIM CSV / Bungie | Preview changes; may be unstable |
+| Windows desktop | [Download x64 installer](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe) | DIM CSV; no Bungie sign-in | Windows 10/11 x64 with WebView2 installed |
+| Portable browser build | [Actions artifacts](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml), or build locally | DIM CSV; no Bungie sign-in | Extract and open `index.html`; Chrome / Edge recommended |
 
-## Live Site
+The Windows installer needs no Node.js, Rust, or local server. It does not bundle or install WebView2;
+WebView2 120 or newer is recommended. The installer is unsigned, so Windows may warn about an unknown publisher.
+Download only from this repository's Releases. There is no automatic updater; download a new installer to upgrade.
+See [desktop documentation](docs/desktop.md) for requirements and validation details.
 
-Portal: [https://migo-ovo.github.io/d2-armor-solver/](https://migo-ovo.github.io/d2-armor-solver/)
+The portable browser ZIP is **not a current Release attachment**.
+Push builds retain it as an Actions artifact for 14 days; downloading artifacts normally requires GitHub sign-in.
+Extract the ZIP inside the artifact and open the entry point through `file://`.
+This build runs without Workers, so large inventory searches may briefly block the UI.
+Firefox restrictions on `file://` storage may prevent drafts and saved builds from persisting.
+DIM links can be generated offline, but opening DIM or other external sites requires a connection.
 
-Solver: [https://migo-ovo.github.io/d2-armor-solver/app/](https://migo-ovo.github.io/d2-armor-solver/app/)
+## Quick start
 
-Development build: [https://migo-ovo.github.io/d2-armor-solver/dev/app/](https://migo-ovo.github.io/d2-armor-solver/dev/app/)
+1. Select a class. Start with theoretical armor, import an Armor CSV exported from DIM, or sign in to Bungie online.
+2. Choose build-from-scratch or optimize-current-build mode. The latter can load equipped armor or accept five manually edited pieces.
+3. Set six stat targets, priorities, and exact / at-least / at-most / range rules. Add Fragment changes and mod budgets.
+4. Configure Exotic, Exotic class item perk, and set requirements as needed. Choose Fast / Balanced / Deep search.
+5. Inspect the plan list and details: owned pieces, farming gaps, per-piece Tuning and mods, and replacement steps.
+6. Save a build or export a DIM loadout link. Bungie inventory plans can be equipped only when execution requirements are met.
 
-> `main` is the stable channel, `develop` is the development channel. The two online versions share the language preference and saved builds, but drafts and Bungie login state use separate storage keys so they don't overwrite each other. Browser data isn't migrated automatically between other deployments either.
-
-![Destiny 2 Armor Solver workbench](./asset/web-input.png)
-
-## Offline Use
-
-### Windows desktop installer
-
-[Download the Windows 10/11 x64 offline installer](https://github.com/MIGO-OvO/d2-armor-solver/releases/latest/download/d2-armor-solver-windows-x64-setup.exe) (about 2.22 MB). The Rust/Tauri 2 + React/TypeScript desktop workbench uses sidebar navigation and language selection, with a single scrolling column for parameters and results. The web UI and deployment remain unchanged, and this installer is the only offline package attached to Releases.
-
-WebView2 Runtime must already be installed (120 or newer recommended); it is neither bundled nor downloaded automatically. DIM CSV import, solving and saved loadouts work offline. Bungie login/sync is not yet available in the desktop app. The installer is unsigned. Develop with `npm run desktop:dev`, build with `npm run desktop:build`; see [desktop documentation](docs/desktop.md).
-
-### Browser ZIP (Actions artifacts)
-
-The Release offline package is the Windows installer above. The standalone browser ZIP is no longer attached to Releases; grab `d2-armor-solver-offline.zip` from the [Actions](https://github.com/MIGO-OvO/d2-armor-solver/actions/workflows/deploy-pages.yml) artifacts of any push (kept 14 days), or run `npm run build:offline` locally.
-
-A standalone build that runs fully offline, no Node, npm, or server required:
-
-1. Download the offline package from the Actions artifacts.
-2. Unzip it and open `index.html` in a browser over the `file://` protocol.
-
-The offline package matches the online version, with one difference: it doesn't inject Bungie secrets at build time, so the login entry is hidden. DIM CSV import, solving, and saving builds all run fully offline; the DIM Loadout export link is just a URL, so opening it still needs a network connection.
-
-Browser support:
-
-- Chrome and Edge are fully supported.
-- In Firefox over `file://`, `localStorage` is unavailable, so drafts and saved builds don't survive a refresh. The rest of the app is unaffected.
-
-The offline build runs on the main thread (it doesn't start a Web Worker under `__OFFLINE_MODE__`), so the UI may freeze briefly during a heavy inventory solve. That's expected. Data stays 100% on your machine, same as the online version; the offline build hits no CDN at all.
-
-## Changelog
-
-### v3.1.0 (latest)
-
-- Solver V3.1: exact-target preimage queries now reach the rule-interval Oracle directly with six-dimensional armor intervals; mixed-mode exact search prefilters Balanced selections by target residue before the Cartesian product; the adjustment DP uses integer keys and reuses the bounded dense cache; and Fast / Balanced search profiles are no longer overridden by wrappers. On a 1300-item synthetic inventory the median "hard rules, first feasible" case drops from 1610.8 ms to 145.3 ms, and the Scratch exact Oracle medians drop from 593.0 / 539.7 ms to 66.1 / 39.1 ms, with unchanged witnesses.
-- Inventory proof is now independent of global search status: it no longer depends on completion, the search limit, or cancellation, and a cancelled reachability probe is no longer reported as a failure.
-- Three separate totals: the main six-stat bar shows only the mathematical total, the projected total is the single consistency bridge between execution and the solver, and the installable total appears only in advanced diagnostics and execution hints instead of overwriting the main bar. When a planned write is proven blocked, the piece keeps its installed modifier.
-- New real-DIM regression: one reported inventory recovers both physical exact builds without altering installed mods; automatic inventory stat mods are decoupled from the CSV-installed count; explicit budgets take precedence; and a large zero-installed-mod inventory is not pruned by installed-budget bounds. Parallel inventory solving shards by physical candidate, and unfinished shards stay marked incomplete.
-- Unified Plan and the results workspace: both solving paths feed one list ranked by "qualifying first, then ownership", the result page is rebuilt as plan list + plan detail, the Plan Browser becomes a bounded content-adaptive sticky workspace, and the command bar height is measured instead of assumed.
-- Information architecture and responsiveness: one app-wide width (pixel-identical before and after solving), six-column stat inputs, five-column piece summary, two-column owned-armor and constraint panels, and three replacement lanes on wide screens, collapsing step by step on narrow ones; armor tables, acquisition plans and stat grids switch to container queries.
-- Owned armor and replacement paths: advanced constraints collapse by default, the five-piece editor expands one piece at a time, each replacement step shows current / target / execute lanes, and the acquisition plan counts only real farm requirements.
-- Saved Builds: saved plans are shared across channels while drafts, calculator mode and Bungie login state stay channel-scoped; a new saved-builds drawer supports search, load, rename and delete with undo; an invalidated snapshot only prompts a re-solve and never deletes a build.
-- New standalone trilingual user guide (`/guide/`, Simplified Chinese / Traditional Chinese / English) with shared stable anchors, covering everything from importing inventory and setting rules to reading each results column and saving builds; it replaces the old help drawer.
-- Web, offline and Windows desktop follow this release; the Windows installer is still built on Release and attached to it, and the browser ZIP remains an Actions artifact only.
-- Release validation: the full Node suite, lint, upgrade plan verification, `benchmark:v3`, browser smoke (including 1920/1440/1280 geometry regression), `file://` offline verification and the desktop frontend contract all pass. Full notes: [v3.1.0 Release Notes](./docs/release-notes-v3.1.0.md).
-
-### v3.0.1
-
-- Fixed Upgrade Search missing feasible exact plans at the visible 0/200 boundaries: exact visible rules clamped to "at most 0" / "at least 200" are now treated as exact visible targets using the same clamp preimages as Build from Scratch, instead of falling back to the bounded heuristic sweep.
-- Fixed feasible plans being hidden by the search budget: a verified feasible replacement plan is established and published first, then replacement count is minimized within the remaining budget; when the budget runs out the proof is reported honestly as a feasible upper bound.
-- Fixed inventory interaction state: expanding sections and the loadout being read now survive inventory re-ranking, and passive Bungie refreshes no longer interrupt an open select.
-- Fixed planned tuning display: owned armor now shows the plan's required tuning next to the currently installed tuning mod, flags when it must be changed, and never overwrites real inventory data.
-- Fixed unowned Exotic reservations: picking "Any Exotic (to acquire)" reserves the slot instead of letting an owned Legendary or another Exotic fill it silently, and the reservation survives draft restore.
-- Fixed class-specific set counts: the "owned" count in the set picker only counts armor for the selected class.
-- Release validation: 322 Node tests, browser smoke, upgrade verification, offline verification, and the 1300-item benchmark matrix all pass. Full notes: [v3.0.1 Release Notes](./docs/release-notes-v3.0.1.md).
-
-### v3.0.0
-
-- Solver V3 stable release: the four solving paths share one integer constraint model and result certificate; witness verification and sealing make the certificate the single source of truth for mathematical results, and the UI reports correctness conclusions only from the certificate instead of legacy heuristics.
-- Staged search Fast / Balanced / Deep: they solve the same mathematical problem and only change search budget and proof depth — no game-rule change. Fast never claims infeasibility when it finds no solution; budget exhaustion yields `SEARCH_LIMIT_REACHED`, and only a complete trusted proof produces `INFEASIBLE_PROVEN`.
-- Large-inventory search: retained states / nodes / evaluations are separated, so Deep really gets a larger search budget; 1300-item benchmark scenarios and exact-witness independent-rebuild regression pass. Large inventories remain budget-bounded searches; exhaustive proof exists only when the whole search domain was actually completed.
-- Progressive Search / Worker: progressively verified results, cancellation and generation isolation keep stale Worker results from polluting the UI; Reachability cooperative cancellation preserves proof completeness; Upgrade / fallback use the same V3 correctness boundary.
-- Bungie single-item actions: pull / equip of owned single items with target picking, read-back verification after writes, and ambiguous writes are never blindly replayed.
-- Release validation: 318 Node tests, browser smoke, upgrade verification, offline verification, and the 1300-item benchmark matrix all pass. Full notes: [v3.0.0 Release Notes](./docs/release-notes-v3.0.0.md).
-
-### v2.0.7
-
-- Improved real-inventory search to rank target quality first and keep a broader, target-aware frontier for large inventories, so an exact build is not discarded by an early local score or by saving one more owned piece.
-- Aligned exact rules between the existing-loadout and from-scratch paths. When the fast replacement search misses an exact build, an independent exact-target query now supplies a feasible witness while preserving fixed Legendary `+5` rolls and freely selectable Exotic tuning.
-- Fixed Exotic Class Item right-column tertiary-stat priorities, correcting eight affected `30/25/20` perk combinations involving Wormhusk, Armamentarium, Starfire, Swarm, and Harmony; added regression coverage for all 192 combinations across the three classes.
-
-### v2.0.6
-
-- Fixed stat rules in the "optimize existing loadout" path to match the from-scratch solver: at most / at least / range / exact now all take effect. Ceiling rules judge normality as a ceiling (at or below the cap is met with no shortfall, exceeding shows "over cap" instead of "met"), the search no longer parks a capped stat at its cap, and the "no farming" inventory results share the same rule-aware met markers.
-
-### v2.0.5
-
-- Fixed the "at most / range upper bound" stat rule: when the target total is below the budget and surplus must be spilled somewhere, the capped stat is no longer treated as the cheapest squared-difference dump — the cap is strictly enforced.
-- Fixed the 2+2 dual-set requirement: the two set pickers now build their own options, so the "second set" choice survives re-renders and can actually be selected.
-
-### v2.0.4
-
-- Fixed target rule enforcement: priority and fuzzy constraints (exact / at least / at most / range) now apply strictly, and replacement planning allocates farmable armor to must-meet stats first, never breaking a must-meet constraint to reduce swap count.
-- Fixed tuning roll matching: a Legendary piece's `+5` roll must match the plan, otherwise it's downgraded to farm; an Exotic's `+5` direction stays freely selectable.
-- Fixed Bungie equip: when the character is full, non-plan items are moved aside; per-item equip failures are recorded instead of aborting the whole sequence; per-socket write failures are handled softly; the app re-reads the profile to verify the applied plugs.
-
-### v2.0.3
-
-- Added a portal home page and moved the solver to the `app/` subpath; the root portal offers online / offline entries and three languages.
-- Added Bungie OAuth login and real inventory: cross-save resolution, a pre-generated armor catalog, and inventory deduplication. Builds made entirely of owned items can be equipped in game.
-- Added per-stat priority (high / mid / low) and fuzzy constraints (exact / at least / at most / range) for from-scratch targets. The solver maximizes reachable stats in priority order, then balances the rest.
-- Reworked the stat mode controls: symbol badges became labeled priority / rule controls, and inventory sync moved out of the account menu with a 10-second auto-refresh.
-- Fixed Bungie inventory issues: double-counted mods, aligning actual totals with the DIM export, skipped mods, single-Exotic constraints, and vault slot recovery.
-
-### v2.0.2 algorithm optimization
-
-- Improved upgrade planning: once must-meet stats are satisfied, it prefers plans with fewer swaps.
-- Planning seeds now keep owned armor so exact swap combinations can be found.
-- Added an "only +5/-5 tuning" option.
-
-### v2.0.1 optimized edition
-
-- Renamed to "命运2 T5配装求解器·优化版" with updated footer credits (Ver 2.0.1).
-- Fixed DIM import so bare armor (no tuning or armor mod installed) resolves its fixed +5 roll.
-- Exotic Class Items are recognized by their fixed 30/25/20 roll (Armor Archetype + tertiary stat).
-- Planning no longer rejects owned pieces over a different +5 roll. A whole-assignment feasibility check (pinned +5, free -5, free mods) decides matching and downgrades infeasible pieces back to farm.
-
-### v2.0.0 inventory planning
-
-v2 was a major upgrade around real-inventory builds:
-
-- Import DIM Armor CSV and recognize class, slot, Tier, Exotic, equipped state, base stats, sets, and masterwork level.
-- Infer installed `+3` / `+5/-5` tuning and `+5` / `+10` armor mods from the stats DIM displays.
-- New owned-armor solving: prefer exact matches from inventory and show which slots, Armor Archetypes, and Tuning directions still need farming.
-- Support fixed normal Exotics, Exotic Class Items, and closest-stat comparison between multiple copies of the same Exotic.
-- Support `4-piece`, `2-piece`, and `2+2` set constraints, with 56 built-in Bungie Manifest sets.
-- The set picker lists the full 56-set catalog grouped by activity category (World / Lost Sectors, Vanguard / Gambit, Crucible / PvP, Dungeon, Raid), marks owned piece counts, and previews the selected set's 2pc / 4pc perks and acquisition source.
-- Export owned-armor builds as DIM loadout links carrying armor instances, stat mods, and tuning mods.
-- "Optimize current build" supports must-meet stats, real armor distribution, pinned pieces, and replacement plans sorted by benefit.
-- Reworked the DIM import, inventory results, and replacement-planning UI for desktop, 390px narrow screens, keyboard focus, and status feedback.
-- Solving, reachability, inventory search, and replacement analysis all run in a Web Worker to keep the UI responsive.
-
-See the [v2.0.0 release](https://github.com/MIGO-OvO/d2-armor-solver/releases/tag/v2.0.0) for the full notes.
+The [standalone guide](https://migo-ovo.github.io/d2-armor-solver/guide/) covers workflows, result panels, and FAQs
+in Simplified Chinese, Traditional Chinese, and English.
 
 ## Features
 
-### From-scratch builds
+- **Build from scratch:** derive five armor frames, reachable ranges, Tuning and mod assignments, and target differences.
+- **Inventory planning:** parse DIM instances and installed modifiers, compare copies of the same Exotic,
+  and produce owned-only or owned-plus-farming plans.
+- **Exotics and sets:** pin regular Exotics, reserve unowned Exotics, select Exotic class item perks,
+  and enforce 2-piece, 4-piece, or 2+2 set requirements.
+- **Replacement planning:** preserve pinned pieces and search under hard rules; keep current armor when it already meets the target.
+- **Unified results:** rank plans by rule satisfaction and ownership, with piece details, farming needs,
+  replacement steps, and advanced diagnostics.
+- **Saved builds:** search, load, rename, and delete with undo. Stale snapshots prompt a new search instead of being deleted.
+- **Staged search:** progress, cancellation, and selectable budgets; web and desktop computation uses Web Workers.
+- **Three languages:** Simplified Chinese, Traditional Chinese, and English, with a standalone guide and responsive layouts.
 
-- Set six stat targets: Health, Melee, Grenade, Super, Class, and Weapons.
-- Give each stat a priority (high / mid / low) and a fuzzy constraint (exact / at least / at most / range). The solver maximizes reachable stats in priority order, then balances the rest.
-- Apply Fragment stat changes, `+5` / `+10` armor mods, and `+3` / `+5/-5` tuning.
-- Lock targets, or limit plans to `+5/-5` tuning only.
-- Enumerate five-piece Armor Archetypes and show the target delta, theoretical reachable range, and farming needs.
-- Support Exotic Class Items with class, left/right-column perks, and the fixed `30/25/20` Armor Archetype.
+## Reading solver results
 
-### DIM inventory planning
+V3.1 retains the Solver V3 integer constraint model and result certificates.
+Fast / Balanced / Deep change search budgets and proof depth, not game rules.
+**A feasible result is not necessarily a global optimum. A search limit is not proof of infeasibility.**
 
-- Filter imported armor by class and Tier 5.
-- Match owned armor first, then sort plans by farming count and stat closeness.
-- Pin a normal Exotic by slot and name; multiple copies of the same Exotic are compared automatically by archetype, tertiary stat, and Tuning.
-- Set set requirements for a target plan and make sure the inventory combination or farming suggestion meets the piece count.
-- View plans made entirely of owned armor, or a mixed "owned + to-farm" plan.
+| Status | Meaning |
+| --- | --- |
+| `EXACT_TARGET_PROVEN` | Concrete armor, Tuning, and mods reconstruct the exact target |
+| `RULE_FEASIBLE_PROVEN` | The returned witness satisfies all hard rules |
+| `INFEASIBLE_PROVEN` | A complete, trusted search-domain proof establishes infeasibility |
+| `SEARCH_LIMIT_REACHED` | Coverage is incomplete; a feasible result may exist, but no infeasibility or global-optimum claim follows |
+| `INVALID_INPUT` | Input violates model requirements and must be corrected |
 
-### Optimize current build
+Mathematical proof and execution status are separate.
+`VERIFIED` means execution evidence is complete and passes preflight;
+`UNVERIFIED` means evidence is missing; `BLOCKED` means an instance/socket preflight is blocked;
+`NOT_APPLICABLE` is used for theoretical results without an execution check.
+The main stat display shows mathematical totals. Installable totals belong to execution diagnostics and do not overwrite them.
+Inventory proof is also tracked separately from global search completion.
 
-- Auto-fill the five armor pieces from DIM's currently equipped, or configure each piece by hand.
-- Pin Exotics or any pieces you don't want replaced.
-- Check "must meet" for key stats to satisfy hard constraints before comparing total shortfall.
-- Show current state, the six stats after replacement, the step-by-step replacement order, tuning assignment, and armor mod assignment.
-- When the current gear is already good enough, it says so with a keep-everything plan.
+See [architecture](docs/architecture.md), [consistency audit](docs/v3-consistency-audit.md),
+and [staged search](docs/staged-search.md) for model boundaries and limits.
 
-### Equip in game via Bungie (online)
+### Equip-to-game limitations
 
-- After logging into Bungie and importing your real inventory, builds made entirely of owned instances show an "Equip to game" action. You can pick the target character if you have several of the same class.
-- Before applying, it checks the five instances, class, Exotic Class Item perks, mod unlock state, exact sockets, and armor energy. Stat mods that don't fit the energy are listed as skipped.
-- Custom results are applied as `TransferItem → EquipItems → InsertSocketPlugFree`. Bungie's public API has no endpoint for creating an arbitrary in-game loadout; `EquipLoadout` only applies loadouts you've already saved in game.
-- Saved in-game loadouts are read from `CharacterLoadouts`, so you can apply them directly or load their armor, mods, and Fragment stats back into the optimizer.
-- Custom plans keep the target character's current subclass, aspects, and Fragments. The UI only stores the total Fragment stat change, so it can't reconstruct specific Fragments unambiguously; direct apply is allowed only when the total matches the character's current exact config. To fully switch subclass setups, apply a saved in-game loadout instead.
+- Requires online sign-in, actual owned instances, and application write permissions.
+  CSV data or theoretical frames alone do not provide full execution evidence.
+- Preflight checks class, sockets, plug availability, energy, and fixed Tuning.
+  Unavailable or unaffordable mod writes are reported as skipped or blocked.
+- Custom plans use transfer, equip, and socket-write API calls. Partial failure can leave some operations completed;
+  this is not an atomic transaction.
+- Custom plans preserve the current subclass, Aspects, and Fragments.
+  Direct equip requires the entered Fragment stat sum to match the character's current configuration.
+- Only armor and armor mods are handled, not weapons. Exotic class items require matching real perk rolls;
+  random perks cannot be rewritten.
+- Existing in-game loadouts can be read and applied; this does not create arbitrary new in-game loadouts.
+- Bungie may reject writes during activities. Use orbit, a social space, or an offline character,
+  and rely on preflight, API responses, and read-back verification.
 
-Limitations:
+## Local development
 
-- The character must be in orbit, a social space, or offline; Bungie rejects equipment writes during an activity.
-- Writes depend on the Bungie app having `MoveEquipDestinyItems` enabled. Bungie's OAuth URL doesn't accept a `scope` parameter; permissions are fixed by the app registration.
-- When energy is short, the corresponding mods are skipped and counted; the app doesn't change armor elements on its own, and doesn't promise success for operations that consume materials.
-- Exotic Class Items can only equip an existing instance whose perks match exactly; random perks can't be rewritten.
-- Only the five armor slots and armor mods are handled, not weapons, Ghost, or other slots. If a manual sequence fails partway through, the UI says so, to avoid reporting a full success when only some transfers went through.
-
-### Other features
-
-- Simplified Chinese, Traditional Chinese, and English UI.
-- Drafts, language, mode, and named builds auto-save to `localStorage`.
-- Armor Archetypes use stable English IDs / Bungie Manifest hashes as internal identity. Legacy localized values such as `壁垒` are migrated in place without clearing user data.
-- Official terminology is centralized. Game-specific names with Manifest hashes come only from Bungie Manifest `displayProperties` in all three languages; DIM / light.gg are compatibility or cross-check sources, and Chinese game names are never generated by automatic script conversion.
-- Reduced motion, keyboard operation, clear focus, and `aria-live` status announcements.
-- GitHub Pages and Cloudflare Workers Static Assets share the same production build.
-
-## Usage: import and export DIM
-
-### Import your armor list
-
-In DIM, go through:
-
-```text
-DIM → Settings → Spreadsheets → Armor → Export CSV
-```
-
-Back in the solver, click "Choose DIM CSV". The file is parsed only in your browser, never uploaded.
-
-After importing, it helps to:
-
-1. Pick your class and decide whether to use only Tier 5 armor.
-2. If you want to pin a normal Exotic, choose its slot and name.
-3. Set your six targets, Fragments, and set constraints.
-4. Run the solve and compare owned pieces against what still needs farming.
-
-### Export a DIM loadout
-
-Builds made entirely of owned armor can generate a DIM Loadout link. The link carries DIM instance IDs, stat mods, and tuning mods; make sure your browser is logged into DIM before opening it.
-
-DIM ignores mods your account doesn't own, and armor needs to meet the in-game energy and masterwork requirements before mods can be applied.
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js `22.13.0` or later
-- npm
-- Optional: Chrome or Edge for the browser regression tests
-
-### Install
+Use **Node.js 22.13.0 or newer** and npm. CI uses Node.js 22; `package-lock.json` defines locked dependencies.
 
 ```bash
 git clone https://github.com/MIGO-OvO/d2-armor-solver.git
 cd d2-armor-solver
 npm ci
-```
-
-### Dev server
-
-```bash
 npm run dev
 ```
 
-Open the local address shown in the terminal. On Windows you can also run `start_windows.bat`, which installs missing dependencies and opens a browser.
-
-### Commands
+Open the address printed by Vite. The root is the portal, `/app/` is the solver, and `/guide/` is the guide.
+Bungie environment variables are optional for development; missing configuration hides sign-in.
 
 | Command | Purpose |
 | --- | --- |
-| `npm run dev` | Start the Vite dev server |
-| `npm run build` | Build `dist/` for production |
-| `npm run build:offline` | Build the solver-only `dist-offline/` offline bundle |
-| `npm run preview` | Preview the production build locally |
-| `npm run lint` | Run ESLint |
-| `npm test` | Run the deterministic algorithm tests |
-| `npm run test:upgrade` | Run the randomized replacement-planning regression tests |
-| `npm run test:browser` | Verify the Worker, interactions, and 390px layout in local Chrome/Edge |
-| `npm run verify:offline` | Build and verify the offline bundle over `file://` |
-| `npm run check` | Run lint, tests, replacement regression, and build in order |
-| `npm run deploy` | Deploy Cloudflare static assets with Wrangler |
+| `npm run build` / `npm run preview` | Build `dist/` / preview the production site |
+| `npm run build:offline` | Build `dist-offline/` for `file://` use |
+| `npm run check` | ESLint, Node tests, upgrade regression, production build |
+| `npm run test:consistency` | Witness consistency and V3 differential tests |
+| `npm run test:browser` | Build and run browser smoke/layout regressions |
+| `npm run verify:offline` | Build and verify the portable offline version |
+| `npm run benchmark:v3` / `npm run benchmark:inventory` | V3 / realistic-scale synthetic inventory benchmarks |
+| `npm run desktop:dev` | Start Tauri development |
+| `npm run desktop:test` | Desktop frontend build and browser contract checks |
+| `npm run desktop:build` | Build the Windows x64 NSIS installer |
 
-## Repository Structure
+Browser tests require local Chrome / Edge; set `CHROME_PATH` if automatic discovery fails.
+Native desktop builds also require Rust stable MSVC, Visual Studio C++ Build Tools, and the Windows SDK.
+Installers are written to `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
+See [desktop documentation](docs/desktop.md) for native checks and offline acceptance testing.
+
+## Repository structure
 
 ```text
 d2-armor-solver/
-├─ .github/workflows/        # GitHub Pages continuous deployment
-├─ app/
-│  └─ index.html             # Online solver page (/app/)
-├─ asset/                    # Icon sources and README screenshots
-├─ docs/architecture.md      # Modules, Worker, and storage boundaries
-├─ scripts/
-│  ├─ build.mjs              # Production build and static asset handling
-│  ├─ build-offline.mjs      # Single-entry offline build that runs over file://
-│  ├─ verify-offline.mjs     # Offline bundle browser verification
-│  ├─ browser-smoke.mjs      # Browser regression checks
-│  └─ fetch-armor-mod-data.mjs
-├─ src/
-│  ├─ portal.mjs             # Trilingual portal switching
-│  ├─ app.mjs                # Browser workbench and UI orchestration
-│  ├─ core/
-│  │  ├─ armor-engine.mjs    # Unified solver interface
-│  │  ├─ dim-csv.mjs         # DIM CSV parsing and mod inference
-│  │  ├─ inventory-solver.mjs # Owned-armor combination search
-│  │  ├─ inventory-plan.mjs  # Owned / to-farm mixed planning
-│  │  ├─ bungie-api.mjs      # OAuth, requests, rate limiting, error classification
-│  │  ├─ bungie-inventory.mjs # Bungie inventory and instance/socket mapping
-│  │  ├─ bungie-loadout.mjs  # Equip pre-check, write sequence, saved loadouts
-│  │  ├─ armor-sets.mjs      # Set catalog and activation rules
-│  │  └─ upgrade-optimizer.mjs
-│  ├─ workers/               # Non-blocking algorithm Workers
-│  └─ styles/
-│     ├─ portal.css          # Portal visuals and responsive styles
-│     └─ app.css             # Solver responsive UI styles
-├─ tests/                    # Algorithm, DIM, inventory, and structure tests
-├─ index.html                # Root portal page
-└─ package.json
+├── index.html              # Portal entry
+├── app/                    # Shared solver HTML template
+├── guide/                  # Standalone guide entry
+├── src/
+│   ├── app.mjs             # UI state and result orchestration
+│   ├── core/               # Constraints, solvers, DIM, Bungie, storage, built-in data
+│   ├── workers/            # Worker entry
+│   └── styles/             # Portal, workbench, and guide styles
+├── desktop/                # React + TypeScript shell and shared UI bridge
+├── src-tauri/              # Rust + Tauri 2, permissions, installer configuration
+├── asset/                  # SVG brand hero, icons, and static assets
+├── scripts/                # Builds, data generation, regression checks, benchmarks
+├── tests/                  # Algorithms, inventory, execution contracts, fixtures
+├── docs/                   # Architecture, audits, benchmarks, release notes
+└── .github/workflows/      # Validation, dual-channel Pages, Windows releases
 ```
 
-For more detail on module relationships, see the [architecture notes](./docs/architecture.md).
+The web application uses vanilla JavaScript / HTML / CSS with Vite.
+The desktop React shell mounts the shared template and solver modules; it is not a separate solver or a Rust algorithm port.
 
-## Deployment
+## Deployment and branches
 
-On push, [Deploy stable and development Pages](.github/workflows/deploy-pages.yml):
+Daily development targets `develop`; `main` is stable.
+On pushes to either branch, the [Pages workflow](.github/workflows/deploy-pages.yml) validates and builds both channels,
+placing stable at the root and development under `/dev/` in one GitHub Pages deployment.
+Pushes to any branch also produce portable browser ZIP artifacts retained for 14 days.
 
-1. Builds an offline zip on every branch push and uploads it as an Actions artifact kept for 14 days, for early access.
-2. Installs locked dependencies and runs `npm run check` for both `main` and `develop`, injecting each channel's name and commit at build time.
-3. Places `main`'s portal and solver at the root path and `/app/`, and `develop`'s full build under `/dev/`. The portal's "use online" link always points to stable, with an extra development-build entry.
-4. Verifies both entries, compatibility redirects, static assets, and `versions.json`, then publishes the combined output to a single GitHub Pages site. When a Release is published, the offline zip is attached to it.
+The [Windows workflow](.github/workflows/desktop-windows.yml) builds on relevant code changes, PRs, or manual dispatch,
+and attaches the Windows installer when a Release is published.
+**The Pages workflow does not attach a browser ZIP to Releases.**
+The [validation workflow](.github/workflows/validate.yml) covers check, V3 benchmarks, browser,
+offline, and desktop frontend checks.
 
-Branch convention: day-to-day work goes to `develop`, and merges to `main` only after on-device verification. If either channel's publish fails, GitHub Pages keeps the last successful deploy rather than overwriting the live site with an incomplete build.
+Other static hosts can serve `dist/` after `npm run build`.
+Cloudflare Static Assets configuration is included: run `npx wrangler login`, then `npm run deploy`.
+Bungie login remains disabled unless its configuration and the deployed origin are registered.
 
-Cloudflare deployment:
+### Bungie deployment configuration and security
 
-```bash
-npx wrangler login
-npm run deploy
-```
+The build reads `BUNGIE_API_KEY`, `BUNGIE_OAUTH_CLIENT_ID`, and `BUNGIE_OAUTH_CLIENT_SECRET`.
+The Pages workflow injects matching GitHub Actions Secrets.
+Register the actual Origin and redirect URL with Bungie, and enable `MoveEquipDestinyItems` for equipment writes.
+The stable callback is `https://migo-ovo.github.io/d2-armor-solver/app/`;
+the local callback is `http://localhost:5173/app/`.
+An Origin includes scheme, host, and port, not a path.
 
-`dist/`, `node_modules/`, Wrangler local state, and agent working files are excluded from version control.
+Both published channels share this configuration. Development authorization is forwarded from the stable callback
+to `/dev/app/` and still validates OAuth state. Offline and desktop builds do not enable these credentials.
 
-## Data, privacy, and disclaimer
+**Security limitation: the current implementation compiles the OAuth client secret into the static frontend,
+where visitors can read it.** GitHub Secrets protect values before the build, not published browser code.
+Do not treat this deployment as an architecture that can keep a confidential client secret.
+Evaluate OAuth security before production deployment; secret-bearing token exchange belongs on a trusted server.
+Never commit real credentials, authorization codes, or access tokens to source, issues, or logs.
+This documentation update does not change the authentication implementation.
 
-- Armor sets, item hashes, and mod data come from the Bungie Manifest; the generated static data ships with each release.
-- Destiny, Destiny 2, and related names, trademarks, and game art belong to Bungie and its rights holders.
-- This project is not affiliated with or endorsed by Bungie or Destiny Item Manager.
-- The app never sends your targets, inventory, or builds to a project server.
-- Clearing this site's browser data also deletes drafts and saved builds.
+## Data and privacy
 
-## Bungie login setup
+- Computation is local; targets, CSV files, and plans are not uploaded to a project server.
+  Bungie sign-in, sync, and equipment operations contact Bungie.
+- Drafts, preferences, and saved builds use local storage.
+  **Clearing site or desktop application data removes them.**
+- Same-origin stable and development channels share language and saved builds;
+  drafts, calculation mode, and OAuth state use separate channel keys.
+- Desktop WebView storage, different browsers, and other deployment origins do not automatically share or migrate data.
+- Armor, mod, set, and Fragment catalogs come from Bungie Manifest and ship with project versions;
+  they may lag behind game hotfixes.
 
-Bungie login (OAuth) is used to fetch your real inventory and needs to be configured on the deployment side. Registration and setup are done manually by the repo maintainer:
+## Version and technical documentation
 
-1. Open [bungie.net/en/Application](https://www.bungie.net/en/Application) and create a Bungie app:
-   - Set the client type to `Confidential`.
-   - Register redirect URLs `https://migo-ovo.github.io/d2-armor-solver/app/` and `http://localhost:5173/app/`.
-   - Register origins `https://migo-ovo.github.io` and `http://localhost:5173`. An origin is just protocol, host, and port, without the `/d2-armor-solver/app/` path; the browser's Origin header must match a registered value (no wildcards), or Bungie rejects it with CORS.
-   - When upgrading from an old version, change the redirect URL that pointed at the repo root to the `app/` subpath above, or the OAuth callback lands on the portal and login fails.
-2. Get the three credentials from the app page: `API Key`, `OAuth Client ID`, and `OAuth Client Secret`.
-3. Enable the `MoveEquipDestinyItems` permission in the app console; without it, inventory reads still work but transfers, equipping, and writing mods return permission errors. Have players log in again after changing permissions.
-4. In the GitHub repo, go to `Settings → Secrets and variables → Actions` and add the stable secrets: `BUNGIE_API_KEY`, `BUNGIE_OAUTH_CLIENT_ID`, `BUNGIE_OAUTH_CLIENT_SECRET`.
-5. The development channel reuses the same Bungie app and GitHub secrets. Bungie still calls back to the registered stable `/app/` path; the combined output recognizes OAuth state with the `develop.` prefix and forwards the code and state unchanged to `/dev/app/`, where the development build does its normal state check. Stable state is not forwarded.
-6. Cloudflare deployment has Bungie login off by default (that origin isn't registered on the portal). The build still succeeds without the secrets, and the login and "equip to game" entries hide themselves; the offline build forcibly clears these settings.
+The current source version is **v3.1.0**, including exact-target interval queries, inventory search optimizations,
+the unified plan workspace, cross-channel saved builds, and the standalone three-language guide.
 
-> Never put real secret values in the repo, issues, or any docs; GitHub secrets are injected only during Actions runs.
+- [v3.1.0 release notes](docs/release-notes-v3.1.0.md) · [All releases](https://github.com/MIGO-OvO/d2-armor-solver/releases)
+- [V3.1 optimization and methodology](docs/solver-v31-optimization.md) · [Raw benchmarks](docs/benchmarks/solver-v31.json)
+- [Algorithm optimizations](docs/algorithm-optimization.md) · [Parallel inventory validation](docs/parallel-inventory-validation.md)
 
-## Quality assurance
+Benchmarks compare implementations on specific datasets and hardware;
+they do not guarantee response times or global optimality for every inventory.
 
-The pre-release quality gates cover:
+## Issues and contributions
 
-- Armor rules, budget balancing, reachability, and replacement planning.
-- DIM CSV BOM, quoting, CRLF, multilingual fields, and real-stat inference.
-- Set membership, `2-piece / 4-piece / 2+2` constraints, and pinned Exotics.
-- Same-hash different instances, owned-piece priority, and farming suggestions.
-- Worker requests, mode switching, target sync, and the 390px responsive layout.
-- Bungie write request bodies, partial-apply errors, energy skips, saved loadouts, and browser-side write-route mocks.
+Report problems through [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues).
+For calculation issues, include version/channel, browser and OS, targets and rules, Fragment/mod budgets,
+Exotic/set/pinned-piece settings, and expected versus actual results.
+A minimal anonymized CSV helps. **Do not include OAuth tokens or complete authentication responses.**
 
-## Issues and Contributing
+Run `npm run check` and `npm run test:browser` before contributing;
+also run the relevant offline or desktop checks when changing those paths.
+Prefer pull requests targeting `develop`.
 
-Report problems or suggestions through [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues). For calculation errors, please include:
+Maintainer: [@MIGO-OvO](https://github.com/MIGO-OvO) · Feedback group (QQ): 1104108070.
 
-- The six stat targets and Fragment changes
-- Mod, Exotic, and set settings
-- Slot and stats of the relevant armor in the DIM CSV
-- Expected vs. actual results
-- Browser and OS versions
+## License and acknowledgements
 
-Before submitting a pull request, run:
+Code is available under the [MIT License](LICENSE).
+Thanks to [liheng-Huang](https://github.com/liheng-Huang/d2-armor-solver) for the original project,
+[Destiny Item Manager](https://destinyitemmanager.com/) for CSV exports and loadout workflows,
+and Bungie for the Manifest and game data API.
 
-```bash
-npm run check
-npm run test:browser
-```
-
-## License
-
-Released under the [MIT License](./LICENSE).
-
-## Acknowledgements
-
-- [liheng-Huang](https://github.com/liheng-Huang) provided the initial version and source repository.
-- [MIGO-OvO](https://github.com/MIGO-OvO) maintains this fork and its later versions.
-- [Destiny Item Manager](https://destinyitemmanager.com/) provides armor list export and the Loadout workflow.
-- Bungie provides the Destiny 2 Manifest and game data API.
-
-## Contact
-
-Maintainer: [@MIGO-OvO](https://github.com/MIGO-OvO)
-
-For feature and calculation-rule discussions, prefer [GitHub Issues](https://github.com/MIGO-OvO/d2-armor-solver/issues).
+Destiny, Destiny 2, associated trademarks, and game artwork belong to Bungie and their respective owners.
+This is a community tool, not affiliated with or officially endorsed by Bungie or DIM.
