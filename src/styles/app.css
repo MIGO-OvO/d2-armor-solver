@@ -367,38 +367,6 @@ body {
   letter-spacing: .01em;
   text-transform: none;
 }
-.card--intro {
-  padding: 14px 18px;
-  background: var(--surface-quiet);
-}
-.card--intro summary {
-  color: var(--text) !important;
-  font-size: 13px !important;
-  list-style-position: inside;
-}
-.card--intro summary::marker { color: var(--accent); }
-.card--intro details[open] summary { margin-bottom: 0; }
-.card--intro details > div {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 32px;
-  max-width: none;
-  margin-top: 0 !important;
-  color: var(--text-dim) !important;
-  font-size: 13px !important;
-  line-height: 1.7 !important;
-}
-.card--intro details > div p {
-  max-width: 65ch;
-  margin: 0;
-  padding-top: 16px;
-  border-top: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
-  text-wrap: pretty;
-}
-.card--intro details > div p:first-child {
-  color: var(--text);
-  font-weight: 520;
-}
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(245px, .72fr) minmax(0, 1.65fr);
@@ -545,11 +513,6 @@ input[type="checkbox"]:focus-visible {
 .piece-result .piece-name .emoji { font-size: 17px; }
 .piece-result .detail-grid { gap: 8px 18px; font-size: 12px; }
 .piece-result .piece-stats-row span { border-color: var(--border); background: var(--card); }
-#savedCard { background: var(--surface-quiet); }
-#savedBuildsList > div {
-  border-color: var(--border) !important;
-  background: var(--card) !important;
-}
 #floatJump {
   right: 24px !important;
   bottom: 24px !important;
@@ -645,23 +608,6 @@ input[type="checkbox"]:focus-visible {
   font-size: .8125rem;
   line-height: 1.6;
 }
-.upgrade-import-heading {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-section);
-}
-.upgrade-import-heading > div { min-width: 0; }
-.upgrade-import-heading h3 {
-  margin: 0 0 4px;
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.4;
-}
-.upgrade-import-heading p,
-.set-effects-head p,
 .inventory-results-head p {
   max-width: 82ch;
   margin: 0;
@@ -692,12 +638,6 @@ input[type="checkbox"]:focus-visible {
   outline: 3px solid color-mix(in oklab, var(--focus) 82%, var(--text));
   outline-offset: 3px;
 }
-.upgrade-import-hint {
-  margin: calc(var(--space-control-tight) * -1) 0 0;
-  color: var(--text-dim);
-  font-size: .875rem;
-  line-height: 1.55;
-}
 .upgrade-import-status {
   min-height: var(--touch-target);
 }
@@ -714,13 +654,6 @@ input[type="checkbox"]:focus-visible {
   line-height: 1.6;
 }
 .upgrade-import-counts .icon { color: var(--success); }
-.upgrade-import-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-control);
-  padding: var(--space-control) 0;
-}
 .upgrade-import-actions {
   display: flex;
   align-items: center;
@@ -757,7 +690,7 @@ input[type="checkbox"]:focus-visible {
   min-width: 110px;
   min-height: 38px;
 }
-.upgrade-import-toolbar :disabled {
+.armor-filter-toolbar :disabled {
   cursor: not-allowed;
   opacity: .5;
 }
@@ -842,31 +775,22 @@ input[type="checkbox"]:focus-visible {
   overflow-wrap: break-word;
   word-break: break-word;
 }
-.set-effects-head {
-  display: grid;
-  gap: var(--space-control);
-}
-.set-effects-title {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 1rem;
-}
-.set-requirement-controls {
+.set-requirement-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: var(--space-control);
 }
-.set-requirement-controls label {
+.set-requirement-head label {
   display: inline-flex;
   align-items: center;
   gap: var(--space-control-tight);
   color: var(--text-dim);
   font-size: .875rem;
 }
-.set-requirement-controls label[hidden] { display: none; }
-.set-requirement-controls select {
+.set-requirement-head label[hidden] { display: none; }
+.set-requirement-head select {
   min-width: 0;
   max-width: 260px;
   min-height: 38px;
@@ -2270,17 +2194,6 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   padding-top: var(--import-gap);
 }
 .upgrade-import-body[hidden] { display: none; }
-.upgrade-import-heading {
-  align-items: start;
-  gap: clamp(16px, 2.4vw, 28px);
-}
-.upgrade-import-heading-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .bungie-auth {
   display: inline-flex;
   align-items: center;
@@ -2313,17 +2226,6 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   white-space: nowrap;
 }
 .upgrade-import-toggle .icon { width: 1rem; height: 1rem; }
-.upgrade-import-heading h3 {
-  margin-bottom: 6px;
-  color: var(--text);
-  font-size: 1.0625rem;
-  letter-spacing: -.012em;
-}
-.upgrade-import-heading p {
-  max-width: 68ch;
-  font-size: .875rem;
-  line-height: 1.65;
-}
 .upgrade-import-primary {
   gap: .5rem;
   padding-inline: 16px;
@@ -2339,15 +2241,6 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
 }
 .upgrade-import-primary .icon,
 .upgrade-import-actions .icon { width: 1rem; height: 1rem; }
-.upgrade-import-hint {
-  margin: -6px 0 1px;
-  padding: 9px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: color-mix(in oklab, var(--surface-quiet) 78%, var(--card));
-  font-size: .8125rem;
-  line-height: 1.55;
-}
 .upgrade-import-status { min-height: 0; }
 .upgrade-import-empty,
 .upgrade-import-counts {
@@ -2366,15 +2259,6 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   flex: 0 0 1rem;
   margin-top: .2rem;
   color: var(--success);
-}
-.upgrade-import-toolbar {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: end;
-  gap: 14px 18px;
-  padding: 16px 0 18px;
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
 }
 .import-class-select,
 .import-tier-toggle {
@@ -2538,35 +2422,23 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   padding-top: 20px;
   border-top-color: var(--border-subtle);
 }
-.set-effects-head { gap: 14px; }
-.set-effects-title {
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -.01em;
-}
-.set-effects-head p {
-  max-width: 72ch;
-  font-size: .875rem;
-  line-height: 1.65;
-}
-.set-requirement-controls {
+.set-requirement-head {
   display: flex;
   align-items: end;
   gap: 12px 16px;
 }
-.set-requirement-controls label {
+.set-requirement-head label {
   display: grid;
   grid-template-columns: max-content minmax(140px, 220px);
   align-items: center;
   gap: 10px;
   min-height: var(--touch-target);
 }
-.set-requirement-controls label > span {
+.set-requirement-head label > span {
   color: var(--text-dim);
   font-weight: 650;
 }
-.set-requirement-controls select {
+.set-requirement-head select {
   width: 100%;
   min-height: 42px;
   border-color: var(--border-strong);
@@ -2580,19 +2452,6 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
     gap: 14px;
     padding: 16px;
     border-radius: var(--radius-md);
-  }
-  .upgrade-import-heading {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
-  }
-  .upgrade-import-heading-actions { justify-content: flex-start; }
-  .upgrade-import-heading h3 { font-size: 1rem; }
-  .upgrade-import-hint { margin: -1px 0 0; }
-  .upgrade-import-toolbar {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-    gap: 8px;
-    padding-block: 14px 16px;
   }
   .import-class-select {
     grid-template-columns: 72px minmax(0, 1fr);
@@ -2613,13 +2472,13 @@ body:has(#results.show) .container { max-width: min(1520px, 100%); }
   .bungie-saved-actions .btn-solve { flex: 1; }
   .inventory-solve-options { padding-top: 18px; }
   .inventory-exotic-picker { grid-template-columns: minmax(0, 1fr); }
-  .set-requirement-controls {
+  .set-requirement-head {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
     gap: 8px;
   }
-  .set-requirement-controls label {
+  .set-requirement-head label {
     grid-template-columns: 72px minmax(0, 1fr);
   }
 }
@@ -2710,16 +2569,6 @@ input[type="number"],
 .card h2 {
   font-size: var(--type-heading);
   line-height: 1.35;
-}
-.card--intro summary {
-  min-height: var(--touch-target);
-  display: flex;
-  align-items: center;
-  font-size: .9375rem !important;
-}
-.card--intro details > div {
-  font-size: 1rem !important;
-  line-height: 1.7 !important;
 }
 .input-group label,
 .range-panel-caption,
@@ -3067,9 +2916,6 @@ a:focus-visible {
   font-size: .875rem !important;
   line-height: 1.35;
 }
-#savedCard .danger {
-  font-size: .875rem !important;
-}
 .footer {
   font-size: var(--type-label);
   line-height: 1.65;
@@ -3106,11 +2952,6 @@ a:focus-visible {
     padding-right: max(14px, env(safe-area-inset-right));
   }
   .header .subtitle { font-size: .9375rem; }
-  .card--intro details > div { font-size: .9375rem !important; }
-  .card--intro details > div {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
   .workspace-grid { gap: 12px; }
   .card--fragments .input-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4603,12 +4444,6 @@ a:focus-visible {
   font-size: 1.125rem;
   font-weight: 700;
 }
-.upgrade-plan-copy {
-  max-width: 68ch;
-  color: var(--text-dim);
-  font-size: 1rem;
-  line-height: 1.6;
-}
 .upgrade-plan-steps {
   margin-top: 12px;
   border-top: 1px solid var(--border);
@@ -4947,19 +4782,12 @@ body {
   border-color: var(--border-subtle);
   box-shadow: inset 0 1px 0 oklch(1 0 0 / .025);
 }
-.card--intro,
 .card--fragments {
   background: color-mix(in oklab, var(--surface-quiet) 74%, var(--card));
 }
 .card--targets {
   border-color: color-mix(in oklab, var(--border-strong) 84%, transparent);
   background: color-mix(in oklab, var(--card) 96%, var(--accent) 4%);
-}
-.card--intro summary {
-  border-radius: 6px;
-  transition:
-    color var(--duration-fast) var(--ease-out-quart),
-    background-color var(--duration-fast) var(--ease-out-quart);
 }
 .solver-mode-switch {
   gap: 6px;
@@ -5055,10 +4883,6 @@ a:focus-visible {
   min-height: 2rem;
 }
 @media (hover: hover) {
-  .card--intro summary:hover {
-    color: var(--accent-strong) !important;
-    background: color-mix(in oklab, var(--text) 4%, transparent);
-  }
   .target-stat-group:hover {
     border-color: color-mix(in oklab, var(--border-strong) 88%, transparent);
     background: color-mix(in oklab, var(--surface-raised) 68%, var(--card));
@@ -5874,16 +5698,6 @@ a:focus-visible {
   flex-wrap: wrap;
   gap: 10px 16px;
 }
-.set-requirement-head label {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  color: var(--text-dim);
-  font-size: .75rem;
-  font-weight: 650;
-}
-.set-requirement-head label[hidden] { display: none; }
-.set-requirement-head select { max-width: 22rem; }
 .set-requirement-summary {
   display: flex;
   align-items: center;
@@ -6247,3 +6061,17 @@ body.has-overlay { overflow: hidden; }
   cursor: pointer;
 }
 .witness-breakdown > summary:hover { color: var(--text); }
+
+/* The recommended replacement path is a list of steps, not a three-column
+   card. Pinned explicitly so it cannot inherit the retired setup-column grid. */
+.upgrade-plan-steps { border-top: 0; }
+.upgrade-plan-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 4px 12px;
+  padding: 12px 0;
+}
+.upgrade-plan-step > .upgrade-plan-number { grid-column: 1; grid-row: 1; }
+.upgrade-plan-step > .upgrade-plan-change { grid-column: 2; }
+.upgrade-plan-step > .upgrade-plan-setup-details { grid-column: 2; }

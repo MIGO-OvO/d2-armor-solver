@@ -129,7 +129,7 @@ function stopSearches() {
   document.getElementById('loading')?.classList.remove('show');
   document.getElementById('btnSolve')?.removeAttribute('disabled');
   document.getElementById('btnUpgradeAnalyze')?.removeAttribute('disabled');
-  document.querySelectorAll('.set-requirement-controls select').forEach(control => { control.disabled = false; });
+  document.querySelectorAll('.set-requirement-head select').forEach(control => { control.disabled = false; });
   if (lastSearchResult?.search) lastSearchResult.search = {...lastSearchResult.search, running: false, termination: 'cancelled'};
   document.getElementById('cancelSearch')?.setAttribute('disabled', '');
   const status = document.getElementById('searchStatus');
@@ -5032,7 +5032,7 @@ async function solveInventoryRequirement({
   const requirementSnapshot = snapshotSetRequirement();
   const solveRevision = ++inventorySolveRevision;
   const revision = searchUiRevision;
-  const setControls = [...document.querySelectorAll(".set-requirement-controls select")];
+  const setControls = [...document.querySelectorAll(".set-requirement-head select")];
   const reassignModifiers = fromScratch || document.getElementById("upgradeReassignModifiers")?.checked !== false;
   const inputs = fromScratch ? getOwnedArmorInputs() : null;
   const classItem = fromScratch ? getExoticSettings() : null;
