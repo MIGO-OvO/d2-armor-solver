@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assignArmorMods, executionProjectionMismatch, socketCapabilityConfidence, SOCKET_CONFIDENCE } from "../src/core/armor-mod-assignment.mjs";
+import {
+  assignArmorMods,
+  executionBlockCategory,
+  executionProjectionMismatch,
+  socketCapabilityConfidence,
+  summarizeBlockedReasons,
+  EXECUTION_BLOCK_CATEGORY,
+  SOCKET_CONFIDENCE,
+} from "../src/core/armor-mod-assignment.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
@@ -580,4 +588,164 @@ test("full masterwork with no limits makes mathematical, projected and installab
   assert.equal(result.executionStatus, EXECUTION_STATUS.VERIFIED);
   assert.deepEqual(executionProjectionMismatch(result.actualTotals, result.projectedTotals), []);
   assert.deepEqual(result.actualTotals, result.projectedTotals);
+});
+
+// --- A blocked write must not uninstall what the piece already carries -------
+// `actualTotals` describes the instance AFTER the plan runs. A replacement that
+// is proven impossible changes nothing, so the current modifier stays. Deriving
+// the totals from "the desired writes that succeeded" is what silently deleted
+// an installed +5 health mod whenever a planned +10 weapons could not fit.
+
+test("a blocked stat replacement keeps the modifier the piece already has", () => {
+  // Current: +5 health. Plan: +10 weapons, which needs 3 energy on a 2-capacity
+  // piece. The +10 cannot be written, so the instance ends with +5 health.
+  const items = Array.from({length: 5}, (_, index) => makeItem({
+    index,
+    fixedTuningStat: "health",
+    masterworkTier: 5,
+    capacity: 2,
+    used: 1,
+    currentStat: ["health", 5],
+  }));
+  const result = assignArmorMods({
+    pieces: makePieces(),
+    inventory: items,
+    tuningAssignments: SLOTS.map(() => null),
+    modAssignments: SLOTS.map(() => ({size: 10, stat: "weapons"})),
+  });
+
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
+  assert.ok(result.unassignedMods.some(mod => mod.kind === "stat" && mod.reason === "energy"));
+  assert.equal(result.blockedByCategory.energy, 5);
+  // Powerhouse frame at Tier 5: health 15 base, weapons 10 base per piece.
+  // The still-installed +5 health x5 must survive the failed swap.
+  assert.equal(result.actualTotals.health, 100, "the installed +5 health must stay counted");
+  assert.equal(result.actualTotals.weapons, 50, "the blocked +10 weapons is not counted");
+  // The mathematical plan is untouched by execution reality.
+  assert.equal(result.projectedTotals.weapons, 100);
+  assert.equal(result.projectedTotals.health, 75);
+});
+
+test("a blocked tuning replacement keeps the installed tuning direction", () => {
+  const allStats = ["health", "melee", "grenade", "super", "class", "weapons"];
+  const items = Array.from({length: 5}, (_, index) => {
+    const item = makeItem({
+      index,
+      exotic: true,
+      allowedTuningStats: allStats,
+      masterworkTier: 5,
+      currentTuning: ["health", "weapons"],
+    });
+    // Complete candidate list that does not contain the requested direction.
+    item.sockets[1] = {
+      ...item.sockets[1],
+      candidateState: CANDIDATE_STATE.KNOWN,
+      candidatePlugHashes: new Set([BALANCED_TUNING_MOD_HASH]),
+    };
+    return item;
+  });
+  const result = assignArmorMods({
+    pieces: makePieces(),
+    inventory: items,
+    tuningAssignments: SLOTS.map(() => ({mode: "+5-5", to: "melee", from: "grenade"})),
+    modAssignments: SLOTS.map(() => null),
+  });
+
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
+  assert.ok(result.unassignedMods.some(mod => mod.kind === "tuning" && mod.reason === "plugUnavailable"));
+  assert.equal(result.blockedByCategory.plug, 5);
+  // The piece still carries health:+5 / weapons:-5.
+  assert.equal(result.actualTotals.health, 100, "the installed +5 health tuning must stay");
+  assert.equal(result.actualTotals.weapons, 25, "and its -5 weapons source must stay deducted");
+  // The requested direction is only in the mathematical/projected domain.
+  assert.equal(result.projectedTotals.health, 75);
+  assert.equal(result.projectedTotals.melee, 100);
+});
+
+test("a blocked clear keeps the installed stat mod", () => {
+  const items = Array.from({length: 5}, (_, index) => {
+    const item = makeItem({
+      index,
+      fixedTuningStat: "health",
+      masterworkTier: 5,
+      capacity: 10,
+      used: 3,
+      currentStat: ["weapons", 10],
+    });
+    // No empty plug is exposed, so the clear cannot be named or written.
+    item.sockets[0] = {...item.sockets[0], emptyPlugHash: null};
+    return item;
+  });
+  const result = assignArmorMods({
+    pieces: makePieces(),
+    inventory: items,
+    tuningAssignments: SLOTS.map(() => null),
+    modAssignments: SLOTS.map(() => null),
+  });
+
+  assert.equal(result.executionStatus, EXECUTION_STATUS.BLOCKED);
+  assert.ok(result.unassignedMods.some(mod => mod.kind === "stat" && mod.reason === "cannotClear"));
+  assert.equal(result.blockedByCategory.socket, 5);
+  assert.equal(result.actualTotals.weapons, 100, "a clear that cannot be written leaves the +10 in place");
+  assert.equal(result.actualTotals.health, 75);
+});
+
+test("a clear that IS written removes the modifier (and the queue proves it)", () => {
+  const items = Array.from({length: 5}, (_, index) => makeItem({
+    index,
+    fixedTuningStat: "health",
+    masterworkTier: 5,
+    capacity: 10,
+    used: 3,
+    currentStat: ["weapons", 10],
+  }));
+  const result = assignArmorMods({
+    pieces: makePieces(),
+    inventory: items,
+    tuningAssignments: SLOTS.map(() => null),
+    modAssignments: SLOTS.map(() => null),
+  });
+
+  assert.equal(result.valid, true, JSON.stringify(result.unassignedMods));
+  assert.equal(result.plugOperations.filter(op => op.kind === "stat").length, 5);
+  assert.equal(result.actualTotals.weapons, 50, "a queued clear really does remove the +10");
+});
+
+test("an unknown-capability write stays optimistic: desired lands, status is UNVERIFIED", () => {
+  const items = Array.from({length: 5}, (_, index) => makeUnknownSocketItem({index}));
+  const result = assignArmorMods({
+    pieces: makePieces(),
+    inventory: items,
+    tuningAssignments: SLOTS.map(() => ({mode: "+5-5", to: "health", from: "weapons"})),
+    modAssignments: SLOTS.map(() => ({size: 10, stat: "weapons"})),
+  });
+
+  assert.equal(result.executionStatus, EXECUTION_STATUS.UNVERIFIED);
+  assert.deepEqual(result.unassignedMods, []);
+  assert.deepEqual(result.blockedByCategory,
+    {energy: 0, socket: 0, plug: 0, tuning: 0, instance: 0, consistency: 0});
+  assert.deepEqual(result.actualTotals, result.projectedTotals,
+    "an unverifiable write must be presumed, never downgraded to the current state");
+});
+
+test("blocked reasons are classified into user-facing families", () => {
+  assert.equal(executionBlockCategory("energy"), EXECUTION_BLOCK_CATEGORY.ENERGY);
+  assert.equal(executionBlockCategory("statSocketMissing"), EXECUTION_BLOCK_CATEGORY.SOCKET);
+  assert.equal(executionBlockCategory("tuningSocketMissing"), EXECUTION_BLOCK_CATEGORY.SOCKET);
+  assert.equal(executionBlockCategory("cannotClear"), EXECUTION_BLOCK_CATEGORY.SOCKET);
+  assert.equal(executionBlockCategory("plugUnavailable"), EXECUTION_BLOCK_CATEGORY.PLUG);
+  assert.equal(executionBlockCategory("tuningMismatch"), EXECUTION_BLOCK_CATEGORY.TUNING);
+  assert.equal(executionBlockCategory("invalidAssignment"), EXECUTION_BLOCK_CATEGORY.TUNING);
+  assert.equal(executionBlockCategory("notOwnedInstance"), EXECUTION_BLOCK_CATEGORY.INSTANCE);
+  assert.equal(executionBlockCategory("physicalMismatch"), EXECUTION_BLOCK_CATEGORY.INSTANCE);
+  assert.equal(executionBlockCategory("missingPieces"), EXECUTION_BLOCK_CATEGORY.INSTANCE);
+  assert.equal(executionBlockCategory("witnessTotalsMismatch"), EXECUTION_BLOCK_CATEGORY.CONSISTENCY);
+  assert.equal(executionBlockCategory("somethingNew"), EXECUTION_BLOCK_CATEGORY.INSTANCE,
+    "an unclassified reason must still land in a named family");
+  const counts = summarizeBlockedReasons([
+    {reason: "energy"}, {reason: "energy"}, {reason: "plugUnavailable"},
+  ]);
+  assert.equal(counts.energy, 2);
+  assert.equal(counts.plug, 1);
+  assert.equal(counts.tuning, 0);
 });

@@ -23,8 +23,12 @@
 //                      requested modifier applied. At full masterwork this IS
 //                      the solver's mathematical result, which is why the
 //                      execution/solver consistency check compares against it.
-//   actualTotals     — the installable subset: known-blocked writes contribute
-//                      nothing. Unverified writes DO contribute (see above).
+//   actualTotals     — the instance state after this plan runs, per piece:
+//                      whatever write is queued/current/presumed lands, and
+//                      whatever a *proven-impossible* write would have replaced
+//                      stays installed. A blocked replacement must never erase
+//                      the modifier the piece already carries (see
+//                      `effectiveAssignment` below).
 // Pure functions: no DOM, no fetch, no browser storage.
 
 import {
@@ -59,6 +63,47 @@ export function socketCapabilityConfidence(item) {
   return sockets.every(socket => socket?.candidateState === CANDIDATE_STATE.KNOWN)
     ? SOCKET_CONFIDENCE.KNOWN
     : SOCKET_CONFIDENCE.UNKNOWN;
+}
+
+// Every proven-negative reason belongs to exactly one user-facing family, so
+// the presentation layer never has to pattern-match raw reason strings and can
+// never render a BLOCKED state with an empty "why" area.
+export const EXECUTION_BLOCK_CATEGORY = Object.freeze({
+  ENERGY: "energy",
+  SOCKET: "socket",
+  PLUG: "plug",
+  TUNING: "tuning",
+  INSTANCE: "instance",
+  CONSISTENCY: "consistency",
+});
+
+const BLOCK_CATEGORY_BY_REASON = Object.freeze({
+  energy: EXECUTION_BLOCK_CATEGORY.ENERGY,
+  statSocketMissing: EXECUTION_BLOCK_CATEGORY.SOCKET,
+  tuningSocketMissing: EXECUTION_BLOCK_CATEGORY.SOCKET,
+  cannotClear: EXECUTION_BLOCK_CATEGORY.SOCKET,
+  plugUnavailable: EXECUTION_BLOCK_CATEGORY.PLUG,
+  tuningMismatch: EXECUTION_BLOCK_CATEGORY.TUNING,
+  invalidAssignment: EXECUTION_BLOCK_CATEGORY.TUNING,
+  notOwnedInstance: EXECUTION_BLOCK_CATEGORY.INSTANCE,
+  physicalMismatch: EXECUTION_BLOCK_CATEGORY.INSTANCE,
+  missingPieces: EXECUTION_BLOCK_CATEGORY.INSTANCE,
+  witnessTotalsMismatch: EXECUTION_BLOCK_CATEGORY.CONSISTENCY,
+});
+
+// A reason outside the table is still a proven negative; it is reported as an
+// instance/mapping error rather than silently disappearing from the summary.
+export function executionBlockCategory(reason) {
+  return BLOCK_CATEGORY_BY_REASON[reason] || EXECUTION_BLOCK_CATEGORY.INSTANCE;
+}
+
+export function summarizeBlockedReasons(unassignedMods = []) {
+  const counts = Object.fromEntries(
+    Object.values(EXECUTION_BLOCK_CATEGORY).map(category => [category, 0]));
+  for (const mod of unassignedMods) {
+    counts[executionBlockCategory(mod?.reason)] += 1;
+  }
+  return counts;
 }
 
 // The single invariant that ties the execution rebuild back to the solver.
@@ -155,6 +200,41 @@ function currentTuningHash(item) {
   return 0;
 }
 
+// The instance's *current* modifier, in the same shape as a solver assignment.
+// Needed because a proven-impossible write changes nothing: the piece keeps
+// exactly this, and the installable totals have to say so.
+function currentStatAssignment(item) {
+  const size = Number(item?.armorModSize) || 0;
+  const stat = item?.armorModStat;
+  if (size <= 0 || !STATS.includes(stat)) return null;
+  return { stat, size };
+}
+
+function currentTuningAssignment(item) {
+  if (item?.tuningMode === "plus3") return { mode: "+3", from: null, to: null };
+  if (item?.tuningMode === "shift" && item.tuningTo && item.tuningFrom) {
+    return { mode: "+5-5", from: item.tuningFrom, to: item.tuningTo };
+  }
+  return null;
+}
+
+// The single rule that keeps `actualTotals` describing reality instead of
+// "the desired writes that happened to succeed":
+//
+//   desired already installed        -> effective = desired
+//   desired write queued             -> effective = desired
+//   desired replacement BLOCKED      -> effective = current  (the mod stays!)
+//   desired clear queued             -> effective = null
+//   desired clear BLOCKED            -> effective = current
+//   capability UNKNOWN (optimistic)  -> effective = desired, status UNVERIFIED
+//
+// `settled` already encodes every one of those branches, so the fallback is a
+// one-liner: a settled plan carries the desired state, an unsettled one can
+// only carry what the instance already has.
+function effectiveAssignment(settled, desired, current) {
+  return settled ? desired : current;
+}
+
 function assignPiece({
   item, index, slot,
   desiredStatHash, desiredStatAssignment,
@@ -173,12 +253,16 @@ function assignPiece({
   if (!compatibility.ok) {
     // Nothing is written, so the instance keeps whatever it already carries.
     unassigned.push({ index, slot, kind: "tuning", reason: "tuningMismatch" });
+    const statSettled = desiredStatHash ? desiredStatHash === currentStatModHash(item) : !currentStatModHash(item);
+    const tuningSettled = desiredTuningHash
+      ? desiredTuningHash === currentTuningHash(item)
+      : !currentTuningHash(item);
     return {
       operations, unassigned, unverified,
-      statSettled: desiredStatHash ? desiredStatHash === currentStatModHash(item) : !currentStatModHash(item),
-      tuningSettled: desiredTuningHash
-        ? desiredTuningHash === currentTuningHash(item)
-        : !currentTuningHash(item),
+      statSettled,
+      tuningSettled,
+      effectiveStatAssignment: effectiveAssignment(statSettled, desiredStatAssignment, currentStatAssignment(item)),
+      effectiveTuningAssignment: effectiveAssignment(tuningSettled, desiredTuningAssignment, currentTuningAssignment(item)),
     };
   }
   if (compatibility.unverified) unverified.push({ index, slot, kind: "tuning", reason: "tuningCapabilityUnknown" });
@@ -313,8 +397,9 @@ function assignPiece({
   // `settled` answers "is the requested state in effect once this plan runs":
   // either a write was queued, or the instance already carries exactly that
   // plug, or the capability data cannot disprove the write. Anything proven
-  // impossible (energy, known socket, known availability, mismatch) is excluded
-  // from the installable totals instead of being counted from the request.
+  // impossible (energy, known socket, known availability, mismatch) leaves the
+  // requested state OUT of effect — but it does not remove what is already
+  // installed, which is what `effective*Assignment` reports back.
   const statSettled = desiredStatHash
     ? desiredStatHash === currentStatHash
       || operations.some(op => op.kind === "stat" && op.plugItemHash === desiredStatHash)
@@ -325,7 +410,11 @@ function assignPiece({
       || operations.some(op => op.kind === "tuning" && op.plugItemHash === desiredTuningHash)
       || presumed.tuning
     : !currentTuning || operations.some(op => op.kind === "tuning") || presumed.tuning;
-  return { operations, unassigned, unverified, statSettled, tuningSettled };
+  return {
+    operations, unassigned, unverified, statSettled, tuningSettled,
+    effectiveStatAssignment: effectiveAssignment(statSettled, desiredStatAssignment, currentStatAssignment(item)),
+    effectiveTuningAssignment: effectiveAssignment(tuningSettled, desiredTuningAssignment, currentTuningAssignment(item)),
+  };
 }
 
 // Order the per-piece operations deterministically: stat socket writes first,
@@ -439,13 +528,14 @@ export function assignArmorMods({
     if (statAssignment?.size > 0) resolvedCounts.stat++;
     if (tuningAssignment) resolvedCounts.tuning++;
 
-    // installableTotals: only the requested mods this instance can actually
-    // accept right now, i.e. everything that is not a *proven* negative. An
-    // unverified write (missing socket metadata) is counted, because the plan's
-    // math must not be reduced by data the export never carried.
+    // installableTotals: the instance state after this plan runs. Every queued,
+    // already-installed or presumed write is counted; a write that is *proven*
+    // impossible is not counted as the desired modifier — but the modifier the
+    // piece already carries stays, because a failed replacement does not
+    // uninstall anything. `effective*Assignment` is that value.
     const actual = pieceTotals(item, {
-      tuningAssignment: result.tuningSettled ? tuningAssignment : null,
-      statAssignment: result.statSettled ? statAssignment : null,
+      tuningAssignment: result.effectiveTuningAssignment,
+      statAssignment: result.effectiveStatAssignment,
       projected: false,
     });
     // projectedTotals: the same plan with this piece upgraded to Tier 5. At full
@@ -467,6 +557,9 @@ export function assignArmorMods({
     valid: unassignedMods.length === 0,
     unassignedMods,
     unverifiedMods,
+    // Per-family counts for the presentation layer: a BLOCKED plan always has a
+    // named reason family, so the UI can never show an empty explanation.
+    blockedByCategory: summarizeBlockedReasons(unassignedMods),
     executionStatus: unassignedMods.length > 0
       ? EXECUTION_STATUS.BLOCKED
       : unverifiedMods.length > 0
