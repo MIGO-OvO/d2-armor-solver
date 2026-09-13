@@ -1118,6 +1118,7 @@ export function findExactPartialConfigWitnesses({
   numPlus5,
   numPlus10,
   allowedFreePlus3Counts,
+  numPlus3 = null,
   maxWitnesses = 16,
   checkpoint = null,
 }) {
@@ -1182,6 +1183,7 @@ export function findExactPartialConfigWitnesses({
   for (const fixedSelection of fixedModeSelections) {
     for (const freePlus3Count of counts) {
       if (witnesses.length >= maxWitnesses) break;
+      if (numPlus3 !== null && fixedSelection.fixedPlus3Count + freePlus3Count !== numPlus3) continue;
       const freeShiftCount = freePieceCount - freePlus3Count;
       const expectedTotal = fixedSelection.baseTotals
         .reduce((sum, value) => sum + value, 0)

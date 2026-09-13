@@ -432,6 +432,16 @@ body {
   background: color-mix(in oklab, var(--accent) 6%, var(--card));
 }
 .exotic-settings > label { color: var(--text); font-size: 13px !important; }
+.exotic-mode-toggle {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.exotic-mode-toggle input { flex-shrink: 0; }
 .exotic-settings > label strong { color: var(--accent-strong) !important; }
 .exotic-settings-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
 .exotic-settings p,

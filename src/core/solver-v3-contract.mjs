@@ -908,10 +908,15 @@ export function verifyWitness(problemSpec, witness) {
   const identities = new Set();
   const slots = new Set();
   const inventoryContext = problemSpec?.inventoryContext;
-  const ownedOperation = ["analyzeUpgrade", "solveInventory"].includes(problemSpec?.operation);
+  const planning = inventoryContext?.planInventory === true;
+  const ownedOperation = planning || ["analyzeUpgrade", "solveInventory"].includes(problemSpec?.operation);
   const modeId = mode => mode === "plus3" ? "+3" : mode === "shift" ? "+5-5" : mode;
   if (Object.keys(mods || {}).some(key => !/^[0-4]$/.test(key))) errors.push("invalid armor mod slot");
   const selectedSources = [];
+  if (planning && (capabilities.some(c => c.errors?.length)
+      || new Set(capabilities.map(c => c.identity).filter(Boolean)).size !== capabilities.filter(c => c.identity).length)) {
+    errors.push('invalid planning capability registry');
+  }
   if (Array.isArray(pieces) && pieces.length === 5) {
     if (pieces.filter(piece => piece?.exotic).length > 1) errors.push("multiple Exotic armor pieces");
     for (let index = 0; index < pieces.length; index++) {
@@ -933,7 +938,7 @@ export function verifyWitness(problemSpec, witness) {
         slots.add(piece?.slot);
       }
       if (source) {
-        for (const key of ["hash", "slot", "archetype", "tertiary", "exotic", "setHash", "tunedStat",
+        for (const key of ["hash", "slot", "classId", "archetype", "tertiary", "exotic", "setHash", "tunedStat",
           "allowedTuningStats", "primaryPerkId", "secondaryPerkId"]) {
           if (stableSerialize(source[key]) !== stableSerialize(capability[key])) {
             errors.push(`immutable capability ${identity}.${key} changed`);
@@ -947,7 +952,8 @@ export function verifyWitness(problemSpec, witness) {
         if (source.dataConfidence?.stats === "unknown") errors.push(`unknown base data for ${identity}`);
       }
       if (ownedOperation && !identity) {
-        const knownBase = [...BASE_CONFIGS, ...capabilities.filter(p => p.slot === piece.slot)]
+        const knownBase = [...BASE_CONFIGS, ...capabilities.filter(p => p.slot === piece.slot),
+          ...(planning && inventoryContext.farmExotic?.slot === piece.slot ? [inventoryContext.farmExotic] : [])]
           .some(p => (p.archetype || p.archetypeId) === (piece.archetype || piece.archetypeId)
             && p.tertiary === piece.tertiary && STATS.every(stat => p.baseStats[stat] === piece.baseStats?.[stat]
               || piece.requiresMasterwork && p.projectedBaseStats?.[stat] === piece.baseStats?.[stat]));
@@ -986,7 +992,9 @@ export function verifyWitness(problemSpec, witness) {
           errors.push(`witness tuning ${index} has an invalid directional assignment`);
         } else {
           const allowed = source?.allowedTuningStats ?? capability.allowedTuningStats;
-          if (ownedOperation && !Array.isArray(allowed)) {
+          if (source?.dataConfidence?.tuning === "unknown") {
+            errors.push(`witness tuning ${index} capability is unknown`);
+          } else if (ownedOperation && !Array.isArray(allowed) && !(planning && !identity)) {
             errors.push(`witness tuning ${index} capability is unknown`);
           } else if (Array.isArray(allowed) && !allowed.includes(assignment.to)) {
             errors.push(`witness tuning ${index} changes immutable destination or exceeds capability`);
@@ -1040,8 +1048,21 @@ export function verifyWitness(problemSpec, witness) {
       if (locked.locked && locked.sourceId && !identities.has(String(locked.sourceId))) errors.push("locked inventory piece was replaced");
     }
     const requirement = inventoryContext?.setRequirement;
-    if (inventoryContext?.fixedExotic && !selectedSources.some(piece => matchesFixedExotic(piece, inventoryContext.fixedExotic))) {
+    const farmExotic = planning && inventoryContext.farmExotic;
+    const hasFarmExotic = farmExotic && (pieces || []).some(piece => !piece.sourceId && !piece.id
+      && piece.exotic && piece.slot === farmExotic.slot && piece.hash === farmExotic.hash
+      && piece.archetype === farmExotic.archetype && piece.tertiary === farmExotic.tertiary
+      && STATS.every(stat => piece.baseStats?.[stat] === farmExotic.baseStats?.[stat]));
+    if (inventoryContext?.fixedExotic && !hasFarmExotic
+        && !selectedSources.some(piece => matchesFixedExotic(piece, inventoryContext.fixedExotic))) {
       errors.push('fixed Exotic requirement violated');
+    }
+    if (planning) {
+      if (inventoryContext.classId && selectedSources.some(p => p && p.classId !== inventoryContext.classId)) errors.push('armor class requirement violated');
+      const exotic = (pieces || []).find(p => p.exotic);
+      if (farmExotic ? !exotic || exotic.slot !== farmExotic.slot : Boolean(exotic)) errors.push('planned Exotic slot violated');
+      if (exotic && !exotic.sourceId && !exotic.id && !hasFarmExotic) errors.push('unbound farm Exotic');
+      if ((pieces || []).some(p => p?.exotic && p.setHash)) errors.push('Exotic cannot supply set coverage');
     }
     const count = hash => (pieces || []).filter(p => Number(p?.setHash) === Number(hash)).length;
     if (requirement?.type === "set" && count(requirement.setHash) < requirement.count
@@ -1151,7 +1172,7 @@ export function sealWitness(problemSpec, candidate) {
   // Bind only the used source registry, not a copy of the entire vault per result.
   const ids = new Set((witness.config || witness.pieces).map(p => String(p.sourceId ?? p.id ?? "")));
   witness.problemSpec = structuredClone({ ...problemSpec,
-    pieceCapabilities: problemSpec.operation === "solveInventory"
+    pieceCapabilities: problemSpec.operation === "solveInventory" || problemSpec.inventoryContext?.planInventory
       ? problemSpec.pieceCapabilities.filter(p => !p.identity || ids.has(p.identity)) : problemSpec.pieceCapabilities,
   });
   witness.canonicalId = createCanonicalId(witness);

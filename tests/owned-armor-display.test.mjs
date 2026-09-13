@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
+import {createProblemSpec, createRulesetId} from '../src/core/solver-v3-contract.mjs';
 
 const source = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
 // The five-piece armor table renders one row per piece; an owned piece of a
@@ -46,4 +47,26 @@ test('re-ranking owned plans keeps the solution being read', () => {
   state.refreshInventoryPlansFromSolutions({ rerender: false });
   assert.equal(state.allSolutions[state.currentSolutionIdx], betterOwnedMatch,
     'a new search should still select the best owned match initially');
+});
+
+test('owned plan cache binds original rules/budget as well as inventory revision', () => {
+  let evaluations = 0;
+  const state = vm.createContext({
+    calculatorMode: 'solve', importClassFilter: 'hunter', inventoryExoticSlotFilter: '', inventoryFixedExoticKey: '',
+    document: {getElementById: () => ({checked: false})},
+    snapshotSetRequirement: () => ({type: 'none'}), createCanonicalId: () => 'same-five-pieces', createRulesetId,
+    createOwnedArmorPlanRequest: () => ({}), rankInventoryPlans: () => [{evaluation: ++evaluations}],
+  });
+  vm.runInContext(source.slice(source.indexOf('let ownedPlanRevision ='),
+    source.indexOf('function refreshInventoryPlansFromSolutions(')), state);
+  const original = {problemSpec: createProblemSpec({target: {health: 100}})};
+  const first = state.getOwnedArmorPlan(original);
+  assert.equal(state.getOwnedArmorPlan(original), first);
+  const differentRule = {problemSpec: createProblemSpec({target: {health: 100}, constraints: {minimums: {health: 100}}})};
+  assert.notEqual(state.getOwnedArmorPlan(differentRule), first);
+  const differentBudget = {problemSpec: createProblemSpec({target: {health: 100}, numPlus10: 1})};
+  assert.notEqual(state.getOwnedArmorPlan(differentBudget), first);
+  state.invalidateOwnedPlanCache();
+  assert.notEqual(state.getOwnedArmorPlan(original), first);
+  assert.equal(evaluations, 4);
 });

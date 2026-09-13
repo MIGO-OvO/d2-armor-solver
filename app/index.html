@@ -216,7 +216,7 @@
     <div class="upgrade-target-budget" id="upgradeTargetBudget" aria-live="polite"></div>
     <div id="realtimeRangeSummary" style="margin-top:8px;display:none;" aria-live="polite"></div>
     <div class="exotic-settings">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;">
+      <label class="exotic-mode-toggle" for="useExoticMode">
         <input type="checkbox" id="useExoticMode" onchange="toggleExoticMode()" style="accent-color:var(--accent);width:17px;height:17px;">
         <span data-i18n-html="exoticModeLabel">启用<strong style="color:var(--accent);">异域职业物品模式</strong></span>
       </label>
@@ -230,7 +230,7 @@
         <div class="exotic-settings-grid">
           <div class="input-group">
             <label for="exoticClass" data-i18n="classLabel">职业</label>
-            <select id="exoticClass" onchange="updateExoticPerkOptions()"></select>
+            <select id="exoticClass" onchange="updateExoticPerkOptions({ syncInventory: true })"></select>
           </div>
           <div class="input-group">
             <label for="exoticPrimaryPerk" data-i18n="primaryPerkLabel">主特性（左栏，决定主要/次要属性）</label>

@@ -1513,10 +1513,42 @@ async function checkBungieAuthFlow(browser) {
       );
     }
 
+    // Only the checkbox and its adjacent text activate Exotic Class Item mode.
+    const mode = page.locator('#useExoticMode');
+    await mode.uncheck();
+    await mode.scrollIntoViewIfNeeded();
+    const card = await page.locator('.exotic-settings').boundingBox();
+    const control = await mode.boundingBox();
+    await page.mouse.click(card.x + card.width - 20, control.y + control.height / 2);
+    assert.equal(await mode.isChecked(), false, 'right-hand card whitespace must not toggle mode');
+    await page.evaluate(() => {
+      window.exoticModeChanges = 0;
+      document.getElementById('useExoticMode').addEventListener('change', () => window.exoticModeChanges++);
+    });
+    await mode.click();
+    assert.equal(await mode.isChecked(), true);
+    assert.equal(await page.evaluate(() => window.exoticModeChanges), 1);
+    await page.locator('[data-i18n-html="exoticModeLabel"]').click();
+    assert.equal(await mode.isChecked(), false);
+    assert.equal(await page.evaluate(() => window.exoticModeChanges), 2);
+    await mode.focus();
+    await page.keyboard.press('Space');
+    assert.equal(await mode.isChecked(), true);
+    assert.equal(await mode.evaluate(el => el === document.activeElement), true);
+    assert.equal(await page.evaluate(() => window.exoticModeChanges), 3);
+    await page.locator('#exoticSettingsBody p').click();
+    assert.equal(await mode.isChecked(), true, 'settings body must not toggle mode');
+    await mode.uncheck();
+
     // --- (d2) an Exotic Class Item selection survives a Bungie re-import ---
     // Regression: applyImportedInventory used to clear the Exotic selection on
     // every import, so the Bungie auto-refresh silently dropped the user's
     // fixed Exotic and solutions stopped honoring it.
+    await openAdvancedConstraints(page);
+    await page.locator('#setReqMode').selectOption('split');
+    const refreshSets = await page.locator('#setReqA option').evaluateAll(nodes => nodes.slice(0, 2).map(n => n.value));
+    await page.locator('#setReqA').selectOption(refreshSets[0]);
+    await page.locator('#setReqB').selectOption(refreshSets[1]);
     await page.locator("#useExoticMode").check();
     assert.equal(
       await page.locator("#inventoryExoticSlotFilter").inputValue(),
@@ -1537,6 +1569,12 @@ async function checkBungieAuthFlow(browser) {
       "classItem",
       "a re-import must keep the Exotic Class Item slot filter",
     );
+    await page.locator('#useExoticMode').focus();
+    await page.evaluate(() => window.importInventoryFromBungie({silent: true}));
+    assert.equal(await page.locator('#importClass').inputValue(), 'hunter');
+    assert.equal(await page.locator('#setReqMode').inputValue(), 'split');
+    assert.equal(await page.locator('#setReqA').inputValue(), refreshSets[0]);
+    assert.equal(await page.locator('#setReqB').inputValue(), refreshSets[1]);
     await page.locator("#useExoticMode").uncheck();
 
     // --- (e) saved game loadout and custom solver result cover all write routes ---
@@ -3404,12 +3442,72 @@ async function checkComposedGuides(browser) {
   }
 }
 
+async function checkExoticConstraintState(browser) {
+  const context = await browser.newContext({viewport: {width: 1440, height: 1000}});
+  const page = await context.newPage();
+  try {
+    await page.goto(baseUrl, {waitUntil: 'networkidle'});
+    for (const [classId, mode] of [['titan', 'set4'], ['warlock', 'split'], ['titan', 'set2']]) {
+      await page.locator('#useExoticMode').uncheck();
+      if (await page.locator('#importClass').isHidden()) await page.locator('#toggleInventoryImportButton').click();
+      await page.locator('#importClass').selectOption(classId);
+      await openAdvancedConstraints(page);
+      await page.locator('#setReqMode').selectOption(mode);
+      const options = await page.locator('#setReqA option').evaluateAll(nodes => nodes.map(n => n.value));
+      const a = options[3], b = options[5];
+      await page.locator('#setReqA').selectOption(a);
+      if (mode === 'split') await page.locator('#setReqB').selectOption(b);
+      const check = async () => {
+        assert.equal(await page.locator('#importClass').inputValue(), classId);
+        assert.equal(await page.locator('#exoticClass').inputValue(), classId);
+        assert.equal(await page.locator('#setReqMode').inputValue(), mode);
+        assert.equal(await page.locator('#setReqA').inputValue(), a);
+        if (mode === 'split') assert.equal(await page.locator('#setReqB').inputValue(), b);
+        const draft = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), TEST_STORAGE_KEYS.upgradeDraft);
+        assert.equal(draft.importClassFilter, classId);
+        assert.deepEqual(draft.setRequirement, mode === 'split'
+          ? {type: 'split', a: Number(a), b: Number(b)} : {type: 'set', setHash: Number(a), count: mode === 'set4' ? 4 : 2});
+      };
+      // A direct checkbox click must not let its initial Hunter value win.
+      await page.locator('#useExoticMode').check();
+      await check();
+      await page.locator('#exoticPrimaryPerk').selectOption({index: 1});
+      await page.locator('#exoticSecondaryPerk').selectOption({index: 1});
+      await check();
+      await page.locator('#useExoticMode').uncheck();
+      await check();
+      await page.locator('#inventoryExoticSlotFilter').selectOption('classItem');
+      await check();
+      await page.evaluate(() => window.toggleInventoryImportPanel());
+      await check();
+      const record = {...DIM_FIXTURE.records[1], Equippable: classId === 'titan' ? 'Titan' : 'Warlock'};
+      const csv = [Object.keys(record), Object.values(record)]
+        .map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
+      await page.locator('#dimCsvFile').setInputFiles({name: 'state-regression.csv', mimeType: 'text/csv', buffer: Buffer.from(csv)});
+      await page.waitForFunction(key => JSON.parse(localStorage.getItem(key) || '{}').inventory?.length === 1,
+        TEST_STORAGE_KEYS.upgradeDraft);
+      await check();
+      await page.locator('#dimCsvFile').setInputFiles({name: 'state-refresh.csv', mimeType: 'text/csv', buffer: Buffer.from(csv)});
+      await page.waitForFunction(() => document.getElementById('dimCsvFile').value === '');
+      await check();
+      await page.waitForFunction(({key, classId}) => {
+        const draft = JSON.parse(localStorage.getItem(key) || '{}');
+        return draft.exotic?.enabled && draft.exotic.classId === classId;
+      }, {key: TEST_STORAGE_KEYS.currentDraft, classId});
+      await page.reload({waitUntil: 'networkidle'});
+      await check();
+    }
+    console.log('browser smoke: Exotic class/set state, perks, toggle, render and draft restore OK');
+  } finally { await context.close(); }
+}
+
 let browser;
 try {
   browser = await chromium.launch({
     executablePath: await findChrome(),
     headless: true,
   });
+  await checkExoticConstraintState(browser);
   await checkPortal(browser);
   await checkGuide(browser);
   await checkComposedGuides(browser);

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ARCHETYPES, BASE_CONFIGS, STATS as STAT_IDS, createExoticConfig } from "../src/core/armor-model.mjs";
-import { rankInventoryPlans, assignmentCanReachExact } from "../src/core/inventory-plan.mjs";
+import { rankInventoryPlans, assignmentCanReachExact, sourceSatisfiesRules } from "../src/core/inventory-plan.mjs";
 import { runSolver } from "../src/core/solver.mjs";
-import { createProblemSpec } from "../src/core/solver-v3-contract.mjs";
+import { createProblemSpec, verifyWitness, satisfiesConstraintModel } from "../src/core/solver-v3-contract.mjs";
 import { normalizeDimItem, parseCsv } from "../src/core/dim-csv.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
@@ -278,10 +278,16 @@ test("a bound constraint model decides whether an owned plan qualifies", () => {
   const nearMiss = makeSolution(BASE_CONFIGS.slice(5, 10));
   nearMiss.problemSpec = problemSpec;
   const nearItems = [0, 1, 2, 3, 4].map(index => makeItem(nearMiss, index));
-  const [rejected] = rankInventoryPlans({solutions: [nearMiss], items: nearItems, classId: "hunter"});
-  assert.equal(rejected.rulesFeasible, false);
-  assert.equal(rejected.feasible, false,
-    "a rule-violating witness must never be labelled as a qualifying owned plan");
+  assert.equal(sourceSatisfiesRules(nearMiss), false);
+  const [repaired] = rankInventoryPlans({solutions: [nearMiss], items: nearItems, classId: "hunter"});
+  // The old test assumed a near-miss source ruled out every alternative final
+  // loadout. It must still fail itself, but a newly proved residual plan may
+  // qualify. Check the new evidence, not a label on the old witness.
+  assert.equal(repaired.feasible, true);
+  assert.notEqual(repaired.matchedSolution, nearMiss);
+  assert.equal(verifyWitness(repaired.matchedSolution.problemSpec, repaired.matchedSolution).valid, true);
+  assert.equal(satisfiesConstraintModel(repaired.matchedSolution, problemSpec.constraintModel), true);
+  assert.equal(sourceSatisfiesRules(nearMiss), false);
 });
 
 // ============================================================

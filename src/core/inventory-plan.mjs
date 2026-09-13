@@ -1,7 +1,9 @@
 import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
-import { compareScoreRanks, farmabilityScore } from "./solver.mjs";
+import { compareScoreRanks, farmabilityScore, scoreStatsRank, scoreStats } from "./solver.mjs";
+import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
 import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers, createCanonicalId,
-  satisfiesConstraintModel, STAT_DOMAIN } from "./solver-v3-contract.mjs";
+  satisfiesConstraintModel, STAT_DOMAIN, createPieceCapability, getArmorSolverInput,
+  matchesFixedExotic } from "./solver-v3-contract.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -61,9 +63,10 @@ function getSolutionRequirements(solution, fixedExotic = null) {
     const config = solution.config[index];
     const tuning = solution.tuningAssignments[index];
     const isClassItem = solution.exoticIndex === index;
-    const slot = hasExoticClassItem
+    const defaultSlot = hasExoticClassItem
       ? (isClassItem ? "classItem" : LEGENDARY_SLOTS[legendaryIndex++])
       : INVENTORY_PLAN_SLOTS[index];
+    const slot = config.slot || defaultSlot;
     requirements.push({
       index,
       slot,
@@ -421,7 +424,8 @@ function comparePlans(left, right) {
   if (left.rulesFeasible !== right.rulesFeasible) return left.rulesFeasible ? -1 : 1;
   // Plans whose owned pieces can actually reach the exact totals rank first.
   if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
-  const targetOrder = compareScoreRanks(left.solution?.rank, right.solution?.rank);
+  const targetOrder = compareScoreRanks((left.matchedSolution || left.solution)?.rank,
+    (right.matchedSolution || right.solution)?.rank);
   if (targetOrder !== 0) return targetOrder;
   if (left.farmCount !== right.farmCount) return left.farmCount - right.farmCount;
   if (left.fixedExoticDistance !== right.fixedExoticDistance) {
@@ -432,6 +436,145 @@ function comparePlans(left, right) {
     || createCanonicalId(left.solution).localeCompare(createCanonicalId(right.solution));
 }
 
+// Bind a fresh planning problem to the same target/rules and budget. Physical
+// pieces keep their slots and immutable capabilities; only catalog farm pieces
+// are free variables. This is mathematical feasibility, not execution preflight.
+function planningContext(solution, pool, classId, fixedExotic, setRequirement) {
+  if (!solution.problemSpec?.valid) return null;
+  const exoticIndex = solution.exoticIndex ?? (fixedExotic
+    ? getSolutionRequirements(solution).findIndex(r => r.slot === fixedExotic.slot) : -1);
+  const exoticSlot = solution.exoticIndex != null ? 'classItem' : fixedExotic?.slot;
+  const config = solution.config[exoticIndex];
+  const selection = solution.problemSpec.solverContext?.exoticSelection;
+  const fixed = fixedExotic || (config ? {slot: exoticSlot, classId: selection?.classId || classId,
+    hash: selection?.itemHash, config, primaryPerkId: selection?.primaryPerkId,
+    secondaryPerkId: selection?.secondaryPerkId} : null);
+  const farmExotic = config ? {...config, sourceId: null, id: null, slot: exoticSlot,
+    hash: fixed?.hash ?? config.hash ?? null, exotic: true, setHash: null} : null;
+  const capabilities = pool.map(createPieceCapability);
+  const problem = {...solution.problemSpec, pieceCapabilities: capabilities,
+    inventoryContext: {...solution.problemSpec.inventoryContext, planInventory: true,
+      reassignModifiers: true, modifierBudget: {...solution.problemSpec.budget},
+      classId, fixedExotic: fixed, farmExotic, setRequirement}};
+  const physical = item => {
+    const c = createPieceCapability(item);
+    return {...item, sourceId: c.identity, archetype: c.archetype,
+      baseStats: {...c.projectedBaseStats}, physicalBaseStats: {...c.baseStats},
+      requiresMasterwork: STATS.some(s => c.projectedBaseStats[s] !== c.baseStats[s]),
+      masterworkStats: c.masterworkStats};
+  };
+  const eligible = item => {
+    const c = createPieceCapability(item);
+    return c.identity && c.mathDataKnown && c.masterworkStats?.length === 3
+      && (!classId || item.classId === classId)
+      && (item.slot === exoticSlot ? matchesFixedExotic(item, fixed) : !item.exotic);
+  };
+  return {problem, physical, eligible, farmExotic, pool};
+}
+
+function certifyPlan(plan, context, candidate, chosen, slots, setRequirement) {
+  const missing = slots.map((slot, index) => ({index, requirement: {slot,
+    exotic: slot === context.farmExotic?.slot}})).filter(p => !chosen[p.index]);
+  if (!canCompleteSetRequirement(chosen.filter(Boolean), missing, setRequirement)) return null;
+  const hashes = getSetTargetLabels(missing, chosen.filter(Boolean), setRequirement);
+  const config = candidate.config.map((c, index) => chosen[index] ? context.physical(chosen[index])
+    : {...c, slot: slots[index], exotic: slots[index] === context.farmExotic?.slot,
+      ...(slots[index] === context.farmExotic?.slot ? {hash: context.farmExotic.hash} : {}),
+      setHash: hashes[missing.findIndex(p => p.index === index)] || null});
+  const {target, constraints} = getArmorSolverInput(context.problem);
+  const fresh = {config, tuningAssignments: candidate.tuningAssignments, modAssignments: candidate.modAssignments,
+    exoticIndex: plan.solution.exoticIndex != null ? slots.indexOf('classItem') : null,
+    exoticSelection: plan.solution.exoticSelection,
+    rank: scoreStatsRank(candidate.totals, target, constraints), score: scoreStats(candidate.totals, target, constraints)};
+  const sealed = sealWitness(context.problem, fresh);
+  if (!sealed.valid || !satisfiesConstraintModel(sealed.witness, context.problem.constraintModel)) return null;
+  const witness = sealed.witness;
+  witness.certificate = createResultCertificate({problemSpec: witness.problemSpec, witness,
+    status: 'EXACT_TARGET_PROVEN'});
+  if (witness.certificate.status !== 'EXACT_TARGET_PROVEN') {
+    witness.certificate = createResultCertificate({problemSpec: witness.problemSpec, witness,
+      status: 'RULE_FEASIBLE_PROVEN'});
+  }
+  witness.status = witness.certificate.status;
+  const requirements = getSolutionRequirements(witness);
+  const pieces = requirements.map((r, index) => {
+    const requirement = {...r, slot: slots[index], exotic: config[index].exotic};
+    const closest = chosen[index] ? null : findClosestFixedExotic(context.pool, requirement,
+      context.problem.inventoryContext.fixedExotic, setRequirement);
+    return {...requirement, item: chosen[index] || null,
+      farmSetHash: chosen[index] ? null : config[index].setHash,
+      closestItem: closest?.item || null, closestMismatch: closest?.mismatch || null};
+  });
+  return {...plan, matchedSolution: witness, requirements: pieces.map(({item: _item, ...r}) => r),
+    pieces, slotByConfig: slots, ownedCount: chosen.filter(Boolean).length,
+    farmCount: missing.length, setCoverage: getSetCoverage(chosen.filter(Boolean), setRequirement),
+    feasible: true, rulesFeasible: true, score: witness.score,
+    farmability: farmabilityScore(witness.config, witness.exoticIndex)};
+}
+
+function reoptimizePlan(plan, context, pool, setRequirement, checkpoint) {
+  const rows = INVENTORY_PLAN_SLOTS.map(slot => {
+    const seen = new Set();
+    const candidates = pool.filter(item => item.slot === slot && context.eligible(item))
+      .sort((a, b) => sortCandidates(a, b, setRequirement)).filter(item => {
+        const c = createPieceCapability(item);
+        const key = `${c.mathEquivalenceKey}|${c.classId}|${item.setHash || 0}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    return {slot, candidates};
+  });
+  const chosen = [];
+  let found = null;
+  const inspect = () => {
+    checkpoint();
+    const owned = chosen.filter(Boolean);
+    const missing = rows.map(r => ({requirement: {slot: r.slot,
+      exotic: r.slot === context.farmExotic?.slot}})).filter((_, i) => !chosen[i]);
+    if (!canCompleteSetRequirement(owned, missing, setRequirement)) return;
+    const fixedEntries = owned.map(item => ({config: context.physical(item), allowBalanced: true,
+      allowedDirectionalStats: getItemDirectionalStats(item) || []}));
+    if (context.farmExotic && !chosen[INVENTORY_PLAN_SLOTS.indexOf(context.farmExotic.slot)]) {
+      fixedEntries.push({config: context.farmExotic, allowBalanced: true, allowedDirectionalStats: [...STATS]});
+    }
+    const freePieceCount = 5 - fixedEntries.length;
+    const rules = context.problem.constraintModel.rules;
+    const witnesses = findExactPartialConfigWitnesses({fixedEntries, freePieceCount,
+      minimums: rules.map(r => r.armorMinimum), maximums: rules.map(r => r.armorMaximum),
+      ...context.problem.budget, allowedFreePlus3Counts: Array.from({length: freePieceCount + 1}, (_, i) => i),
+      maxWitnesses: 1, checkpoint});
+    for (const candidate of witnesses) {
+      const freeSlots = INVENTORY_PLAN_SLOTS.filter(slot => !fixedEntries.some(e => e.config.slot === slot));
+      const slots = candidate.config.map((_, i) => i < fixedEntries.length
+        ? fixedEntries[i].config.slot : freeSlots[i - fixedEntries.length]);
+      const assigned = slots.map(slot => chosen[INVENTORY_PLAN_SLOTS.indexOf(slot)] || null);
+      found = certifyPlan(plan, context, candidate, assigned, slots, setRequirement);
+      if (found) return;
+    }
+  };
+  const walk = (index, remaining) => {
+    checkpoint();
+    if (found || remaining < 0 || remaining > 5 - index) return;
+    if (index === 5) { inspect(); return; }
+    if (remaining) for (const item of rows[index].candidates) {
+      if (chosen.some(p => p && (getItemKey(p) === getItemKey(item) || p.classId !== item.classId))) continue;
+      chosen[index] = item;
+      walk(index + 1, remaining - 1);
+      chosen[index] = null;
+      if (found) return;
+    }
+    chosen[index] = null;
+    walk(index + 1, remaining);
+  };
+  const maximum = rows.filter(r => r.candidates.length).length;
+  for (let count = maximum; count > (plan.feasible ? plan.ownedCount : 0); count--) {
+    walk(0, count);
+    if (found) return found;
+  }
+  return null;
+}
+
 export function rankInventoryPlans({
   solutions = [],
   items = [],
@@ -439,6 +582,7 @@ export function rankInventoryPlans({
   fixedExotic = null,
   setRequirement = { type: "none" },
   maxResults = 12,
+  residualSearchLimits = {},
 } = {}) {
   const normalizedSetRequirement = getSetRequirement(setRequirement);
   const pool = items.filter(item => !classId || item.classId === classId).map(normalizePieceNumbers);
@@ -450,6 +594,12 @@ export function rankInventoryPlans({
     eligibleItemsByKey.set(key, bucket);
   }
   const plans = [];
+  const deadline = performance.now() + (residualSearchLimits.maxTimeMs ?? 1500);
+  let nodes = 0;
+  const exhausted = Symbol('inventory-plan search limit');
+  const checkpoint = () => {
+    if (++nodes > (residualSearchLimits.maxNodes ?? 200000) || performance.now() > deadline) throw exhausted;
+  };
 
   for (const solution of solutions) {
     let requirements = getSolutionRequirements(solution, fixedExotic);
@@ -493,7 +643,7 @@ export function rankInventoryPlans({
         return;
       }
       const original = originalRequirements[index];
-      const fixed = solution.exoticIndex === index || solution.config[index].sourceId;
+      const fixed = original.exotic || solution.config[index].sourceId;
       for (const slot of fixed ? [original.slot] : [original.slot, ...INVENTORY_PLAN_SLOTS.filter(slot => slot !== original.slot)]) {
         if (usedSlots.has(slot) || solution.exoticIndex != null && solution.exoticIndex !== index && slot === "classItem") continue;
         const previousEqual = signatures.slice(0, index).lastIndexOf(signatures[index]);
@@ -530,7 +680,7 @@ export function rankInventoryPlans({
       ? pieces.find(piece => piece.slot === fixedExotic.slot)
       : null;
     const rulesFeasible = sourceSatisfiesRules(solution);
-    const plan = {
+    let plan = {
       solution,
       slotByConfig: requirements.map(requirement => requirement.slot),
       matchingProof: {scope: "provided-theoretical-witness", complete: true, slotPermutations: true},
@@ -547,15 +697,19 @@ export function rankInventoryPlans({
       farmability: farmabilityScore(solution.config, solution.exoticIndex),
       score: solution.score,
     };
-    if (solution.problemSpec && requirements.some((requirement, index) => requirement.slot !== solution.config[index].slot)) {
-      const candidate = {...solution, config: solution.config.map((config, index) => ({...config, slot: requirements[index].slot}))};
-      delete candidate.canonicalId;
-      delete candidate.certificate;
-      const sealed = sealWitness(solution.problemSpec, candidate);
-      if (sealed.valid) {
-        plan.matchedSolution = sealed.witness;
-        plan.matchedSolution.certificate = createResultCertificate({problemSpec: solution.problemSpec,
-          witness: sealed.witness, status: solution.status || solution.certificate?.status || "SEARCH_LIMIT_REACHED"});
+    const context = planningContext(solution, pool, classId, fixedExotic, normalizedSetRequirement);
+    if (context) {
+      const certified = certifyPlan(plan, context, solution, assignment.chosen,
+        requirements.map(r => r.slot), normalizedSetRequirement);
+      if (certified) plan = certified;
+      else plan.feasible = false;
+      try {
+        const optimized = reoptimizePlan(plan, context, pool, normalizedSetRequirement, checkpoint);
+        if (optimized) plan = {...optimized, matchingProof: {scope: 'original-constraint-model',
+          complete: false, slotPermutations: true, residualResolve: true}};
+      } catch (error) {
+        if (error !== exhausted) throw error;
+        plan.matchingProof = {...plan.matchingProof, complete: false, residualSearchLimited: true};
       }
     }
     plans.push(plan);

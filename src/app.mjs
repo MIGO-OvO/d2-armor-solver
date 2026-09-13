@@ -39,7 +39,7 @@ import {
   visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
 import { rankInventoryPlans } from "./core/inventory-plan.mjs";
-import { createCanonicalId, createSolutionDisplayModel, assertSolutionConsistency, EXECUTION_STATUS, SOLVER_V3_SCHEMA_VERSION } from "./core/solver-v3-contract.mjs";
+import { createCanonicalId, createRulesetId, createSolutionDisplayModel, assertSolutionConsistency, EXECUTION_STATUS, SOLVER_V3_SCHEMA_VERSION } from "./core/solver-v3-contract.mjs";
 import {
   SAVED_BUILD_LIMIT,
   SAVED_BUILD_SCHEMA_VERSION,
@@ -719,7 +719,12 @@ function toggleExoticMode({ syncInventory = true, refreshInventory = true } = {}
   if (showSettings) updateExoticFramework();
   if (syncInventory && calculatorMode === 'solve') {
     if (enabled) {
-      const classId = document.getElementById('exoticClass')?.value || 'hunter';
+      const classId = importClassFilter || document.getElementById('exoticClass')?.value || 'hunter';
+      const classSelect = document.getElementById('exoticClass');
+      if (classSelect && classSelect.value !== classId) {
+        classSelect.value = classId;
+        updateExoticPerkOptions();
+      }
       importClassFilter = classId;
       inventoryExoticSlotFilter = 'classItem';
       inventoryFixedExoticKey = getExoticClassItemKey(classId);
@@ -729,8 +734,10 @@ function toggleExoticMode({ syncInventory = true, refreshInventory = true } = {}
     }
     renderUpgradeImportPanel();
   } else {
-    updateInventorySolveOptions({ refreshPlans: refreshInventory });
+    renderInventorySolveOptions();
   }
+  saveUpgradeDraft();
+  if (refreshInventory) refreshInventoryPlansFromSolutions();
 }
 
 function renderExoticInputs() {
@@ -804,7 +811,7 @@ function getSelectedExoticClassData() {
     || EXOTIC_CLASSES.hunter;
 }
 
-function updateExoticPerkOptions() {
+function updateExoticPerkOptions({ syncInventory = false } = {}) {
   const data = getSelectedExoticClassData();
   const primary = document.getElementById('exoticPrimaryPerk');
   const secondary = document.getElementById('exoticSecondaryPerk');
@@ -819,12 +826,15 @@ function updateExoticPerkOptions() {
   primary.value = data.primary.some(perk => perk[0] === oldPrimary) ? oldPrimary : data.primary[0][0];
   secondary.value = data.secondary.some(perk => perk[0] === oldSecondary) ? oldSecondary : data.secondary[0][0];
   updateExoticFramework();
-  if (document.getElementById('useExoticMode')?.checked && inventoryExoticSlotFilter === 'classItem') {
+  if (syncInventory && document.getElementById('useExoticMode')?.checked && inventoryExoticSlotFilter === 'classItem') {
     const classId = document.getElementById('exoticClass')?.value || 'hunter';
     if (importClassFilter !== classId || inventoryFixedExoticKey !== getExoticClassItemKey(classId)) {
       importClassFilter = classId;
       inventoryFixedExoticKey = getExoticClassItemKey(classId);
+      invalidateOwnedPlanCache();
       renderUpgradeImportPanel();
+      saveUpgradeDraft();
+      refreshInventoryPlansFromSolutions();
     }
   }
 }
@@ -994,7 +1004,6 @@ function loadCurrentDraft() {
   syncPlus3PreferenceUI();
 
   document.getElementById('useExoticMode').checked = !!draft.exotic?.enabled;
-  toggleExoticMode();
   if (draft.exotic?.enabled) {
     if (draft.exotic.classId && EXOTIC_CLASSES[draft.exotic.classId]) {
       document.getElementById('exoticClass').value = draft.exotic.classId;
@@ -1004,6 +1013,7 @@ function loadCurrentDraft() {
     if (draft.exotic.secondaryPerkId) document.getElementById('exoticSecondaryPerk').value = draft.exotic.secondaryPerkId;
     updateExoticFramework();
   }
+  toggleExoticMode();
   updateBudget();
   scheduleRealtimeRanges();
 }
@@ -1878,7 +1888,8 @@ function ownedPlanCacheKey(solution, allowEmpty) {
   const exoticKey = classItemSettings
     ? `class-item:${classId}`
     : `${inventoryExoticSlotFilter || ''}:${inventoryFixedExoticKey || ''}`;
-  return `${ownedPlanRevision}|${Number(Boolean(allowEmpty))}|${canonicalId}|${requirementKey}|${classId || ''}|${exoticKey}`;
+  const rulesetId = solution.problemSpec ? createRulesetId(solution.problemSpec) : '';
+  return `${ownedPlanRevision}|${Number(Boolean(allowEmpty))}|${canonicalId}|${rulesetId}|${requirementKey}|${classId || ''}|${exoticKey}`;
 }
 
 function getOwnedArmorPlan(solution, { allowEmpty = true, force = false } = {}) {
@@ -2244,13 +2255,11 @@ function getInventoryExoticPickerData() {
   const slots = importClassFilter
     ? EXOTIC_SLOT_ORDER
     : [];
-  if (!slots.includes(inventoryExoticSlotFilter)) {
-    inventoryExoticSlotFilter = "";
-    inventoryFixedExoticKey = "";
-  }
+  const selectedSlot = slots.includes(inventoryExoticSlotFilter) ? inventoryExoticSlotFilter : '';
+  let selectedKey = selectedSlot ? inventoryFixedExoticKey : '';
 
   let names;
-  if (inventoryExoticSlotFilter === 'classItem' && importClassFilter) {
+  if (selectedSlot === 'classItem' && importClassFilter) {
     const key = getExoticClassItemKey(importClassFilter);
     const data = EXOTIC_CLASSES[importClassFilter];
     names = [{
@@ -2264,11 +2273,11 @@ function getInventoryExoticPickerData() {
       },
       count: pool.filter(item => item.slot === 'classItem').length,
     }];
-    inventoryFixedExoticKey = key;
+    selectedKey = key;
   } else {
     const groups = new Map();
     for (const item of pool) {
-      if (item.slot !== inventoryExoticSlotFilter) continue;
+      if (item.slot !== selectedSlot) continue;
       const key = getInventoryExoticKey(item);
       if (!groups.has(key)) groups.set(key, { key, item, count: 0 });
       groups.get(key).count++;
@@ -2276,16 +2285,21 @@ function getInventoryExoticPickerData() {
     names = [...groups.values()].sort((left, right) =>
       String(left.item.name || "").localeCompare(String(right.item.name || ""), localeCode())
     );
-    if (importClassFilter && EXOTIC_SLOTS.has(inventoryExoticSlotFilter)) {
+    if (importClassFilter && EXOTIC_SLOTS.has(selectedSlot)) {
       names.unshift({ key: 'any-exotic', item: {
         name: l('任意异域', '任意異域', 'Any Exotic'),
       }, count: 0 });
     }
   }
-  if (!names.some(entry => entry.key === inventoryFixedExoticKey)) {
-    inventoryFixedExoticKey = "";
-  }
-  return { pool, slots, names };
+  if (!names.some(entry => entry.key === selectedKey)) selectedKey = '';
+  return { pool, slots, names, selectedSlot, selectedKey };
+}
+
+// Normalize at state-changing boundaries, never as a side effect of rendering.
+function normalizeInventoryExoticSelection() {
+  const {selectedSlot, selectedKey} = getInventoryExoticPickerData();
+  inventoryExoticSlotFilter = selectedSlot;
+  inventoryFixedExoticKey = selectedKey;
 }
 
 // Key by content identity, not DOM order: set previews may be reordered.
@@ -2452,7 +2466,7 @@ function renderUpgradeImportPanel() {
     ${getSavedBungieLoadoutsHtml()}
   `;
   updateImportSummary();
-  updateInventorySolveOptions();
+  renderInventorySolveOptions();
   renderSetEffects();
   renderBungieAuthState();
   updateAdvancedConstraintsSummary();
@@ -3580,12 +3594,12 @@ function applyImportedInventory(items, source, { passive = false } = {}) {
     if (classSelect && classSelect.value !== importClassFilter) {
       classSelect.value = importClassFilter;
       updateExoticPerkOptions();
-    } else if (inventoryFixedExoticKey !== getExoticClassItemKey(importClassFilter)) {
-      inventoryFixedExoticKey = getExoticClassItemKey(importClassFilter);
     }
+    inventoryFixedExoticKey = getExoticClassItemKey(importClassFilter);
   }
+  normalizeInventoryExoticSelection();
   renderUpgradeImportPanel();
-  if (passive) refreshInventoryPlansFromSolutions();
+  refreshInventoryPlansFromSolutions();
   saveUpgradeDraft();
 }
 
@@ -3654,7 +3668,10 @@ function updateImportOptions() {
     toggleExoticMode({ syncInventory: false, refreshInventory: false });
   }
   syncBungieTargetCharacter();
+  normalizeInventoryExoticSelection();
   renderUpgradeImportPanel();
+  saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
 }
 
 function updateInventoryExoticSlot() {
@@ -3678,7 +3695,10 @@ function updateInventoryExoticSlot() {
     }
   }
   invalidateOwnedPlanCache();
+  normalizeInventoryExoticSelection();
   renderUpgradeImportPanel();
+  saveUpgradeDraft();
+  refreshInventoryPlansFromSolutions();
   saveCurrentDraft();
 }
 
@@ -3688,6 +3708,14 @@ function updateInventorySolveOptions({ refreshPlans = true } = {}) {
   if (slotSelect) inventoryExoticSlotFilter = slotSelect.value || "";
   if (nameSelect) inventoryFixedExoticKey = nameSelect.value || "";
   invalidateOwnedPlanCache();
+  renderInventorySolveOptions();
+  saveUpgradeDraft();
+  if (refreshPlans) refreshInventoryPlansFromSolutions();
+}
+
+function renderInventorySolveOptions() {
+  const slotSelect = document.getElementById("inventoryExoticSlotFilter");
+  const nameSelect = document.getElementById("inventoryFixedExoticName");
   const exoticClassItemMode = calculatorMode === 'solve' &&
     document.getElementById('useExoticMode')?.checked === true;
   if (slotSelect) slotSelect.disabled = exoticClassItemMode || !importClassFilter;
@@ -3717,8 +3745,6 @@ function updateInventorySolveOptions({ refreshPlans = true } = {}) {
     // line is elided to one caption row instead of a full-width paragraph.
     hint.title = hint.textContent;
   }
-  saveUpgradeDraft();
-  if (refreshPlans) refreshInventoryPlansFromSolutions();
 }
 
 function setImportClass(classId) {
@@ -4563,6 +4589,7 @@ function loadUpgradeDraft() {
     : [];
   manualOwnedSequence = manualOwnedItems.length;
   inventoryImportExpanded = importedInventory.length > 0 && draft?.inventoryImportExpanded !== false;
+  normalizeInventoryExoticSelection();
   invalidateOwnedPlanCache();
   const reassign = document.getElementById('upgradeReassignModifiers');
   if (reassign) reassign.checked = draft?.reassignModifiers !== false;
@@ -7290,7 +7317,11 @@ function applySavedBuildInput(build) {
   }
   syncPlus3PreferenceUI();
   document.getElementById('useExoticMode').checked = !!input.exotic?.enabled;
-  toggleExoticMode();
+  // Loading a saved input is an explicit state replacement, unlike enabling
+  // the checkbox. Adopt its class before the one-way Exotic synchronization.
+  if (EXOTIC_CLASSES[input.classFilter || input.exotic?.classId]) {
+    importClassFilter = input.classFilter || input.exotic.classId;
+  }
   if (input.exotic?.enabled) {
     if (input.exotic.classId && EXOTIC_CLASSES[input.exotic.classId]) {
       document.getElementById('exoticClass').value = input.exotic.classId;
@@ -7300,11 +7331,13 @@ function applySavedBuildInput(build) {
     if (input.exotic.secondaryPerkId) document.getElementById('exoticSecondaryPerk').value = input.exotic.secondaryPerkId;
     updateExoticFramework();
   }
+  toggleExoticMode();
   if (input.setRequirement?.type) {
     setRequirement = snapshotSetRequirement(input.setRequirement);
     invalidateOwnedPlanCache();
     renderSetEffects();
   }
+  saveUpgradeDraft();
   updateBudget();
   return input;
 }
