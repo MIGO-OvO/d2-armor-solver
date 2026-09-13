@@ -1589,7 +1589,7 @@ async function checkBungieAuthFlow(browser) {
         await page.locator(".bungie-equip-hint").innerText(),
     );
     await equipButton.click();
-    await page.waitForFunction(() => /五件护甲与全部模组已装备|护甲与模组已装备|已装备 \d\/5 件护甲|装备到游戏失败|已完成部分/.test(
+    await page.waitForFunction(() => /五件护甲与(?:可安装)?模组已装备|护甲与模组已装备|已装备 \d\/5 件护甲|装备到游戏失败|已完成部分/.test(
       document.getElementById("bungieEquipStatus")?.textContent || "",
     ));
     assert.equal(writeRequests.transfer.length, 5, "five vault armor pieces should transfer");
@@ -1597,7 +1597,7 @@ async function checkBungieAuthFlow(browser) {
     const customEquipStatus = await page.locator("#bungieEquipStatus").innerText();
     assert.ok(
       writeRequests.insertPlug.length > 0 ||
-        /五件护甲与(?:全部)?模组已装备/.test(
+        /五件护甲与(?:可安装)?模组已装备/.test(
           customEquipStatus,
         ),
       "the custom plan must either write its sockets or explicitly report an armor-only apply: " +
