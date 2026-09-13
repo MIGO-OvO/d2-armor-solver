@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 
 import { saveToken } from "../src/core/bungie-api.mjs";
 import {
@@ -29,6 +31,24 @@ globalThis.__BUNGIE_OAUTH_CLIENT_SECRET__ = "test-secret";
 
 const ORIG_FETCH = globalThis.fetch;
 const ORIG_LOCAL_STORAGE = globalThis.localStorage;
+
+test("equip UI allows missing or different fragments and unverified mod evidence", () => {
+  const source = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
+  const gate = source.slice(source.indexOf("function getInventorySolutionEquipState("),
+    source.indexOf("function showBungieEquipMessage("));
+  for (const subclass of [undefined, {adjustments: {health: -10}}]) {
+    const plan = {valid: true, assignment: {executionStatus: "UNVERIFIED"}};
+    const context = {__BUNGIE_OAUTH_CLIENT_ID__: "client", hasToken: () => true,
+      importSource: "bungie", bungieTargetCharacterId: "target", importClassFilter: "hunter",
+      bungieProfileState: {characters: {target: {}}, currentSubclassByCharacter: {target: subclass}},
+      syncBungieTargetCharacter: () => {}, importedInventory: [], isBungieApplying: false,
+      getUpgradeFragments: () => ({health: 10}), buildCustomLoadoutPlan: () => plan,
+      l: value => value};
+    const state = runInNewContext(gate + "\ngetInventorySolutionEquipState({verified: true})", context);
+    assert.equal(state.available, true);
+    assert.equal(state.plan, plan);
+  }
+});
 
 function installAuth() {
   const store = new Map();
@@ -470,7 +490,7 @@ test("a disabled single owned-armor action with a replacement source equips the 
   }
 });
 
-test("energy-incompatible stat mods block the plan and never skip to success", () => {
+test("energy-incompatible mods are deferred without bypassing exotic perk checks", () => {
   const fixture = customPlanFixture({ energyCapacity: 2, energyUsed: 3 });
   fixture.pieces[4] = {
     ...fixture.pieces[4],
@@ -489,12 +509,37 @@ test("energy-incompatible stat mods block the plan and never skip to success", (
   });
   assert.equal(plan.valid, false);
   assert.ok(plan.errors.some(error => error.code === "exoticPerkMismatch"));
-  // The five energy-infeasible +10 mods are BLOCKING errors now (capacity 2,
-  // used 3 -> a 3-cost mod cannot fit), not skippedMods.
-  assert.equal(plan.errors.filter(error => error.code === "energy").length, 5);
+  assert.equal(plan.errors.filter(error => error.code === "energy").length, 0);
   assert.equal(plan.assignment.unassignedMods.length, 5);
-  assert.deepEqual(plan.skippedMods, []);
+  assert.equal(plan.skippedMods.length, 5);
   assert.equal(plan.plugOperations.filter(operation => operation.kind === "tuning").length, 5);
+});
+
+test("non-masterworked armor can equip while energy-incompatible mods wait for the user", async () => {
+  const fixture = customPlanFixture({ energyCapacity: 2, energyUsed: 3 });
+  fixture.inventory.forEach(item => { item.masterworkTier = 0; });
+  const plan = buildCustomLoadoutPlan({membershipType: 3,
+    targetCharacterId: "character-1", classId: "hunter", ...fixture});
+  assert.equal(plan.valid, true, JSON.stringify(plan.errors));
+  assert.equal(plan.equipItemIds.length, 5);
+  assert.equal(plan.skippedMods.length, 5);
+  assert.equal(plan.expectedArmorTotals, null);
+  assert.equal(plan.expectedSocketPlugs.length, 5);
+  assert.ok(plan.plugOperations.every(op => op.kind === "tuning"));
+  installAuth();
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push(url);
+    const body = JSON.parse(options.body);
+    return jsonResponse({ErrorCode: 1, Response: url.includes("EquipItems")
+      ? {equipResults: body.itemIds.map(itemInstanceId => ({itemInstanceId, equipStatus: 1}))} : {}});
+  };
+  try {
+    const result = await applyCustomLoadoutPlan(plan, {delays: false, verify: false});
+    assert.equal(result.completed.targetEquip, 5);
+    assert.equal(result.skippedMods.length, 5);
+    assert.equal(calls.filter(url => url.includes("InsertSocketPlugFree")).length, 5);
+  } finally { restoreGlobals(); }
 });
 
 test("preflight rejects only permanently unequippable armor (level restriction)", () => {

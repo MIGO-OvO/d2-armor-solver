@@ -519,7 +519,7 @@ export function buildCustomLoadoutPlan({
 
   // Global assignment over the five real instances: exact socket resolution,
   // tri-state availability, energy feasibility, fixed-tuning compatibility.
-  // Any unassignable mod BLOCKS the plan — there is no skipped-success path.
+  // Energy upgrades are user-managed; defer only energy-incompatible mods.
   const assignment = assignArmorMods({
     pieces,
     inventory: resolvedItems,
@@ -544,6 +544,10 @@ export function buildCustomLoadoutPlan({
     } catch { errors.push({code: "unverifiedWitness"}); }
   }
   for (const miss of assignment.unassignedMods) {
+    if (miss.reason === "energy") {
+      warnings.push({ ...miss, code: "energy" });
+      continue;
+    }
     errors.push({
       code: MISS_REASON_TO_ERROR_CODE[miss.reason] || "plugUnavailable",
       index: miss.index,
@@ -637,10 +641,7 @@ export function buildCustomLoadoutPlan({
     valid: errors.length === 0,
     errors,
     warnings,
-    // Legacy compatibility: the old flow could skip energy-incompatible mods
-    // and still report success. That success semantics is gone — any unplaced
-    // mod is a blocking error above — so the list is always empty.
-    skippedMods: [],
+    skippedMods: assignment.unassignedMods.filter(miss => miss.reason === "energy"),
     membershipType: Number(membershipType),
     membershipId: membershipId ? String(membershipId) : null,
     targetCharacterId: String(targetCharacterId || ""),
@@ -648,8 +649,12 @@ export function buildCustomLoadoutPlan({
     classType: characterClassType,
     assignment,
     witnessCanonicalId: verifiedWitness?.canonicalId || null,
-    expectedArmorTotals: verifiedWitness?.armorTotals || null,
-    expectedSocketPlugs: assignment.expectedSocketPlugs,
+    // Verify armor identities and applied sockets, not projected masterwork stats.
+    expectedArmorTotals: null,
+    expectedSocketPlugs: assignment.expectedSocketPlugs.filter(expected =>
+      !assignment.unassignedMods.some(miss => miss.reason === "energy"
+        && String(pieces[miss.index]?.sourceId) === expected.itemId
+        && Number(miss.plugHash) === Number(expected.plugItemHash))),
     preparationTransfers,
     sourceEquips: [...sourceEquipByCharacter].map(([characterId, itemIds]) => ({
       characterId,
@@ -1056,7 +1061,7 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
 
     return {
       completed,
-      skippedMods: [],
+      skippedMods: plan.skippedMods || [],
       equipFailures,
       transferFailures,
       plugFailures,

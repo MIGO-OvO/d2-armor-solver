@@ -2985,10 +2985,6 @@ function setFragmentAdjustmentsToUI(adjustments) {
   scheduleRealtimeRanges();
 }
 
-function fragmentAdjustmentsMatch(left, right) {
-  return STATS.every(stat => (Number(left?.[stat]) || 0) === (Number(right?.[stat]) || 0));
-}
-
 const BUNGIE_WEAPON_BUCKET_TERMS = new Map([
   [1498876634, "kineticWeapon"],
   [2465295065, "energyWeapon"],
@@ -3271,17 +3267,6 @@ function getInventorySolutionEquipState(entry) {
   syncBungieTargetCharacter();
   const target = bungieProfileState.characters?.[bungieTargetCharacterId];
   if (!target) return { available: false, reason: l("没有匹配职业的目标角色。", "沒有相符職業的目標角色。", "No matching target character was found.") };
-  const subclass = bungieProfileState.currentSubclassByCharacter?.[bungieTargetCharacterId];
-  if (!subclass || !fragmentAdjustmentsMatch(subclass.adjustments, getUpgradeFragments())) {
-    return {
-      available: false,
-      reason: l(
-        "碎片数值不是该目标角色当前分支职业的精确配置；当前界面只保存数值总和，无法无歧义反推具体碎片。请填入该角色当前穿戴，或直接应用游戏内已存配装。",
-        "碎片數值不是該目標角色目前副職業的精確配置；目前介面只儲存數值總和，無法無歧義反推具體碎片。請填入該角色目前穿著，或直接套用遊戲內已存配裝。",
-        "The Fragment totals do not match this character's exact current subclass. Totals cannot uniquely identify specific Fragments; fill the current loadout or apply an in-game saved loadout.",
-      ),
-    };
-  }
   const plan = buildCustomLoadoutPlan({
     membershipType: bungieProfileState.membershipType,
     membershipId: bungieProfileState.membershipId,
@@ -3298,8 +3283,6 @@ function getInventorySolutionEquipState(entry) {
   if (!plan.valid) {
     return { available: false, reason: bungiePlanErrorMessage(plan.errors[0]), plan };
   }
-  if (plan.assignment.executionStatus !== 'VERIFIED') return {available: false, plan,
-    reason: l('UNVERIFIED：执行证据不足。', 'UNVERIFIED：執行證據不足。', 'UNVERIFIED: execution evidence is incomplete.')};
   return {
     available: !isBungieApplying,
     plan,
@@ -3416,9 +3399,9 @@ async function equipInventorySolution(index) {
     }
     showBungieEquipMessage(
       l(
-        "五件护甲与全部模组已装备，并经回读核对一致。分支职业、星相与碎片保持目标角色当前精确配置。",
-        "五件防具與全部模組已裝備，並經回讀核對一致。副職業、相位與碎片保持目標角色目前精確配置。",
-        "All five armor pieces and every mod were equipped and confirmed by a verification read-back. The target character's exact subclass, Aspects, and Fragments were preserved.",
+        `五件护甲与可安装模组已装备，并经回读核对一致。${result.skippedMods.length} 个模组因能量不足未安装。请自行升级护甲为大师、补装模组并选择方案所需碎片；当前属性可能与方案不同。`,
+        `五件防具與可安裝模組已裝備，並經回讀核對一致。${result.skippedMods.length} 個模組因能量不足未安裝。請自行升級大師之作、補裝模組並選擇方案所需碎片；目前數值可能與方案不同。`,
+        `All five armor pieces and installable mods were verified. ${result.skippedMods.length} mods were deferred for insufficient energy. Upgrade masterwork, install deferred mods and select the planned Fragments yourself; current stats may differ.`,
       ),
       "info",
     );
@@ -5849,9 +5832,9 @@ function renderInventoryBungieEquip(entry, index) {
   if (equipState.hidden) return "";
   const targetOptions = getBungieTargetOptionsHtml();
   const hint = equipState.reason || l(
-    "自检通过。将自动转移并穿戴五件护甲、写入全部模组，并在写入后回读核对；保持目标角色当前的分支职业、星相与碎片。请先确保角色在轨道、社交空间或离线。",
-    "自檢通過。將自動轉移並穿著五件防具、寫入全部模組，並在寫入後回讀核對；保持目標角色目前的副職業、相位與碎片。請先確保角色在軌道、社交空間或離線。",
-    "Preflight passed. The app will transfer and equip all five armor pieces, insert every mod, then re-read and verify; it preserves the target character's current subclass, Aspects, and Fragments. Make sure the character is in orbit, a social space, or offline.",
+    "将转移并穿戴五件护甲、安装可用模组并回读核对。能量不足的模组暂不安装；大师升级、补装模组及碎片选择由你自行完成，当前属性可能与方案不同。请确保角色在轨道、社交空间或离线。",
+    "將轉移並穿著五件防具、安裝可用模組並回讀核對。能量不足的模組暫不安裝；大師升級、補裝模組及碎片選擇由你自行完成，目前數值可能與方案不同。請確保角色在軌道、社交空間或離線。",
+    "Transfers and equips five armor pieces, installs available mods and verifies the result. Energy-incompatible mods are deferred. Handle masterwork, deferred mods and Fragments yourself; current stats may differ. Be in orbit, a social space, or offline.",
   );
   return `<section class="bungie-equip-panel" aria-labelledby="bungieEquipTitle">
     <div class="bungie-equip-copy">
