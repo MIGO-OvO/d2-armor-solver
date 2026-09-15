@@ -5363,17 +5363,17 @@ function buildUnifiedLoadouts() {
     }
   }
   // A fully owned theoretical skeleton and an inventory witness describe the
-  // same five pieces. The inventory entry wins because it carries execution
-  // preflight; dropping the duplicate is what removes the "shown twice" plan.
+  // same five pieces, but may carry different Tuning/mod assignments. Keep the
+  // stronger witness first; a near miss must never erase an exact assignment.
+  // Stable ties retain the inventory entry and its execution preflight.
   const seen = new Set();
   const merged = [];
-  for (const entry of entries) {
+  for (const entry of entries.sort(compareUnifiedEntries)) {
     const key = unifiedEntryKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(entry);
   }
-  merged.sort(compareUnifiedEntries);
   unifiedCache = { key: cacheKey, solutions: allSolutions, entries: merged };
   return merged;
 }
@@ -5394,7 +5394,7 @@ function renderInventoryResults(result) {
 const PLAN_FILTERS = {
   all: () => true,
   qualifying: entry => entry.feasible === true,
-  owned: entry => entry.farmCount === 0,
+  owned: entry => entry.feasible === true && entry.farmCount === 0,
   lowfarm: entry => entry.farmCount <= 1,
 };
 
@@ -5418,7 +5418,7 @@ function planCounts(entries) {
   return {
     total: entries.length,
     qualifying: entries.filter(entry => entry.feasible === true).length,
-    owned: entries.filter(entry => entry.farmCount === 0).length,
+    owned: entries.filter(PLAN_FILTERS.owned).length,
     lowfarm: entries.filter(entry => entry.farmCount <= 1).length,
   };
 }

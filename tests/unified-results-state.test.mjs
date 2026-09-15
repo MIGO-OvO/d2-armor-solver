@@ -30,6 +30,7 @@ const api = vm.runInContext(`(() => {
     "unifiedEntryKey",
     "compareUnifiedEntries",
     "normalizeInventoryEntry",
+    "normalizeTheoryPlan",
     "buildUnifiedLoadouts",
     "resolveSelectedRowIndex",
   ].map(name => source.slice(source.indexOf(`function ${name}(`)).split("\nfunction ")[0]).join("\n")}
@@ -89,6 +90,29 @@ test("an unchanged inventory result is still served from the projection cache", 
   const first = api.buildUnifiedLoadouts();
   const second = api.buildUnifiedLoadouts();
   assert.equal(first, second, "no change must not re-project");
+});
+
+test('a fully owned exact theory assignment survives dedup against an inventory near miss', t => {
+  const originalRequest = context.createOwnedArmorPlanRequest;
+  const originalRank = context.rankInventoryPlans;
+  t.after(() => {
+    context.createOwnedArmorPlanRequest = originalRequest;
+    context.rankInventoryPlans = originalRank;
+    api.acceptInventory(null);
+  });
+  const pieces = ['helmet', 'arms', 'chest', 'legs', 'classItem'].map(slot => ({slot, sourceId: slot}));
+  const exact = witness('unused', {pieces});
+  context.createOwnedArmorPlanRequest = () => ({});
+  context.rankInventoryPlans = () => [{solution: exact, pieces, feasible: true, ownedCount: 5, farmCount: 0}];
+  api.acceptInventory({results: [witness('unused', {pieces, certificate: {status: 'SEARCH_LIMIT_REACHED'}})]});
+  const merged = api.buildUnifiedLoadouts();
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].feasible, true);
+  assert.equal(merged[0].exact, true);
+  assert.equal(merged[0].kind, 'theory');
+  // Equal-quality duplicates still prefer inventory execution preflight.
+  api.acceptInventory({results: [exact]});
+  assert.equal(api.buildUnifiedLoadouts()[0].kind, 'inventory');
 });
 
 // --- Search metadata --------------------------------------------------------

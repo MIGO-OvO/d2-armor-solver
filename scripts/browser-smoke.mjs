@@ -20,6 +20,7 @@ import { BASE_CONFIGS, STATS } from "../src/core/armor-model.mjs";
 import { normalizeDimItem } from "../src/core/dim-csv.mjs";
 import { rebuildReference } from "../tests/helpers/reference-witness.mjs";
 import { GUIDE_CONTENT } from "../src/guide-content.mjs";
+import { crowdedDimRequest } from '../tests/helpers/dim-exact-inventory.mjs';
 
 // The reported DIM CSV fixture, normalized through the production importer so
 // the browser regression exercises the same item shape the app really sees.
@@ -1972,6 +1973,9 @@ async function checkResultWorkspace(browser) {
         assert.equal(metas.length, Math.min(chipCounts[index].count, 60),
           description + " must render exactly the counted plans");
         for (const meta of metas) assert.ok(predicate(meta), description + " leaked a non-matching row: " + meta);
+        if (index === 1 || index === 2) assert.equal(
+          await page.locator('#planList .inventory-result-state:not(.is-met)').count(), 0,
+          description + ' must exclude fully owned near misses');
       }
       await page.locator(".plan-chip").nth(0).click();
       await page.locator("#inventoryResults:not([hidden])").waitFor();
@@ -2757,7 +2761,7 @@ await startPreview();
 // The reported DIM CSV: exact arithmetic, no socket capability. The page must
 // present the certificate's numbers, stay UNVERIFIED (never BLOCKED) and never
 // word a data gap as a refusal.
-async function checkExactInventoryTotals(browser) {
+async function checkExactInventoryTotals(browser, crowded = false) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   const browserErrors = [];
@@ -2784,7 +2788,7 @@ async function checkExactInventoryTotals(browser) {
       }));
       localStorage.setItem(storageKeys.calculatorMode, "solve");
       return { count: inventory.length, exotic: exotic?.name || null };
-    }, { storageKeys: TEST_STORAGE_KEYS, inventory: DIM_ITEMS, fixture: DIM_FIXTURE });
+    }, { storageKeys: TEST_STORAGE_KEYS, inventory: crowded ? crowdedDimRequest().items : DIM_ITEMS, fixture: DIM_FIXTURE });
     assert.ok(injected.count > 0, "the DIM fixture must normalize into an inventory");
 
     await page.reload({ waitUntil: "networkidle" });
@@ -2812,11 +2816,11 @@ async function checkExactInventoryTotals(browser) {
     // The fixture's two known builds must be listed as exact, and 精确 is the
     // first ranking axis, so they occupy the head of the plan browser.
     assert.ok(
-      await page.locator("#planList .inventory-result-option").count() >= DIM_FIXTURE.builds.length,
+      await page.locator("#planList .inventory-result-option").count() >= (crowded ? 1 : DIM_FIXTURE.builds.length),
       "the DIM fixture must produce at least the two reported plans",
     );
 
-    for (let planIndex = 0; planIndex < DIM_FIXTURE.builds.length; planIndex++) {
+    for (let planIndex = 0; planIndex < (crowded ? 1 : DIM_FIXTURE.builds.length); planIndex++) {
       await page.locator("#planList .inventory-result-option").nth(planIndex).click();
       const [bars, grid, audit] = await Promise.all([
         readStatBars(page),
@@ -2826,6 +2830,7 @@ async function checkExactInventoryTotals(browser) {
       assert.equal(audit.status, "EXACT_TARGET_PROVEN",
         `plan ${planIndex} must carry an exact certificate, got ${audit.status}`);
       assert.deepEqual(audit.finalTotals, DIM_FIXTURE.targets, `plan ${planIndex} final totals`);
+      assert.equal(await countUnifiedOwnedRows(page), 5, 'the exact witness must use five actual inventory pieces');
       for (const [statIndex, stat] of STATS.entries()) {
         // The exact number, and 精确/达标 on the same bar — never 10/20 with ✓.
         assert.equal(bars[statIndex].actual, DIM_FIXTURE.targets[stat],
@@ -2880,7 +2885,7 @@ async function checkExactInventoryTotals(browser) {
       assert.doesNotMatch(preflight, /witnessTotalsMismatch/, "a math-only import must not fabricate a witness mismatch");
     }
     assert.deepEqual(browserErrors, []);
-    console.log("browser smoke: exact DIM inventory totals / execution tri-state OK");
+    console.log(`browser smoke: ${crowded ? 'crowded ' : ''}exact DIM inventory totals / execution tri-state OK`);
   } finally {
     await context.close();
   }
@@ -3519,6 +3524,7 @@ try {
   await checkResultWorkspace(browser);
   await checkLoadoutPresentation(browser);
   await checkExactInventoryTotals(browser);
+  await checkExactInventoryTotals(browser, true);
   await checkInformationArchitecture(browser);
   await checkWorkspaceLayout(browser);
   if (process.argv.includes("--target-sync-only")) {
@@ -3971,6 +3977,7 @@ try {
   );
 
   assert.deepEqual(browserErrors, []);
+  await context.close();
   console.log("browser smoke OK (Worker solve, mode switch, target sync, 390px layout)");
   }
 } finally {

@@ -4,7 +4,7 @@ import {STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEviden
 import {applyManualUpgradeModifiers, compareUpgradeMetrics, createUpgradePieceFromItem,
   evaluateUpgradePieces, getUpgradeConfig, getUpgradeTuningCapability} from "./upgrade-optimizer.mjs";
 import {getUpgradeMathKey, refineUpgradeAssignment} from './upgrade-optimizer.mjs';
-import {createResidualBounds} from './residual-bounds.mjs';
+import {createResidualBounds, createInventoryResidueBounds} from './residual-bounds.mjs';
 
 const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
 const keyOf = pieces => pieces.map(piece => `${piece.slot}:id:${piece.sourceId || piece.id || ""}`).sort().join("|");
@@ -74,7 +74,9 @@ export function solveInventoryLoadout({
   const limit = (value, fallback) => Number.isSafeInteger(value) && value > 0 ? value : fallback;
   maxResults = limit(maxResults, 12);
   const started = performance.now();
-  search?.checkpoint(0);
+  const exactRequest = reassignModifiers && problemSpec.constraintModel.rules.every(rule =>
+    rule.visibleMinimum === rule.preferredVisible && rule.visibleMaximum === rule.preferredVisible);
+  search?.checkpoint(0, exactRequest ? {phase: 'exact-inventory'} : null);
   const searchStats = {frontierComplete: true, assignmentComplete: !reassignModifiers,
     shardIndex, shardCount,
     mathCacheHits: 0, mathEvaluations: 0, evaluationMs: 0, prunedJoint: 0, refinedAssignments: 0,
@@ -110,6 +112,12 @@ export function solveInventoryLoadout({
       // computed once per candidate instead of inside the comparator.
       candidate.identity = keyOf([piece]);
       candidate.minKey = candidate.min.join(",");
+      // Identity is intentionally absent; all arithmetic, immutable constraints
+      // and evidence that can affect witness verification remain in the key.
+      candidate.existenceKey = JSON.stringify([capability.mathEquivalenceKey,
+        getUpgradeMathKey([piece], onlyPlus5Tuning), capability.hash,
+        capability.valid, capability.mathDataKnown]);
+      candidate.mathKnown = capability.mathDataKnown;
       physical.push(candidate);
     }
     rows.push({slotIndex: index, candidates: physical});
@@ -148,6 +156,9 @@ export function solveInventoryLoadout({
   let stopped = false;
   const seen = new Set();
   const mathCache = new Map();
+  let exactPhase = false;
+  const checkpoint = (count = 0, statistics = searchStats) => search?.checkpoint(count,
+    exactPhase ? {...statistics, phase: 'exact-inventory'} : statistics);
   const evaluate = (pieces, refined = null) => {
     if (!legal(pieces, setRequirement) || !pieces.every(eligible) || !belongs(pieces[rows[0].slotIndex])) return;
     const key = keyOf(pieces);
@@ -157,9 +168,10 @@ export function solveInventoryLoadout({
     if (!evaluation) {
       const before = performance.now();
       evaluation = evaluateUpgradePieces(pieces, targets, fragments, reassignModifiers, required, onlyPlus5Tuning, userConstraints,
-        {checkpoint: search?.checkpoint, autoStatMods, modifierBudget});
+        {checkpoint, autoStatMods, modifierBudget, exactOnly: exactPhase});
       searchStats.evaluationMs += performance.now() - before;
       searchStats.mathEvaluations++;
+      if (!evaluation) return;
       // Cache only math/assignments. Physical identities are always taken from
       // this path and verified again before entering the result list.
       if (mathKey) {
@@ -196,7 +208,6 @@ export function solveInventoryLoadout({
         pieces: result.pieces, ...result.evaluation,
       }))});
   };
-  if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)) evaluate(currentPieces.map(project));
   const chosen = Array(5);
   const partialMin = Array(6).fill(0);
   const partialMax = Array(6).fill(0);
@@ -206,6 +217,82 @@ export function solveInventoryLoadout({
   const stop = reason => {
     stopped = true; searchStats.frontierComplete = false; searchStats.termination = reason;
   };
+  // A complete existence pass over the quotient inventory precedes the
+  // budgeted physical Top-K pass. A negative mathematical result is shared by
+  // every equivalent instance, rather than charged once per Cartesian copy.
+  // Partition the physical first row BEFORE compression: otherwise choosing a
+  // representative on another shard can erase a whole equivalence class.
+  const findExact = () => {
+    const quotient = rows.map((row, depth) => {
+      const groups = new Map();
+      for (const candidate of row.candidates) {
+        // Unknown base data cannot produce a verified exact witness. Keep it
+        // in the original domain/proof metadata, but do not expand thousands
+        // of equivalent unverifiable instances in the existence query.
+        if (!candidate.mathKnown) continue;
+        if (depth === 0 && !belongs(candidate.piece)) continue;
+        const group = groups.get(candidate.existenceKey) || [];
+        group.push(candidate);
+        groups.set(candidate.existenceKey, group);
+      }
+      return [...groups.values()].map(group => group.sort((a, b) => a.identity.localeCompare(b.identity)));
+    });
+    searchStats.exactGroups = quotient.map(row => row.length);
+    searchStats.exactStates = 0;
+    searchStats.exactPrunedResidues = 0;
+    const residues = createInventoryResidueBounds(quotient.map(row => row.map(group => group[0])), rules, onlyPlus5Tuning);
+    const selected = Array(5);
+    const expand = depth => {
+      if (exactCount) return;
+      if (depth === 5) { evaluate(chosen); return; }
+      for (const candidate of selected[depth]) {
+        chosen[rows[depth].slotIndex] = candidate.piece;
+        expand(depth + 1);
+        if (exactCount) return;
+      }
+    };
+    const walk = (depth, exotics, cover, classId) => {
+      checkpoint(0);
+      if (exactCount) return;
+      searchStats.exactStates++;
+      if (residues && !residues.canReach(depth)) { searchStats.exactPrunedResidues++; return; }
+      if (!canReachRules(depth) || joint && !joint.canReach(depth)) return;
+      if (minimumCoverage.some((value, index) => cover[index] + suffix[depth].cover[index] < value)) return;
+      if (depth === 5) {
+        // Evaluate once per mathematical combination. Only successful math is
+        // expanded back into physical instances, each verified at admission.
+        const pieces = selected.map(group => group[0]);
+        pieces.forEach((candidate, index) => { chosen[rows[index].slotIndex] = candidate.piece; });
+        evaluate(chosen);
+        if (!exactCount && mathCache.has(getUpgradeMathKey(chosen, onlyPlus5Tuning))) expand(0);
+        return;
+      }
+      for (const group of quotient[depth]) {
+        const candidate = group[0];
+        const exoticCount = exotics + Number(candidate.piece.exotic);
+        if (exoticCount > 1 || classId && candidate.piece.classId && classId !== candidate.piece.classId) continue;
+        selected[depth] = group;
+        joint?.add(candidate, 1);
+        residues?.push(candidate);
+        for (let index = 0; index < 6; index++) {
+          partialMin[index] += candidate.min[index]; partialMax[index] += candidate.max[index];
+        }
+        walk(depth + 1, exoticCount, cover.map((value, index) => value + candidate.cover[index]), classId || candidate.piece.classId);
+        joint?.add(candidate, -1);
+        residues?.pop();
+        for (let index = 0; index < 6; index++) {
+          partialMin[index] -= candidate.min[index]; partialMax[index] -= candidate.max[index];
+        }
+        if (exactCount) return;
+      }
+    };
+    exactPhase = true;
+    walk(0, 0, [0, 0], null);
+    exactPhase = false;
+    searchStats.exactExistence = exactCount ? 'witness' : 'exhausted';
+  };
+  if (exactRequest) findExact();
+  if (currentPieces?.length === 5 && legal(currentPieces, setRequirement)) evaluate(currentPieces.map(project));
   const pointTarget = !reassignModifiers && rules.every(rule => rule.armorMinimum !== null
     && rule.armorMinimum === rule.armorMaximum);
   // Exact fixed-assignment inventory is a 2+3 sum join, not five nested

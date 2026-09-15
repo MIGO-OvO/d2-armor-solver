@@ -3,6 +3,7 @@ import test from "node:test";
 import {BASE_CONFIGS, STATS} from "../src/core/armor-model.mjs";
 import {solveInventory} from "../src/core/armor-engine.mjs";
 import {Worker as NodeWorker} from "node:worker_threads";
+import {crowdedDimRequest} from './helpers/dim-exact-inventory.mjs';
 
 const slots = ["helmet", "arms", "chest", "legs", "classItem"];
 function request(count = 2) {
@@ -86,6 +87,14 @@ test("real worker threads preserve canonical Top-K for 1/2/4/8 threads and rever
       assert.equal(new Set(actual.results.map(row => row.canonicalId)).size, actual.results.length);
       assert.ok(actual.results.every(row => row.certificate.witnessVerification.valid));
     }
+  }
+  for (const parallelism of [1, 4]) {
+    const payload = {...crowdedDimRequest(), searchProfile: 'balanced'};
+    payload.items.reverse();
+    const actual = await client.solveInventoryParallelAsync(payload, {parallelism});
+    assert.equal(actual.status, 'EXACT_TARGET_PROVEN', `crowded DIM inventory, ${parallelism} real workers`);
+    assert.deepEqual(actual.results[0].visibleTotals, payload.targets);
+    assert.equal(actual.results[0].pieces.find(p => p.slot === 'classItem').sourceId, 'dim-piece-6');
   }
 });
 

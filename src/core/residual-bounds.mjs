@@ -34,6 +34,8 @@ export function createResidualBounds(rows, rules, reassign, onlyPlus5 = false, g
       const cap = getUpgradeTuningCapability(piece, onlyPlus5);
       const base = STATS.map(stat => config.baseStats[stat]);
       vectors = [STATS.map(stat => manual[stat] - (piece.armorModStat === stat ? piece.armorModSize || 0 : 0))];
+      // Empty tuning is legal for owned armor when directional-only is off.
+      if (!onlyPlus5) vectors.push(base);
       if (cap.allowBalanced) vectors.push(base.map((value, index) => value + Number(config.masterworkStats.includes(STATS[index]))));
       for (const to of cap.allowedDirectionalStats || []) for (const from of STATS) {
         if (from !== to) vectors.push(base.map((value, index) => value + 5 * (Number(STATS[index] === to) - Number(STATS[index] === from))));
@@ -53,5 +55,56 @@ export function createResidualBounds(rows, rules, reassign, onlyPlus5 = false, g
     canReach(depth) { return floors.every((floor, index) => partial[index] + suffix[depth][index] + modSupport[index] >= floor); },
     add(candidate, direction) { maxima.get(candidate).forEach((value, index) => { partial[index] += direction * value; }); },
     projections: groups.length,
+  };
+}
+
+// Directional tuning and stat mods are multiples of five. Balanced tuning
+// contributes +1 on the three masterwork stats. Retain the reachable residues
+// of entire suffixes, not independent per-stat ranges. Dropping an oversized
+// suffix table means "unknown", never "unreachable"; memory is bounded without
+// truncating the search domain. Clamp intervals are deliberately not indexed.
+export function createInventoryResidueBounds(rows, rules, onlyPlus5) {
+  const indexes = rules.flatMap((rule, index) => rule.armorMinimum !== null
+    && rule.armorMinimum === rule.armorMaximum ? [index] : []);
+  if (!indexes.length) return null;
+  const mod = value => ((value % 5) + 5) % 5;
+  const encode = vector => vector.join(',');
+  const target = indexes.map(index => mod(rules[index].armorMinimum));
+  const zero = indexes.map(() => 0);
+  const variants = new Map();
+  for (const row of rows) for (const candidate of row) {
+    const config = getUpgradeConfig(candidate.piece);
+    const base = indexes.map(index => config.baseStats[STATS[index]]);
+    if (!base.every(Number.isSafeInteger)) return null;
+    const options = [base.map(mod)];
+    if (getUpgradeTuningCapability(candidate.piece, onlyPlus5).allowBalanced) {
+      options.push(base.map((value, i) => mod(value + Number(config.masterworkStats.includes(STATS[indexes[i]])))));
+    }
+    variants.set(candidate, options);
+  }
+  const combine = (left, right) => {
+    const out = new Map();
+    for (const a of left) for (const b of right) {
+      const vector = a.map((value, i) => mod(value + b[i]));
+      out.set(encode(vector), vector);
+      if (out.size > 4096) return null;
+    }
+    return [...out.values()];
+  };
+  const suffix = Array(rows.length + 1);
+  suffix[rows.length] = [zero];
+  for (let depth = rows.length - 1; depth >= 0; depth--) {
+    const choices = new Map(rows[depth].flatMap(candidate => variants.get(candidate).map(vector => [encode(vector), vector])));
+    suffix[depth] = suffix[depth + 1] && combine([...choices.values()], suffix[depth + 1]);
+  }
+  const keys = suffix.map(vectors => vectors && new Set(vectors.map(encode)));
+  const prefix = [[zero]];
+  return {
+    push(candidate) { prefix.push(combine(prefix.at(-1), variants.get(candidate))); },
+    pop() { prefix.pop(); },
+    canReach(depth) {
+      return !keys[depth] || prefix.at(-1).some(vector =>
+        keys[depth].has(encode(target.map((value, i) => mod(value - vector[i])))));
+    },
   };
 }

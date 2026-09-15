@@ -20,7 +20,9 @@ vm.runInContext([
   'unifiedEntryKey',
   'compareUnifiedEntries',
   'normalizeTheoryPlan',
+  'planCounts',
 ].map(name => source.slice(source.indexOf(`function ${name}(`)).split('\nfunction ')[0]).join('\n'), context);
+vm.runInContext(source.slice(source.indexOf('const PLAN_FILTERS ='), source.indexOf('\nfunction projectPlanView(')), context);
 
 function entry(overrides) {
   return {
@@ -35,6 +37,17 @@ test('the unified list ranks a qualifying plan ahead of a fully owned near-miss'
   assert.ok(context.compareUnifiedEntries(qualifyingPartial, nearMissComplete) < 0,
     '达标 must outrank owned completeness');
   assert.ok(context.compareUnifiedEntries(nearMissComplete, qualifyingPartial) > 0);
+});
+
+test('fully owned count and filter require a qualifying witness, not just five owned pieces', () => {
+  const entries = [entry({feasible: false, ownedCount: 5}), entry({feasible: true, ownedCount: 5}),
+    entry({feasible: true, ownedCount: 4, farmCount: 1})];
+  const counts = context.planCounts(entries);
+  assert.equal(counts.total, 3);
+  assert.equal(counts.qualifying, 2);
+  assert.equal(counts.owned, 1);
+  context.entries = entries;
+  assert.equal(vm.runInContext('entries.filter(PLAN_FILTERS.owned).length', context), 1);
 });
 
 test('the unified list prefers exact matches, then fuller owned armor', () => {

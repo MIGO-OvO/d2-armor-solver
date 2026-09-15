@@ -1,8 +1,14 @@
 # Math Capability Equivalence Compression
 
-Status: **keys implemented, compression not shipped**. This document records the
-audit, the data model that is now in place, the measured benefit, and the exact
-invariants a future implementation must preserve.
+Status: **compression shipped for exact reassignment existence** (2026-09-15).
+The independent existence pass groups mathematical capabilities, prefilters
+residues, and verifies physical witnesses before admission. Physical Top-K
+enumeration is unchanged. Shards filter the first physical row *before*
+grouping, so every local equivalence class survives without changing shard
+ownership. See [implementation, proof boundary and regression](exact-inventory-existence.md).
+
+The sections below preserve the original pre-implementation audit and design
+considerations; references to compression "not shipped" describe that baseline.
 
 ## 1. What the inventory solver does today
 

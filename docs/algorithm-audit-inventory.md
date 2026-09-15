@@ -2,6 +2,12 @@
 
 ## Acceptance target
 
+Six-exact-visible-stat requests with automatic Tuning/stat-mod reassignment now
+run an independent exact-existence query before profile-budgeted ranking. In
+Balanced as well as Deep, a verified inventory witness cannot be lost to the
+physical Top-K quota, node/evaluation budget or session deadline. Explicit user
+cancellation still terminates the worker. See [the regression audit](exact-inventory-existence.md).
+
 For a known, finite armor inventory, a Deep run must enumerate the complete
 legal five-slot domain, including Tuning and automatic stat-mod assignments.
 Top-K output is only a presentation limit; it must not stop the frontier.
@@ -12,7 +18,7 @@ Top-K output is only a presentation limit; it must not stop the frontier.
 | --- | --- | --- |
 | P0 | Frontier traversal and modifier assignment coverage were conflated. | Deep traverses the physical frontier within its budget; bounded reassignment still reports `assignmentComplete: false` and cannot prove global infeasibility. |
 | P0 | Deep inventory budget was 15 seconds / 20M nodes / 250k evaluations. Large vaults could return a search-limit result despite available witnesses. | Deep budget is 120 seconds / 500M nodes / 5M evaluations. |
-| P1 | `maxResults` is mixed with search termination in non-exhaustive profiles. | Deep keeps scanning after Top-K is full; Balanced remains bounded for interactive use. |
+| P1 | `maxResults` is mixed with search termination in non-exhaustive profiles. | Exact reassignment existence is independent of Top-K; subsequent physical alternatives/ranking remain profile-budgeted. |
 | P0 | The client wrapper (`solveInventoryParallelAsync`) injected `searchLimits.exhaustive = true` into every shard, so Fast/Balanced paid Deep's cost and the `exact-witness-quota` early stop never ran in the browser. | The wrapper forwards the caller's limits unchanged; only an explicit caller flag (or the Deep profile) may force exhaustive. Covered by `tests/parallel-inventory.test.mjs`. |
 | P0 | Progressive publication re-derived the ProblemSpec, the capability index, the ruleset id and the whole certificate chain for every shard callback, costing ~530 ms per merge on a 1300-piece vault. A 3 s Balanced search took ~27 s of wall clock. | Spec/index/ruleset-id caches plus a 150 ms progressive merge interval. `benchmark:v3-client` now records wall time, aggregate worker effort and per-shard termination. |
 | P1 | Current installed `+5/+10` mods cannot represent DIM Auto Stat Mods. | Inventory reassignment uses capability budget, while explicit Upgrade/Scratch requests retain explicit budgets. |

@@ -519,6 +519,39 @@ function assignmentBudgets(pieces, onlyPlus5Tuning, {autoStatMods = false, modif
     ({numPlus5, numPlus10, numPlus3: onlyPlus5Tuning ? 0 : null}))).flat();
 }
 
+// The owned-witness contract permits an empty tuning socket. Reuse the exact
+// fixed-five oracle without changing its catalog domain: encode an empty slot
+// as forced Balanced on a base reduced by that Balanced contribution. The two
+// deltas cancel exactly; restore mode:none before verifying ORIGINAL pieces.
+// This is a bijection for each empty-slot mask, not a relaxed witness.
+function findEmptyTuningWitness(configs, tuningCapabilities, budgets, armorTarget, targets, fragments, checkpoint) {
+  for (let mask = 1; mask < 32; mask++) {
+    checkpoint?.(0);
+    const empty = configs.map((_, index) => Boolean(mask & (1 << index)));
+    const count = empty.filter(Boolean).length;
+    const shifted = configs.map((config, index) => !empty[index] ? config : {...config,
+      baseStats: Object.fromEntries(STATS.map(stat => [stat, config.baseStats[stat]
+        - Number(config.masterworkStats.includes(stat))]))});
+    const capabilities = tuningCapabilities.map((capability, index) => empty[index]
+      ? {allowBalanced: true, allowedDirectionalStats: []} : capability);
+    for (const budget of budgets) {
+      if (budget.numPlus3 != null && budget.numPlus3 + count > 5) continue;
+      const input = {configs: shifted, ...budget,
+        numPlus3: budget.numPlus3 == null ? null : budget.numPlus3 + count,
+        tuningCapabilities: capabilities, checkpoint};
+      let witness = findFixedTargetWitness({...input, target: armorTarget});
+      if (!witness && STATS.some(stat => targets[stat] === 0 || targets[stat] === 200)) {
+        witness = findFixedRuleWitness({...input,
+          minimums: STATS.map(stat => targets[stat] === 0 ? null : targets[stat] - (fragments[stat] || 0)),
+          maximums: STATS.map(stat => targets[stat] === 200 ? null : targets[stat] - (fragments[stat] || 0))});
+      }
+      if (witness) return {...witness, tuningAssignments: witness.tuningAssignments.map((tuning, index) =>
+        empty[index] ? {mode: 'none', from: null, to: null} : tuning)};
+    }
+  }
+  return null;
+}
+
 export function evaluateUpgradePieces(
   pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}, runtime = {}
 ) {
@@ -558,8 +591,8 @@ export function evaluateUpgradePieces(
   let evaluation = manualEvaluation;
   const budgets = assignmentBudgets(pieces, onlyPlus5Tuning, runtime);
   if (reassignModifiers) {
-    const tuningCapabilities = pieces.map(piece =>
-      getUpgradeTuningCapability(piece, onlyPlus5Tuning));
+    const tuningCapabilities = pieces.map(piece => ({...getUpgradeTuningCapability(piece, onlyPlus5Tuning),
+      ...(runtime.exactOnly && piece.dataConfidence?.tuning === 'unknown' ? {allowedDirectionalStats: []} : {})}));
     let exact = null;
     for (const budget of budgets) {
       runtime.checkpoint?.(0);
@@ -575,6 +608,9 @@ export function evaluateUpgradePieces(
         if (exact) break;
       }
     }
+    if (!exact && runtime.exactOnly && !onlyPlus5Tuning) {
+      exact = findEmptyTuningWitness(configs, tuningCapabilities, budgets, armorTarget, targets, fragments, runtime.checkpoint);
+    }
     if (exact && !getUpgradeMetrics(finalizeUpgradeTotals(exact.totals, fragments), targets,
       0, normalizedRequiredStats, null, userConstraints, fragments).hardRulesSatisfied) exact = null;
     // ponytail: fuzzy ranking is bounded to one heuristic budget; exact/rule
@@ -583,7 +619,7 @@ export function evaluateUpgradePieces(
     const automaticEvaluation = exact ? {...exact,
       rank: scoreStatsRank(exact.totals, scoringTarget, constraints),
       score: scoreStats(exact.totals, scoringTarget, constraints),
-    } : evaluateConfig(
+    } : runtime.exactOnly ? null : evaluateConfig(
       configs, scoringTarget, budget.numPlus5, budget.numPlus10, 0, constraints,
       null,
       // The legacy Upgrade outer search evaluates many thousands of candidate
@@ -609,7 +645,9 @@ export function evaluateUpgradePieces(
           value.numPlus5 === pieces.filter(piece => piece.armorModSize === 5).length
           && value.numPlus10 === pieces.filter(piece => piece.armorModSize === 10).length
           && (value.numPlus3 == null || value.numPlus3 === pieces.filter(piece => piece.tuningMode === 'plus3').length)));
-      if (!manualKnown || compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
+      // Existence keeps the oracle's assignment even on a metric tie: a stale
+      // installed direction can have identical totals but fail verification.
+      if (runtime.exactOnly || !manualKnown || compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
         evaluation = automaticEvaluation;
       }
     }
@@ -617,6 +655,11 @@ export function evaluateUpgradePieces(
   const finalTotals = finalizeUpgradeTotals(evaluation.totals, fragments);
   const metrics = getUpgradeMetrics(finalTotals, targets, evaluation.score, normalizedRequiredStats,
     evaluation.rank, userConstraints, fragments);
+  // Existence queries must not spend effort ranking a near miss. The complete
+  // fixed-five tuning/mod oracle above covers all permitted budgets (including
+  // clamp preimages); only a concrete exact assignment can leave this seam.
+  if (runtime.exactOnly && (!metrics.hardRulesSatisfied
+      || !STATS.every(stat => finalTotals[stat] === targets[stat]))) return null;
   if (reassignModifiers && !metrics.hardRulesSatisfied) {
     const lower = STATS.map(stat => {
       const fragment = fragments[stat] || 0;

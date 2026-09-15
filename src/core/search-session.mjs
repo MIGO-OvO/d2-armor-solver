@@ -63,7 +63,14 @@ export function createSearchSession({operation, generation, profile = "balanced"
         stage++;
         progress(lastResult, true);
       }
-      if (now() - started >= maxTimeMs || nodes >= limits.maxNodes) { budgetReached = true; throw new SearchBudgetExceeded(); }
+      // Exact inventory existence is a separate, complete mathematical query.
+      // Profiles bound subsequent physical alternatives/fuzzy ranking, not
+      // whether an existing witness may be discovered. Worker termination
+      // remains the cancellation mechanism, including inside this phase.
+      if (!(operation === 'solveInventory' && statistics?.phase === 'exact-inventory')
+          && (now() - started >= maxTimeMs || nodes >= limits.maxNodes)) {
+        budgetReached = true; throw new SearchBudgetExceeded();
+      }
     },
     publish(result, statistics = null) {
       if (!result?.certificate?.witnessVerification?.valid) return;
