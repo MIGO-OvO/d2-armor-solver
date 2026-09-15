@@ -4,6 +4,7 @@ import {BASE_CONFIGS, STATS} from "../src/core/armor-model.mjs";
 import {solveInventory} from "../src/core/armor-engine.mjs";
 import {Worker as NodeWorker} from "node:worker_threads";
 import {crowdedDimRequest} from './helpers/dim-exact-inventory.mjs';
+import {fixture as performanceFixture} from '../scripts/fixtures/search-performance.mjs';
 
 const slots = ["helmet", "arms", "chest", "legs", "classItem"];
 function request(count = 2) {
@@ -37,6 +38,175 @@ async function clientFor(t) {
   t.after(() => { client.cancelAllSearches(); globalThis.Worker = original; });
   return client;
 }
+
+test('Balanced automatic large-vault dispatch has exactly the serial aggregate effort', async t => {
+  const client = await clientFor(t);
+  const payload = {...performanceFixture('large'), searchProfile: 'balanced', userConstraints: {}};
+  const pending = client.solveInventoryParallelAsync(payload);
+  assert.equal(ControlledWorker.instances.length, 1);
+  const worker = ControlledWorker.instances[0], message = worker.requests[0];
+  assert.equal(message.payload.shardCount, 1);
+  const result = solveInventory(message.payload);
+  worker.reply(message, {...result, search: {nodes: result.searchStats.statesExamined}});
+  const actual = await pending;
+  assert.equal(actual.search.aggregateNodes, result.searchStats.statesExamined);
+  assert.equal(actual.search.progressiveMergeMs + actual.search.finalMergeMs, 0);
+});
+
+test('progressive merge retains its original exception and terminates siblings', async t => {
+  const client = await clientFor(t);
+  const original = new Error('sentinel merge failure');
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2, onProgress() {}});
+  const rejected = assert.rejects(pending, error => error === original);
+  const worker = ControlledWorker.instances[0], message = worker.requests[0];
+  const partial = solveInventory(message.payload);
+  // Fault injection at the real merge iteration, after scheduling/admission.
+  partial.results[Symbol.iterator] = () => { throw original; };
+  worker.events.message({data: {...message, type: 'progress', result: partial, search: {nodes: 4}}});
+  await rejected;
+  assert.equal(original.solverFailure, 'merge');
+  assert.ok(ControlledWorker.instances.every(w => w.terminated));
+});
+
+test('same-turn final replies cannot swallow a progressive merge error', async t => {
+  const client = await clientFor(t);
+  const original = new Error('merge and final response race');
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2, onProgress() { throw original; }});
+  const rejected = assert.rejects(pending, error => error === original);
+  for (const worker of ControlledWorker.instances) {
+    const message = worker.requests[0];
+    worker.reply(message, solveInventory(message.payload));
+  }
+  await rejected;
+});
+
+test('repeated positives do not trigger whole-vault progressive remerges; final witnesses remain verified', async t => {
+  const client = await clientFor(t);
+  const events = [];
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2,
+    onProgress: result => { if (result?.results?.length) events.push(result); }});
+  const [worker, sibling] = ControlledWorker.instances, message = worker.requests[0];
+  const partial = solveInventory(message.payload);
+  const publish = () => worker.events.message({data: {...message, type: 'progress', result: partial, search: {nodes: 4}}});
+  publish(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.length, 1);
+  // Flush any coalescing timer, so throttling alone cannot pass this test.
+  t.mock.timers.enable({apis: ['setTimeout']});
+  t.mock.timers.tick(2000);
+  for (let i = 0; i < 20; i++) publish();
+  t.mock.timers.tick(2000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.length, 1);
+  t.mock.timers.reset(); // Final cleanup must clear the real startup timers.
+  worker.reply(message, partial);
+  sibling.reply(sibling.requests[0], solveInventory(sibling.requests[0].payload));
+  const result = await pending;
+  assert.ok(result.results.every(row => row.certificate.witnessVerification.valid));
+  assert.equal(result.certificate.proof.complete, false);
+  assert.ok(result.search.finalMergeMs > 0);
+});
+
+test('final merge errors retain the exception and merge classification', async t => {
+  const client = await clientFor(t);
+  const original = new Error('final merge failed');
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2});
+  const rejected = assert.rejects(pending, error => error === original && error.solverFailure === 'merge');
+  for (const worker of ControlledWorker.instances) {
+    const message = worker.requests[0];
+    const result = solveInventory(message.payload);
+    result.results[Symbol.iterator] = () => { throw original; };
+    worker.reply(message, result);
+  }
+  await rejected;
+});
+
+test('ordinary theory and inventory retry transport on a replacement worker, not logic errors', async t => {
+  const client = await clientFor(t);
+  for (const operation of ['solveLoadoutAsync', 'solveInventoryAsync']) {
+    const pending = client[operation]({});
+    ControlledWorker.instances.at(-1).events.error({error: new Error('transport killed')});
+    const dead = ControlledWorker.instances.at(-1);
+    await new Promise(resolve => setImmediate(resolve));
+    const retry = ControlledWorker.instances.at(-1);
+    dead.events.error({error: new Error('late event from terminated worker')});
+    retry.reply(retry.requests[0], {results: [], search: {}});
+    assert.equal((await pending).search.fallback, 'replacement-worker');
+    const failed = client[operation]({});
+    const rejected = assert.rejects(failed, {name: 'TypeError', message: 'solver logic'});
+    const worker = ControlledWorker.instances.at(-1), message = worker.requests.at(-1);
+    const count = ControlledWorker.instances.length;
+    worker.events.message({data: {...message, type: 'result', error: {name: 'TypeError', message: 'solver logic'}}});
+    await rejected;
+    assert.equal(ControlledWorker.instances.length, count);
+  }
+});
+
+test('worker-reported logic exceptions cannot impersonate a transport failure by name', async t => {
+  const client = await clientFor(t);
+  for (const operation of ['solveLoadoutAsync', 'solveInventoryAsync', 'solveInventoryParallelAsync']) {
+    const pending = client[operation]({...request(), searchProfile: 'balanced'});
+    const rejected = assert.rejects(pending, error => error.name === 'WorkerTransportError'
+      && error.solverFailure === 'solver' && error.stack === 'original worker stack');
+    const worker = ControlledWorker.instances.at(-1), message = worker.requests.at(-1);
+    const count = ControlledWorker.instances.length;
+    worker.events.message({data: {...message, type: 'result', error: {
+      name: 'WorkerTransportError', message: 'logic failure', stack: 'original worker stack',
+    }}});
+    await rejected;
+    assert.equal(ControlledWorker.instances.length, count);
+  }
+});
+
+test('theory repeated transport failure falls back inline; cancellation and supersession never retry', async t => {
+  const client = await clientFor(t);
+  const payload = {target: Object.fromEntries(STATS.map(s => [s, 60])), searchProfile: 'fast', numPlus5: 0, numPlus10: 5, numPlus3: 0};
+  const pending = client.solveLoadoutAsync(payload);
+  for (let i = 0; i < 2; i++) {
+    ControlledWorker.instances.at(-1).events.messageerror({message: 'killed'});
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal((await pending).search.fallback, 'inline');
+  for (const operation of ['solveLoadoutAsync', 'solveInventoryAsync']) {
+    const controller = new AbortController();
+    const task = client[operation](payload, {signal: controller.signal});
+    const rejected = assert.rejects(task, {name: 'AbortError'});
+    const count = ControlledWorker.instances.length;
+    controller.abort(); await rejected;
+    assert.equal(ControlledWorker.instances.length, count);
+    const failed = client[operation](payload);
+    const cancelled = assert.rejects(failed, {name: 'AbortError'});
+    ControlledWorker.instances.at(-1).events.error({message: 'killed'});
+    client.cancelAllSearches();
+    await cancelled;
+  }
+});
+
+test('inline inventory recovery waits for theory handoff and remains cancellable before execution', async t => {
+  const client = await clientFor(t);
+  globalThis.Worker = undefined;
+  let release, entered = false, settled = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  const controller = new AbortController();
+  const pending = client.solveInventoryParallelAsync(request(), {signal: controller.signal,
+    beforeInline: () => { entered = true; return gate; }});
+  const rejected = assert.rejects(pending, {name: 'AbortError'}).then(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(entered, true);
+  assert.equal(settled, false);
+  controller.abort(); await rejected;
+  release();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(ControlledWorker.instances.length, 0);
+});
+
+test('already aborted calls allocate no workers and perform no fallback', async t => {
+  const client = await clientFor(t);
+  const controller = new AbortController(); controller.abort();
+  for (const operation of ['solveLoadoutAsync', 'solveInventoryAsync', 'solveInventoryParallelAsync']) {
+    await assert.rejects(client[operation](request(), {signal: controller.signal}), {name: 'AbortError'});
+  }
+  assert.equal(ControlledWorker.instances.length, 0);
+});
 
 test("parallel API starts separate workers, merges reverse completion in serial canonical order", {timeout: 10000}, async t => {
   const client = await clientFor(t);
@@ -189,10 +359,32 @@ test('unavailable, constructor failure and complete runtime failure fall back wi
   globalThis.Worker = ControlledWorker;
   const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2});
   for (const w of ControlledWorker.instances) w.events.error({message: 'startup failed'});
+  await new Promise(resolve => setImmediate(resolve));
+  ControlledWorker.instances.at(-1).events.error({message: 'replacement also failed'});
   const result = await pending;
   assert.deepEqual(result.results.map(r => r.canonicalId), expected);
   assert.equal(result.search.effectiveWorkers, 0);
+  assert.equal(result.search.failures, 3);
+  assert.equal(result.search.fallback, 'inline');
+});
+
+test('a completely failed inventory pool recovers on one fresh worker before inline', async t => {
+  const client = await clientFor(t);
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2});
+  for (const w of ControlledWorker.instances) w.events.error({message: 'pool exhausted'});
+  await new Promise(resolve => setImmediate(resolve));
+  const replacement = ControlledWorker.instances.at(-1);
+  assert.equal(ControlledWorker.instances.length, 3);
+  for (let i = 0; i < 2; i++) {
+    const message = replacement.requests[i];
+    replacement.reply(message, solveInventory(message.payload));
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  const result = await pending;
+  assert.equal(result.search.fallback, 'replacement-worker');
+  assert.equal(result.search.effectiveWorkers, 1);
   assert.equal(result.search.failures, 2);
+  assert.ok(result.results.every(r => r.certificate.witnessVerification.valid));
 });
 
 test('more than eight workers is an explicit supported runtime choice', async t => {

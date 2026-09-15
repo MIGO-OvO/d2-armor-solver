@@ -2063,9 +2063,32 @@ async function checkResultWorkspace(browser) {
 
     // (15) stopping the search keeps every verified result on screen.
     await page.locator("#searchProfile").selectOption("deep");
-    await page.evaluate(() => { window.__stoppedSearch = window.solve(); });
+    await page.evaluate(() => {
+      const NativeWorker = window.Worker;
+      // Deliver theory and real progress but hold inventory final replies. A small domain can now
+      // finish before Playwright clicks Stop; cancellation needs pending work,
+      // not a timing assumption about how slowly a successful solver runs.
+      window.Worker = class extends NativeWorker {
+        constructor(url, options) { super(url, options); this.inventory = options?.name === 'armor-engine-solveInventory'; }
+        addEventListener(type, callback, options) {
+          super.addEventListener(type, event => {
+            if (!this.inventory || type !== 'message' || event.data.type !== 'result') callback(event);
+          }, options);
+        }
+      };
+      window.__stoppedSearch = window.solve();
+      window.Worker = NativeWorker;
+    });
     await page.locator("#inventoryResults:not([hidden])").waitFor({ timeout: 60000 });
-    await page.waitForFunction(() => !document.getElementById("cancelSearch").disabled);
+    await page.waitForFunction(() => !document.getElementById("cancelSearch").disabled).catch(async error => {
+      error.message += ' ' + JSON.stringify(await page.evaluate(() => ({
+        status: document.getElementById('searchStatus').textContent,
+        statistics: document.getElementById('searchStatistics').textContent,
+        messages: document.getElementById('messages').textContent,
+        rows: document.querySelectorAll('#planList .inventory-result-option').length,
+      })));
+      throw error;
+    });
     const rowsBeforeStop = await page.locator("#planList .inventory-result-option").count();
     const statsBeforeStop = await page.locator(".inventory-result-stats .inventory-result-stat").count();
     await page.locator("#cancelSearch").click();
@@ -2810,7 +2833,41 @@ async function checkExactInventoryTotals(browser, crowded = false) {
       ["health", "melee", "grenade", "super", "class", "weapons"]
         .map(stat => [stat, parseInt(document.getElementById(`fragVal_${stat}`)?.textContent) || 0])));
     assert.deepEqual(appliedFragments, DIM_FIXTURE.fragments, "the fixture fragments must be applied before solving");
-    await page.evaluate(() => window.solve());
+    if (crowded) {
+      // Hold actual inventory worker replies, not a fake solver result. Theory
+      // must finish and unlock its controls while owned existence is pending.
+      await page.evaluate(() => {
+        const NativeWorker = window.Worker;
+        window.__heldInventoryReplies = [];
+        window.__releaseInventory = () => {
+          window.__inventoryReleased = true;
+          for (const deliver of window.__heldInventoryReplies.splice(0)) deliver();
+        };
+        window.Worker = class extends NativeWorker {
+          constructor(url, options) { super(url, options); this.inventory = options?.name === 'armor-engine-solveInventory'; }
+          addEventListener(type, callback, options) {
+            super.addEventListener(type, event => {
+              if (this.inventory && type === 'message' && event.data.type !== 'started' && !window.__inventoryReleased) {
+                window.__heldInventoryReplies.push(() => callback(event));
+              } else callback(event);
+            }, options);
+          }
+        };
+        window.__theoryDone = false;
+        void window.solve().then(() => { window.__theoryDone = true; });
+      });
+      await page.waitForFunction(() => window.__theoryDone && window.__heldInventoryReplies.length > 0);
+      assert.equal(await page.locator('#btnSolve').isEnabled(), true);
+      assert.equal(await page.locator('#cancelSearch').isEnabled(), true, 'background inventory remains cancellable');
+      assert.doesNotMatch(await page.locator('#messages').innerText(), /已有护甲找到|Found .*owned loadouts/);
+      await page.evaluate(() => window.__releaseInventory());
+      await page.waitForFunction(() => document.getElementById('messages').textContent.includes('无需刷取'));
+    } else {
+      await page.evaluate(() => window.solve());
+    }
+    // solve() now resolves with theory; inventory owns its independent final
+    // publication. A visible theory list is not evidence inventory is done.
+    await page.waitForFunction(() => document.getElementById('cancelSearch').disabled);
     await page.locator("#inventoryResults:not([hidden])").waitFor();
 
     // The fixture's two known builds must be listed as exact, and 精确 is the

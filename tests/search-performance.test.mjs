@@ -61,10 +61,18 @@ test('scheduler scales with hardware and task, leaves CPU and memory headroom', 
   const low = chooseInventorySchedule(large, {hardwareConcurrency: 2, deviceMemory: 2, workersAvailable: true});
   const high = chooseInventorySchedule(large, {hardwareConcurrency: 32, deviceMemory: 32, workersAvailable: true});
   assert.equal(low.workerCount, 1);
-  assert.ok(high.workerCount > 8);
-  assert.ok(high.workerCount < 32);
-  assert.ok(chooseInventorySchedule(large, {hardwareConcurrency: 32, deviceMemory: 1, workersAvailable: true}).workerCount < high.workerCount);
+  assert.equal(high.workerCount, 4);
+  assert.ok(chooseInventorySchedule(large, {hardwareConcurrency: 32, deviceMemory: 1, workersAvailable: true}).workerCount <= high.workerCount);
   assert.equal(chooseInventorySchedule(large, {workersAvailable: false}).workerCount, 0);
   assert.ok(chooseInventorySchedule(large, {hardwareConcurrency: 1e12}).requestedWorkers <= EMERGENCY_WORKER_CAP);
   assert.ok(chooseInventorySchedule({...large, searchProfile: 'fast'}, {hardwareConcurrency: 32, workersAvailable: true}).workerCount < high.workerCount);
+});
+
+test('automatic Fast/Balanced always use one worker and one profile budget, including fuzzy large vaults', () => {
+  for (const searchProfile of ['fast', 'balanced']) for (const cores of [2, 16, 64, 256]) {
+    const payload = {...fixture('large'), searchProfile, userConstraints: {}};
+    const schedule = chooseInventorySchedule(payload, {hardwareConcurrency: cores, deviceMemory: 64, workersAvailable: true});
+    assert.equal(schedule.workerCount, 1);
+    assert.equal(schedule.shardCount, 1);
+  }
 });

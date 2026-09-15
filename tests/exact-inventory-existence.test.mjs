@@ -6,6 +6,23 @@ import {createSearchSession, withSearchProfile} from '../src/core/search-session
 import {assertSolutionConsistency} from '../src/core/solver-v3-contract.mjs';
 import {crowdedDimRequest as request, dimExactFixture as fixture} from './helpers/dim-exact-inventory.mjs';
 import {rebuildReference, seeded, SLOTS} from './helpers/reference-witness.mjs';
+import {residueCompatibleNoWitness} from './helpers/residue-compatible-inventory.mjs';
+
+test('large quotient with compatible residues exhausts exact existence despite expired ranking budget', t => {
+  const payload = {...residueCompatibleNoWitness(), searchLimits: {maxNodes: 1, maxEvaluations: 1, maxTimeMs: 1}};
+  let ticks = 0;
+  const session = createSearchSession({operation: 'solveInventory', profile: 'balanced', now: () => ticks++ * 200000});
+  const result = session.finish(solveInventory(payload, session));
+  const stats = result.search.coverage;
+  assert.notEqual(result.status, 'EXACT_TARGET_PROVEN');
+  assert.equal(stats.exactExistence, 'exhausted');
+  assert.equal(stats.exactPrunedResidues, 0);
+  assert.ok(stats.exactGroups.reduce((a, b) => a * b, 1) >= 100000);
+  assert.ok(stats.exactStates > 1000);
+  assert.equal(result.certificate.proof.complete, false);
+  t.diagnostic(JSON.stringify({groups: stats.exactGroups, states: stats.exactStates,
+    evaluations: stats.mathEvaluations}));
+});
 
 function assertExact(result, payload) {
   assert.equal(result.status, 'EXACT_TARGET_PROVEN');

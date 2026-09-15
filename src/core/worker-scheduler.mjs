@@ -49,7 +49,10 @@ export function chooseInventorySchedule(payload, {hardwareConcurrency = globalTh
   const workMs = profile === 'deep' || !exact ? work.physicalCombinations * 0.24 : work.mathCombinations * 0.002;
   const amortization = profile === 'fast' ? 8 : profile === 'deep' ? 1 : 3;
   const taskLimit = Math.max(1, Math.floor(Math.sqrt(workMs / (overhead * amortization))));
-  const requestedWorkers = parallelism ?? Math.max(1, Math.min(cpuLimit, memoryLimit, taskLimit, work.shardableDomain));
+  // Until budgets are batch-global, extra shards multiply profile effort.
+  // Ordinary Fast/Balanced must stay single-shard regardless of core count.
+  const profileLimit = profile === 'deep' ? 4 : 1;
+  const requestedWorkers = parallelism ?? Math.max(1, Math.min(profileLimit, cpuLimit, memoryLimit, taskLimit, work.shardableDomain));
   // Explicit counts override the cost model for calibration, not the amount
   // of available work. Keep shard coordinates even when the pool is smaller.
   const shards = shardCount ?? requestedWorkers;

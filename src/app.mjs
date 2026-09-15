@@ -30,6 +30,7 @@ import {
   solveInventoryParallelAsync,
   solveLoadoutAsync,
   cancelAllSearches,
+  cancelOperation,
 } from "./core/armor-engine-client.mjs";
 import {
   createBalancedTargetPlan,
@@ -71,6 +72,8 @@ import {
 let searchProfile = "balanced";
 let searchUiRevision = 0;
 let lastSearchResult = null;
+let backgroundInventoryRevision = null;
+let theorySearchRunning = false;
 function searchProofLabel(result, search = result?.search) {
   const labels = {
     exact: ['精确解 · 已证明','精確解 · 已證明','Exact solution · proven'],
@@ -108,6 +111,7 @@ function inventoryProofLabel(result, search = result?.search) {
 }
 // Command Bar is owned exclusively by the global/theory search.
 function renderSearchStatus(result, search = result?.search) {
+  theorySearchRunning = search?.running === true;
   if (result) lastSearchResult = result;
   const status = document.getElementById('searchStatus');
   if (!status) return;
@@ -115,9 +119,11 @@ function renderSearchStatus(result, search = result?.search) {
     : l('正在搜索…','正在搜尋…','Searching…');
   document.getElementById('searchStatistics').textContent = search
     ? `${Math.round(search.elapsedMs)} ms · ${search.nodes.toLocaleString()} ${l('节点','節點','nodes')}` : '';
-  document.getElementById('cancelSearch').disabled = !search?.running;
+  document.getElementById('cancelSearch').disabled = !search?.running && backgroundInventoryRevision !== searchUiRevision;
 }
 function beginSearch() {
+  cancelAllSearches();
+  backgroundInventoryRevision = null;
   lastSearchResult = null;
   const revision = ++searchUiRevision;
   renderSearchStatus(null, {running: true, elapsedMs: 0, nodes: 0});
@@ -148,6 +154,8 @@ function renderSearchControls() {
 }
 function stopSearches() {
   searchUiRevision++;
+  backgroundInventoryRevision = null;
+  theorySearchRunning = false;
   cancelAllSearches();
   document.getElementById('loading')?.classList.remove('show');
   document.getElementById('btnSolve')?.removeAttribute('disabled');
@@ -1357,6 +1365,8 @@ async function solve() {
   const loading = document.getElementById('loading');
   ownedArmorActionStatus = null;
   clearInventoryResults();
+  allSolutions = [];
+  currentSolutionIdx = 0;
   msgs.innerHTML = '';
   delete msgs.dataset.imperfectShown;
   results.classList.remove('show');
@@ -1414,22 +1424,13 @@ async function solve() {
   loading.setAttribute('aria-busy', 'true');
   document.getElementById('btnSolve').disabled = true;
 
+  let inventoryMessage = '';
+  let theoryErrorMessage = '';
   try {
     const solverConstraints = buildVisibleTargetConstraints();
     // Inventory existence is a separate search, not a match against the
     // representative theory witnesses returned below. Keep both proof scopes.
-    const inventoryMessage = importedInventory.length || manualOwnedItems.length
-      ? await solveInventoryRequirement({targets, fragments, requiredStats: [],
-        onlyPlus5Tuning: numPlus3 === 0,
-        constraints: visibleConstraintsToArmor(targets, fragments, solverConstraints),
-        modifierBudget: {numPlus5, numPlus10, numPlus3},
-      }) : '';
-    if (revision !== searchUiRevision) return;
-    msgs.innerHTML = inventoryMessage || '';
-    loading.classList.add('show');
-    loading.setAttribute('aria-busy', 'true');
-    document.getElementById('btnSolve').disabled = true;
-    const solvedSolutions = await solveLoadoutAsync({
+    const theoryTask = solveLoadoutAsync({
       searchProfile,
       target: adjTarget,
       fragments,
@@ -1447,6 +1448,22 @@ async function solve() {
         displayAllResults(partial[0], targets, fragments, {scroll: false, refreshList: false});
       }
     }});
+    if (importedInventory.length || manualOwnedItems.length) {
+      void solveInventoryRequirement({targets, fragments, requiredStats: [], background: true,
+        beforeInline: () => theoryTask.catch(() => {}),
+        onlyPlus5Tuning: numPlus3 === 0,
+        constraints: visibleConstraintsToArmor(targets, fragments, solverConstraints),
+        modifierBudget: {numPlus5, numPlus10, numPlus3},
+      }).then(message => {
+        if (revision !== searchUiRevision || message === null) return;
+        inventoryMessage = message || '';
+        msgs.innerHTML = inventoryMessage + theoryErrorMessage;
+      }).catch(error => {
+        if (revision !== searchUiRevision || error.name === 'AbortError') return;
+        console.error('Background inventory solve failed', error);
+      });
+    }
+    const solvedSolutions = await theoryTask;
     if (revision !== searchUiRevision) return;
     allSolutions = solvedSolutions;
     currentSolutionIdx = 0;
@@ -1459,15 +1476,18 @@ async function solve() {
       displayAllResults(allSolutions[0], targets, fragments, {forceOwnedPlan: true, scroll: !lastInventoryResult?.results?.length});
     }
   } catch (error) {
-    if (error.name === 'AbortError') return;
+    if (revision !== searchUiRevision || error.name === 'AbortError') return;
     console.error('Armor solver failed', error);
-    msgs.innerHTML += '<div class="msg error">' + icon('block') + l(
+    theoryErrorMessage = '<div class="msg error">' + icon('block') + l(
       '求解过程中发生错误，请重试。',
       '求解過程中發生錯誤，請重試。',
       'The solver failed. Please try again.'
     ) + '</div>';
+    msgs.innerHTML = inventoryMessage + theoryErrorMessage;
   } finally {
     if (revision === searchUiRevision) {
+      theorySearchRunning = false;
+      document.getElementById('cancelSearch').disabled = backgroundInventoryRevision !== revision;
       loading.classList.remove('show');
       loading.setAttribute('aria-busy', 'false');
       document.getElementById('btnSolve').disabled = false;
@@ -5039,6 +5059,12 @@ let lastInventoryRequiredStats = [];
 let inventorySolveRevision = 0;
 
 function clearInventoryResults() {
+  if (backgroundInventoryRevision !== null) {
+    cancelOperation('solveInventory');
+    backgroundInventoryRevision = null;
+    const cancelButton = document.getElementById('cancelSearch');
+    if (cancelButton) cancelButton.disabled = !theorySearchRunning;
+  }
   invalidateOwnedPlanCache();
   inventorySolveRevision++;
   lastInventoryResult = null;
@@ -5098,6 +5124,8 @@ async function solveInventoryRequirement({
   onlyPlus5Tuning = document.getElementById('upgradeOnlyPlus5')?.checked === true,
   constraints = {},
   modifierBudget = null,
+  background = false,
+  beforeInline = null,
 } = {}) {
   const fromScratch = calculatorMode === 'solve';
   const button = document.getElementById(fromScratch ? 'btnSolve' : 'btnUpgradeAnalyze');
@@ -5123,15 +5151,20 @@ async function solveInventoryRequirement({
     )}</div>`;
   }
 
-  button.disabled = true;
-  setControls.forEach(control => { control.disabled = true; });
-  loading.querySelector("p").textContent = l(
-    "正在从已有清单中搭配护甲与六维...",
-    "正在從已有清單中搭配防具與六維...",
-    "Searching your inventory for the best loadout..."
-  );
-  loading.classList.add("show");
-  loading.setAttribute("aria-busy", "true");
+  if (!background) {
+    button.disabled = true;
+    setControls.forEach(control => { control.disabled = true; });
+    loading.querySelector("p").textContent = l(
+      "正在从已有清单中搭配护甲与六维...",
+      "正在從已有清單中搭配防具與六維...",
+      "Searching your inventory for the best loadout..."
+    );
+    loading.classList.add("show");
+    loading.setAttribute("aria-busy", "true");
+  } else {
+    backgroundInventoryRevision = revision;
+    document.getElementById('cancelSearch').disabled = false;
+  }
   if (!fromScratch) saveUpgradeDraft();
 
   try {
@@ -5149,7 +5182,7 @@ async function solveInventoryRequirement({
       onlyPlus5Tuning,
       userConstraints: constraints,
     };
-    const result = await solveInventoryParallelAsync(inventoryRequest, {onProgress: (partial) => {
+    const result = await solveInventoryParallelAsync(inventoryRequest, {beforeInline, onProgress: (partial) => {
       if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision) return;
       if (partial?.results?.length) {
         lastInventoryTargets = targets; lastInventoryRequiredStats = requiredStats;
@@ -5185,7 +5218,7 @@ async function solveInventoryRequirement({
     }
     return `<div class="msg warn">${escapeHtml(inventoryProofLabel(result))}</div>`;
   } catch (error) {
-    if (error.name === 'AbortError') return null;
+    if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision || error.name === 'AbortError') return null;
     console.error("Inventory solve failed", error);
     return `<div class="msg error">${icon("block")}${l(
       "库存搭配计算失败，请重试。",
@@ -5193,7 +5226,11 @@ async function solveInventoryRequirement({
       "The inventory solve failed. Please try again."
     )}</div>`;
   } finally {
-    if (revision === searchUiRevision) {
+    if (background && revision === searchUiRevision && solveRevision === inventorySolveRevision) {
+      backgroundInventoryRevision = null;
+      document.getElementById('cancelSearch').disabled = !theorySearchRunning;
+    }
+    if (!background && revision === searchUiRevision && solveRevision === inventorySolveRevision) {
       button.disabled = false;
       setControls.forEach(control => { control.disabled = false; });
       loading.classList.remove("show");

@@ -22,7 +22,7 @@ function harness(result) {
     certifiedFeasible, proofPresentation, l: (...labels) => labels[0],
     document: {getElementById: element, querySelectorAll: () => []},
     calculatorMode: 'solve', searchProfile: 'balanced', searchUiRevision: 1,
-    inventorySolveRevision: 0, lastSearchResult: null, lastInventoryTargets: null,
+    inventorySolveRevision: 0, backgroundInventoryRevision: null, theorySearchRunning: false, lastSearchResult: null, lastInventoryTargets: null,
     lastInventoryRequiredStats: null, lastInventoryResult: null, inventoryResultRevision: 0,
     setRequirement: {type: 'none'}, EXOTIC_CLASSES: {},
     snapshotSetRequirement: () => ({type: 'none'}), sameSetRequirement: () => true,
@@ -62,7 +62,7 @@ test('theory exact + limited inventory with zero owned loadouts keeps both proof
   assert.equal(context.lastInventoryResult.results.length, 0);
   assert.match(message, /已有护甲：暂未找到无需刷取的达标组合 · 库存搜索已达到上限/);
   assert.doesNotMatch(element('searchStatus').textContent + message, /未找到达标解|已证明不存在/);
-  // The production flow also runs inventory before theory: the retained banner
+  // Independent searches may finish in either order: the retained banner
   // must still be scoped when the 60 theoretical plans finish rendering.
   api.renderSearchStatus(theory);
   assert.doesNotMatch(element('searchStatus').textContent + message, /未找到达标解/);
