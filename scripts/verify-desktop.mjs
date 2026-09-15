@@ -14,9 +14,10 @@ for (const candidate of candidates) {
 }
 if (!executablePath) throw new Error("Set CHROME_PATH to Chrome or Edge");
 const server = await preview({ configFile: "desktop/vite.config.mjs", preview: {
-  host: "127.0.0.1", port: 5179, strictPort: true,
+  host: "127.0.0.1", port: 0, strictPort: true,
   headers: { "Content-Security-Policy": config.app.security.csp },
 } });
+const origin = `http://127.0.0.1:${server.httpServer.address().port}/`;
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -28,13 +29,13 @@ try {
   page.on("worker", worker => workers.push(worker.url()));
   await page.route("**/*", route => {
     const url = route.request().url();
-    if (/^https?:/.test(url) && !url.startsWith("http://127.0.0.1:5179/")) {
+    if (/^https?:/.test(url) && !url.startsWith(origin)) {
       external.push(url);
       return route.abort();
     }
     return route.continue();
   });
-  await page.goto("http://127.0.0.1:5179/");
+  await page.goto(origin);
   await page.locator(".desktop-nav button:not([disabled])").first().waitFor();
   await page.getByRole('navigation').getByRole('button', { name: '使用说明', exact: true }).click();
   await page.locator('#guideTitle').waitFor();

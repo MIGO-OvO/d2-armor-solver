@@ -32,6 +32,7 @@ self.addEventListener("message", ({ data }) => {
     // Legacy direct Worker probes retain their unrestricted payload; all UI
     // requests use the versioned start/progress/result envelope.
     if (data.type !== "start") { self.postMessage({id, generation, result: execute(payload)}); return; }
+    self.postMessage({id, generation, type: 'started'});
     const request = withSearchProfile(operation, payload);
     const session = createSearchSession({operation, generation, profile: request.searchProfile,
       onProgress: event => self.postMessage({id, generation, type: "progress", ...event})});

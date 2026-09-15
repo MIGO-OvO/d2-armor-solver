@@ -40,7 +40,7 @@ async function clientFor(t) {
 
 test("parallel API starts separate workers, merges reverse completion in serial canonical order", {timeout: 10000}, async t => {
   const client = await clientFor(t);
-  const payload = request();
+  const payload = request(4);
   const expected = solveInventory({...payload, searchLimits: {exhaustive: true}});
   const pending = client.solveInventoryParallelAsync(payload, {parallelism: 4});
   const settled = Promise.allSettled([pending]);
@@ -61,7 +61,7 @@ test("parallel API starts separate workers, merges reverse completion in serial 
   } finally { client.cancelAllSearches(); await settled; }
 });
 
-test("real worker threads preserve canonical Top-K for 1/2/4/8 threads and reversed inventory", {timeout: 60000}, async t => {
+test("real worker threads preserve canonical Top-K for requested 1/2/4/8 with task-capped pools and reversed inventory", {timeout: 60000}, async t => {
   const original = globalThis.Worker;
   const live = new Set();
   class ThreadWorker {
@@ -116,12 +116,18 @@ test("batch abort releases all workers, ignores stale replies and permits a new 
   assert.ok((await next).results.length);
 });
 
-test("worker failure cancels sibling shards instead of hanging the batch", {timeout: 5000}, async t => {
+test("worker failure requeues its shard on a surviving worker", {timeout: 5000}, async t => {
   const client = await clientFor(t);
-  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 4});
-  const rejection = assert.rejects(pending, /worker failed/);
+  const pending = client.solveInventoryParallelAsync(request(4), {parallelism: 4});
   ControlledWorker.instances[2].events.error({error: new Error("worker failed")});
-  await rejection;
+  for (const worker of ControlledWorker.instances.filter((_, i) => i !== 2)) worker.reply(worker.requests[0], solveInventory(worker.requests[0].payload));
+  await new Promise(resolve => setImmediate(resolve));
+  const retry = ControlledWorker.instances.find(w => w.requests.length === 2);
+  assert.ok(retry);
+  retry.reply(retry.requests[1], solveInventory(retry.requests[1].payload));
+  const result = await pending;
+  assert.equal(result.search.failures, 1);
+  assert.equal(result.search.effectiveWorkers, 3);
   assert.ok(ControlledWorker.instances.every(worker => worker.terminated));
 });
 
@@ -143,10 +149,86 @@ test("incomplete or missing shard evidence cannot produce global infeasibility",
 
 test("invalid thread counts are rejected without creating workers", async t => {
   const client = await clientFor(t);
-  for (const parallelism of [0, -1, 1.5, NaN, Infinity, 9]) {
+  for (const parallelism of [0, -1, 1.5, NaN, Infinity, 257]) {
     await assert.rejects(client.solveInventoryParallelAsync(request(), {parallelism}), RangeError);
   }
   assert.equal(ControlledWorker.instances.length, 0);
+});
+
+test('partial construction failure keeps surviving pool and consumes every shard', async t => {
+  const client = await clientFor(t);
+  globalThis.Worker = class extends ControlledWorker {
+    constructor() { if (ControlledWorker.instances.length >= 2) throw new Error('resource exhausted'); super(); }
+  };
+  const pending = client.solveInventoryParallelAsync(request(4), {parallelism: 4, shardCount: 5});
+  const visited = new Set();
+  for (let turn = 0; turn < 5; turn++) {
+    for (const w of ControlledWorker.instances) for (const message of w.requests) {
+      if (visited.has(message.id)) continue;
+      visited.add(message.id); w.reply(message, solveInventory(message.payload));
+    }
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  const result = await pending;
+  assert.equal(visited.size, 5);
+  assert.equal(result.search.requestedWorkers, 4);
+  assert.equal(result.search.successfullyCreatedWorkers, 2);
+  assert.equal(result.search.shardCount, 5);
+  assert.ok(result.results.every(r => r.certificate.witnessVerification.valid));
+});
+
+test('unavailable, constructor failure and complete runtime failure fall back without a negative proof', async t => {
+  const client = await clientFor(t);
+  const expected = solveInventory(request()).results.map(r => r.canonicalId);
+  for (const worker of [undefined, class { constructor() { throw new Error('no memory'); } }]) {
+    globalThis.Worker = worker;
+    const result = await client.solveInventoryParallelAsync(request(), {parallelism: 2});
+    assert.deepEqual(result.results.map(r => r.canonicalId), expected);
+    assert.equal(result.search.effectiveWorkers, 0);
+  }
+  globalThis.Worker = ControlledWorker;
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2});
+  for (const w of ControlledWorker.instances) w.events.error({message: 'startup failed'});
+  const result = await pending;
+  assert.deepEqual(result.results.map(r => r.canonicalId), expected);
+  assert.equal(result.search.effectiveWorkers, 0);
+  assert.equal(result.search.failures, 2);
+});
+
+test('more than eight workers is an explicit supported runtime choice', async t => {
+  const client = await clientFor(t);
+  const pending = client.solveInventoryParallelAsync(request(12), {parallelism: 12});
+  assert.equal(ControlledWorker.instances.length, 12);
+  for (const w of ControlledWorker.instances) w.reply(w.requests[0], {results: [], searchStats: {frontierComplete: false}});
+  assert.equal((await pending).search.successfullyCreatedWorkers, 12);
+});
+
+test('startup timeout degrades but never times out an acknowledged exact search', async t => {
+  const client = await clientFor(t);
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2});
+  const good = ControlledWorker.instances[0], message = good.requests[0];
+  good.events.message({data: {id: message.id, generation: message.generation, type: 'started'}});
+  t.mock.timers.tick(10001);
+  assert.ok(!good.terminated);
+  good.reply(message, solveInventory(message.payload));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(good.requests.length, 2);
+  good.reply(good.requests[1], solveInventory(good.requests[1].payload));
+  assert.equal((await pending).search.failures, 1);
+});
+
+test('postMessage failure degrades; explicit cancellation never starts queued fallback work', async t => {
+  const client = await clientFor(t);
+  globalThis.Worker = class extends ControlledWorker { postMessage() { throw new Error('clone transport failed'); } };
+  assert.ok((await client.solveInventoryParallelAsync(request(), {parallelism: 2})).results.length);
+  globalThis.Worker = ControlledWorker;
+  ControlledWorker.instances = [];
+  const controller = new AbortController();
+  const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2, shardCount: 5, signal: controller.signal});
+  const rejected = assert.rejects(pending, {name: 'AbortError'});
+  controller.abort(); await rejected;
+  assert.equal(ControlledWorker.instances.reduce((n, w) => n + w.requests.length, 0), 2);
 });
 
 test("2+3 join shard results are disjoint and recover serial Top-K", {timeout: 15000}, () => {

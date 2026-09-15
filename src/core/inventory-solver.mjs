@@ -5,6 +5,7 @@ import {applyManualUpgradeModifiers, compareUpgradeMetrics, createUpgradePieceFr
   evaluateUpgradePieces, getUpgradeConfig, getUpgradeTuningCapability} from "./upgrade-optimizer.mjs";
 import {getUpgradeMathKey, refineUpgradeAssignment} from './upgrade-optimizer.mjs';
 import {createResidualBounds, createInventoryResidueBounds} from './residual-bounds.mjs';
+import {createStatPressure} from './stat-pressure.mjs';
 
 const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
 const keyOf = pieces => pieces.map(piece => `${piece.slot}:id:${piece.sourceId || piece.id || ""}`).sort().join("|");
@@ -61,6 +62,7 @@ export function solveInventoryLoadout({
   maxResults = 12, userConstraints = {}, searchLimits = {},
   fixedExotic = null, autoStatMods = reassignModifiers, modifierBudget = null,
   shardIndex = 0, shardCount = 1,
+  searchOrdering = 'pressure',
 }, problemSpec = createProblemSpec({operation: "solveInventory", targets, fragments, constraints: userConstraints,
   targetDomain: STAT_DOMAIN.VISIBLE, pieces: items,
   inventoryContext: {setRequirement, reassignModifiers, onlyPlus5Tuning, requiredStats, currentPieces,
@@ -223,6 +225,8 @@ export function solveInventoryLoadout({
   // Partition the physical first row BEFORE compression: otherwise choosing a
   // representative on another shard can erase a whole equivalence class.
   const findExact = () => {
+    const order = searchOrdering === 'baseline' ? groups => groups
+      : createStatPressure(rules, modMaximum, onlyPlus5Tuning, suffix, modifierBudget?.numPlus3);
     const quotient = rows.map((row, depth) => {
       const groups = new Map();
       for (const candidate of row.candidates) {
@@ -267,7 +271,7 @@ export function solveInventoryLoadout({
         if (!exactCount && mathCache.has(getUpgradeMathKey(chosen, onlyPlus5Tuning))) expand(0);
         return;
       }
-      for (const group of quotient[depth]) {
+      for (const group of order(quotient[depth], depth, partialMin, partialMax)) {
         const candidate = group[0];
         const exoticCount = exotics + Number(candidate.piece.exotic);
         if (exoticCount > 1 || classId && candidate.piece.classId && classId !== candidate.piece.classId) continue;

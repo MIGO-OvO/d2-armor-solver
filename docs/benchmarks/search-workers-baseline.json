@@ -1,0 +1,4856 @@
+{
+  "label": "baseline",
+  "node": "v24.20.0",
+  "hardwareConcurrency": 16,
+  "memoryGiB": 31.309436798095703,
+  "rows": [
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 224.8725,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 9.074100000000016,
+      "firstFeasibleMs": 9.072000000000003,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 1,
+      "evaluationMs": 3.0725000000000193,
+      "prunedJoint": 0,
+      "refinedAssignments": 1,
+      "statesExamined": 5,
+      "equivalentItems": 0,
+      "mathEquivalentItems": 0,
+      "mergedStates": 0,
+      "peakStates": 5,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "exactStates": 6,
+      "exactPrunedResidues": 0,
+      "exactExistence": "witness",
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 153.6073,
+        "nodes": 5,
+        "firstExactMs": 17.831000000000003,
+        "firstFeasibleMs": 17.82979999999999,
+        "running": false,
+        "termination": "completed",
+        "stageMs": 150,
+        "coverage": {
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 1,
+          "evaluationMs": 3.0725000000000193,
+          "prunedJoint": 0,
+          "refinedAssignments": 1,
+          "statesExamined": 5,
+          "equivalentItems": 0,
+          "mathEquivalentItems": 0,
+          "mergedStates": 0,
+          "peakStates": 5,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "firstFeasibleMs": 9.072000000000003,
+          "firstExactMs": 9.074100000000016,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "exhausted",
+          "jointProjections": 74,
+          "exactGroups": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "exactStates": 6,
+          "exactPrunedResidues": 0,
+          "exactExistence": "witness",
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 1.7022000000000048,
+      "processCpuUs": {
+        "user": 204000,
+        "system": 109000
+      },
+      "memoryGrowth": 25821184,
+      "maxRSS": 80187392
+    },
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 228.40810000000002,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 152.6201,
+      "firstFeasibleMs": 152.6213,
+      "shardCount": 2,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 224.2096,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 152.6201,
+        "firstFeasibleMs": 152.6213,
+        "termination": "completed",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 32.4033,
+      "processCpuUs": {
+        "user": 282000,
+        "system": 156000
+      },
+      "memoryGrowth": 34721792,
+      "maxRSS": 93515776
+    },
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 229.92400000000004,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 143.00150000000002,
+      "firstFeasibleMs": 143.00349999999997,
+      "shardCount": 4,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 226.35789999999997,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 143.00150000000002,
+        "firstFeasibleMs": 143.00349999999997,
+        "termination": "completed",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 33.1934,
+      "processCpuUs": {
+        "user": 328000,
+        "system": 265000
+      },
+      "memoryGrowth": 55721984,
+      "maxRSS": 123772928
+    },
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 329.56269999999995,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 236.2222,
+      "firstFeasibleMs": 236.2244,
+      "shardCount": 6,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 326.3807,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 236.2222,
+        "firstFeasibleMs": 236.2244,
+        "termination": "completed",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 51.301999999999964,
+      "processCpuUs": {
+        "user": 735000,
+        "system": 516000
+      },
+      "memoryGrowth": 76345344,
+      "maxRSS": 159047680
+    },
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 396.2778,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 299.8742,
+      "firstFeasibleMs": 299.8763,
+      "shardCount": 8,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 390.3338,
+        "nodes": 4,
+        "aggregateNodes": 4,
+        "firstExactMs": 299.8742,
+        "firstFeasibleMs": 299.8763,
+        "termination": "budget",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 4,
+            "statesExamined": 4
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 71.6377,
+      "processCpuUs": {
+        "user": 859000,
+        "system": 625000
+      },
+      "memoryGrowth": 89530368,
+      "maxRSS": 181448704
+    },
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "small",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 455.13989999999995,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 164.8089,
+      "firstFeasibleMs": 164.80200000000002,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 2,
+      "evaluationMs": 5.6673000000000116,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 0,
+      "equivalentItems": 1260,
+      "mathEquivalentItems": 1260,
+      "mergedStates": 0,
+      "peakStates": 0,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "exactStates": 11,
+      "exactPrunedResidues": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 283.03220000000005,
+        "nodes": 0,
+        "firstExactMs": 281.2516,
+        "firstFeasibleMs": 281.2485,
+        "running": false,
+        "termination": "budget",
+        "stageMs": 500,
+        "coverage": {
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 2,
+          "evaluationMs": 5.6673000000000116,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 0,
+          "equivalentItems": 1260,
+          "mathEquivalentItems": 1260,
+          "mergedStates": 0,
+          "peakStates": 0,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "firstFeasibleMs": 164.80200000000002,
+          "firstExactMs": 164.8089,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "budget",
+          "jointProjections": 74,
+          "exactGroups": [
+            8,
+            8,
+            8,
+            8,
+            8
+          ],
+          "exactStates": 11,
+          "exactPrunedResidues": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 55.07759999999999,
+      "processCpuUs": {
+        "user": 391000,
+        "system": 204000
+      },
+      "memoryGrowth": 67411968,
+      "maxRSS": 130342912
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 690.562,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 657.1172,
+      "firstFeasibleMs": 657.12,
+      "shardCount": 2,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 672.8723,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 657.1172,
+        "firstFeasibleMs": 657.12,
+        "termination": "budget",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 159.90150000000006,
+      "processCpuUs": {
+        "user": 1094000,
+        "system": 359000
+      },
+      "memoryGrowth": 164499456,
+      "maxRSS": 250142720
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 747.9392,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 713.3613,
+      "firstFeasibleMs": 713.364,
+      "shardCount": 4,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 728.6528,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 713.3613,
+        "firstFeasibleMs": 713.364,
+        "termination": "budget",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 158.6009,
+      "processCpuUs": {
+        "user": 2047000,
+        "system": 562000
+      },
+      "memoryGrowth": 279863296,
+      "maxRSS": 396374016
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 746.4078000000001,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 707.9905,
+      "firstFeasibleMs": 707.994,
+      "shardCount": 6,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 733.0997,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 707.9905,
+        "firstFeasibleMs": 707.994,
+        "termination": "budget",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 202.5906,
+      "processCpuUs": {
+        "user": 3156000,
+        "system": 953000
+      },
+      "memoryGrowth": 391856128,
+      "maxRSS": 542035968
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 749.9297,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 704.708,
+      "firstFeasibleMs": 704.7111,
+      "shardCount": 8,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 734.7299999999999,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 704.708,
+        "firstFeasibleMs": 704.7111,
+        "termination": "budget",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 170.61400000000003,
+      "processCpuUs": {
+        "user": 4672000,
+        "system": 906000
+      },
+      "memoryGrowth": 502128640,
+      "maxRSS": 674086912
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "large",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 283.4022,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 36.07079999999999,
+      "firstFeasibleMs": 36.06790000000001,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 1,
+      "evaluationMs": 8.227199999999982,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 0,
+      "equivalentItems": 73,
+      "mathEquivalentItems": 73,
+      "mergedStates": 0,
+      "peakStates": 0,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        2,
+        1,
+        1,
+        1,
+        1
+      ],
+      "exactStates": 6,
+      "exactPrunedResidues": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 200.4757,
+        "nodes": 0,
+        "firstExactMs": 51.047500000000014,
+        "firstFeasibleMs": 51.04510000000002,
+        "running": false,
+        "termination": "budget",
+        "stageMs": 500,
+        "coverage": {
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 1,
+          "evaluationMs": 8.227199999999982,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 0,
+          "equivalentItems": 73,
+          "mathEquivalentItems": 73,
+          "mergedStates": 0,
+          "peakStates": 0,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "firstFeasibleMs": 36.06790000000001,
+          "firstExactMs": 36.07079999999999,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "budget",
+          "jointProjections": 74,
+          "exactGroups": [
+            2,
+            1,
+            1,
+            1,
+            1
+          ],
+          "exactStates": 6,
+          "exactPrunedResidues": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 1.5657999999999959,
+      "processCpuUs": {
+        "user": 343000,
+        "system": 187000
+      },
+      "memoryGrowth": 42586112,
+      "maxRSS": 99061760
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 289.47860000000003,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 185.6351,
+      "firstFeasibleMs": 185.6376,
+      "shardCount": 2,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 286.0201,
+        "nodes": 3202,
+        "aggregateNodes": 3202,
+        "firstExactMs": 185.6351,
+        "firstFeasibleMs": 185.6376,
+        "termination": "budget",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 3202,
+            "statesExamined": 3202
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 54.7346,
+      "processCpuUs": {
+        "user": 750000,
+        "system": 203000
+      },
+      "memoryGrowth": 71430144,
+      "maxRSS": 145817600
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 324.31690000000003,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 240.4055,
+      "firstFeasibleMs": 240.40810000000002,
+      "shardCount": 4,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 15,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 319.394,
+        "nodes": 8227,
+        "aggregateNodes": 8227,
+        "firstExactMs": 240.4055,
+        "firstFeasibleMs": 240.40810000000002,
+        "termination": "budget",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 2793,
+            "statesExamined": 2793
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 2822,
+            "statesExamined": 2822
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 2612,
+            "statesExamined": 2612
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 15,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 64.9742,
+      "processCpuUs": {
+        "user": 1547000,
+        "system": 328000
+      },
+      "memoryGrowth": 157810688,
+      "maxRSS": 219533312
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 331.069,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 248.37449999999998,
+      "firstFeasibleMs": 248.3769,
+      "shardCount": 6,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 25,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 327.74580000000003,
+        "nodes": 9990,
+        "aggregateNodes": 9990,
+        "firstExactMs": 248.37449999999998,
+        "firstFeasibleMs": 248.3769,
+        "termination": "budget",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1929,
+            "statesExamined": 1929
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1659,
+            "statesExamined": 1659
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 2145,
+            "statesExamined": 2145
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 2068,
+            "statesExamined": 2068
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 2189,
+            "statesExamined": 2189
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 25,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 71.167,
+      "processCpuUs": {
+        "user": 1750000,
+        "system": 641000
+      },
+      "memoryGrowth": 172474368,
+      "maxRSS": 284659712
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 393.6375,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 297.8347,
+      "firstFeasibleMs": 297.8382,
+      "shardCount": 8,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 35,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 390.2704,
+        "nodes": 7590,
+        "aggregateNodes": 7590,
+        "firstExactMs": 297.8347,
+        "firstFeasibleMs": 297.8382,
+        "termination": "budget",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1446,
+            "statesExamined": 1446
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 870,
+            "statesExamined": 870
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1104,
+            "statesExamined": 1104
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1262,
+            "statesExamined": 1262
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1181,
+            "statesExamined": 1181
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1151,
+            "statesExamined": 1151
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 576,
+            "statesExamined": 576
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 35,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 74.63000000000005,
+      "processCpuUs": {
+        "user": 2359000,
+        "system": 828000
+      },
+      "memoryGrowth": 223846400,
+      "maxRSS": 355647488
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 0,
+      "name": "duplicates",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 186.5068,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 7.761099999999999,
+      "firstFeasibleMs": 7.758399999999995,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 1,
+      "evaluationMs": 3.0686999999999784,
+      "prunedJoint": 0,
+      "refinedAssignments": 1,
+      "statesExamined": 5,
+      "equivalentItems": 0,
+      "mathEquivalentItems": 0,
+      "mergedStates": 0,
+      "peakStates": 5,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "exactStates": 6,
+      "exactPrunedResidues": 0,
+      "exactExistence": "witness",
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 113.43459999999999,
+        "nodes": 5,
+        "firstExactMs": 15.469999999999999,
+        "firstFeasibleMs": 15.469099999999997,
+        "running": false,
+        "termination": "completed",
+        "stageMs": 150,
+        "coverage": {
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 1,
+          "evaluationMs": 3.0686999999999784,
+          "prunedJoint": 0,
+          "refinedAssignments": 1,
+          "statesExamined": 5,
+          "equivalentItems": 0,
+          "mathEquivalentItems": 0,
+          "mergedStates": 0,
+          "peakStates": 5,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "firstFeasibleMs": 7.758399999999995,
+          "firstExactMs": 7.761099999999999,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "exhausted",
+          "jointProjections": 74,
+          "exactGroups": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "exactStates": 6,
+          "exactPrunedResidues": 0,
+          "exactExistence": "witness",
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 1.0050999999999988,
+      "processCpuUs": {
+        "user": 188000,
+        "system": 31000
+      },
+      "memoryGrowth": 29446144,
+      "maxRSS": 84721664
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 192.44250000000002,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 126.2716,
+      "firstFeasibleMs": 126.27289999999999,
+      "shardCount": 2,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 189.6469,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 126.2716,
+        "firstFeasibleMs": 126.27289999999999,
+        "termination": "completed",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 36.822599999999994,
+      "processCpuUs": {
+        "user": 235000,
+        "system": 109000
+      },
+      "memoryGrowth": 34193408,
+      "maxRSS": 97751040
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 242.81230000000002,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 159.5431,
+      "firstFeasibleMs": 159.5452,
+      "shardCount": 4,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 240.0071,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 159.5431,
+        "firstFeasibleMs": 159.5452,
+        "termination": "completed",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 31.41040000000001,
+      "processCpuUs": {
+        "user": 469000,
+        "system": 188000
+      },
+      "memoryGrowth": 54968320,
+      "maxRSS": 128913408
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 245.74190000000002,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 162.4572,
+      "firstFeasibleMs": 162.4585,
+      "shardCount": 6,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 242.96560000000002,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 162.4572,
+        "firstFeasibleMs": 162.4585,
+        "termination": "completed",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 31.919099999999986,
+      "processCpuUs": {
+        "user": 468000,
+        "system": 281000
+      },
+      "memoryGrowth": 77168640,
+      "maxRSS": 165752832
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 274.6719,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 190.93869999999998,
+      "firstFeasibleMs": 190.9401,
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 270.2303,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 190.93869999999998,
+        "firstFeasibleMs": 190.9401,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 28.4812,
+      "processCpuUs": {
+        "user": 719000,
+        "system": 391000
+      },
+      "memoryGrowth": 96595968,
+      "maxRSS": 199475200
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "small",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 289.83009999999996,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 108.03749999999997,
+      "firstFeasibleMs": 108.0308,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 2,
+      "evaluationMs": 3.466000000000008,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 0,
+      "equivalentItems": 1260,
+      "mathEquivalentItems": 1260,
+      "mergedStates": 0,
+      "peakStates": 0,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "exactStates": 11,
+      "exactPrunedResidues": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 200.4516,
+        "nodes": 0,
+        "firstExactMs": 194.2612,
+        "firstFeasibleMs": 194.26019999999997,
+        "running": false,
+        "termination": "budget",
+        "stageMs": 500,
+        "coverage": {
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 2,
+          "evaluationMs": 3.466000000000008,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 0,
+          "equivalentItems": 1260,
+          "mathEquivalentItems": 1260,
+          "mergedStates": 0,
+          "peakStates": 0,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "firstFeasibleMs": 108.0308,
+          "firstExactMs": 108.03749999999997,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "budget",
+          "jointProjections": 74,
+          "exactGroups": [
+            8,
+            8,
+            8,
+            8,
+            8
+          ],
+          "exactStates": 11,
+          "exactPrunedResidues": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 15.566299999999991,
+      "processCpuUs": {
+        "user": 313000,
+        "system": 63000
+      },
+      "memoryGrowth": 81813504,
+      "maxRSS": 137097216
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 436.4987,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 413.7642,
+      "firstFeasibleMs": 413.7659,
+      "shardCount": 2,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 422.3675,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 413.7642,
+        "firstFeasibleMs": 413.7659,
+        "termination": "budget",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 104.88050000000004,
+      "processCpuUs": {
+        "user": 891000,
+        "system": 297000
+      },
+      "memoryGrowth": 164876288,
+      "maxRSS": 254341120
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 536.6992,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 513.3328999999999,
+      "firstFeasibleMs": 513.3353,
+      "shardCount": 4,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 523.4116999999999,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 513.3328999999999,
+        "firstFeasibleMs": 513.3353,
+        "termination": "budget",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 114.26070000000004,
+      "processCpuUs": {
+        "user": 1875000,
+        "system": 375000
+      },
+      "memoryGrowth": 279371776,
+      "maxRSS": 397406208
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 904.4435000000001,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 865.5176,
+      "firstFeasibleMs": 865.5231,
+      "shardCount": 6,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 887.4906,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 865.5176,
+        "firstFeasibleMs": 865.5231,
+        "termination": "budget",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 238.72369999999998,
+      "processCpuUs": {
+        "user": 3750000,
+        "system": 812000
+      },
+      "memoryGrowth": 392855552,
+      "maxRSS": 542187520
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 894.0965,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 822.601,
+      "firstFeasibleMs": 822.6031,
+      "shardCount": 8,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 876.1801,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 822.601,
+        "firstFeasibleMs": 822.6031,
+        "termination": "budget",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 240.3021,
+      "processCpuUs": {
+        "user": 4531000,
+        "system": 953000
+      },
+      "memoryGrowth": 504225792,
+      "maxRSS": 672940032
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "large",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 276.0507,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 35.8177,
+      "firstFeasibleMs": 35.8142,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 1,
+      "evaluationMs": 8.352600000000024,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 0,
+      "equivalentItems": 73,
+      "mathEquivalentItems": 73,
+      "mergedStates": 0,
+      "peakStates": 0,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        2,
+        1,
+        1,
+        1,
+        1
+      ],
+      "exactStates": 6,
+      "exactPrunedResidues": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 200.5417,
+        "nodes": 0,
+        "firstExactMs": 53.0697,
+        "firstFeasibleMs": 53.06869999999999,
+        "running": false,
+        "termination": "budget",
+        "stageMs": 500,
+        "coverage": {
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 1,
+          "evaluationMs": 8.352600000000024,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 0,
+          "equivalentItems": 73,
+          "mathEquivalentItems": 73,
+          "mergedStates": 0,
+          "peakStates": 0,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "firstFeasibleMs": 35.8142,
+          "firstExactMs": 35.8177,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "budget",
+          "jointProjections": 74,
+          "exactGroups": [
+            2,
+            1,
+            1,
+            1,
+            1
+          ],
+          "exactStates": 6,
+          "exactPrunedResidues": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 2.4372999999999934,
+      "processCpuUs": {
+        "user": 329000,
+        "system": 156000
+      },
+      "memoryGrowth": 41267200,
+      "maxRSS": 99594240
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 303.0124,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 205.92329999999998,
+      "firstFeasibleMs": 205.9282,
+      "shardCount": 2,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 297.6694,
+        "nodes": 3202,
+        "aggregateNodes": 3202,
+        "firstExactMs": 205.92329999999998,
+        "firstFeasibleMs": 205.9282,
+        "termination": "budget",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 3202,
+            "statesExamined": 3202
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 55.398499999999984,
+      "processCpuUs": {
+        "user": 812000,
+        "system": 297000
+      },
+      "memoryGrowth": 66387968,
+      "maxRSS": 143679488
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 299.8717,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 213.13190000000003,
+      "firstFeasibleMs": 213.13530000000003,
+      "shardCount": 4,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 15,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 294.8441,
+        "nodes": 9288,
+        "aggregateNodes": 9288,
+        "firstExactMs": 213.13190000000003,
+        "firstFeasibleMs": 213.13530000000003,
+        "termination": "budget",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 3035,
+            "statesExamined": 3035
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 3051,
+            "statesExamined": 3051
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 3202,
+            "statesExamined": 3202
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 15,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 70.35849999999999,
+      "processCpuUs": {
+        "user": 1281000,
+        "system": 375000
+      },
+      "memoryGrowth": 131645440,
+      "maxRSS": 220897280
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 332.8441,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 257.5149,
+      "firstFeasibleMs": 257.517,
+      "shardCount": 6,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 25,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 328.7985,
+        "nodes": 8412,
+        "aggregateNodes": 8412,
+        "firstExactMs": 257.5149,
+        "firstFeasibleMs": 257.517,
+        "termination": "budget",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1292,
+            "statesExamined": 1292
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1498,
+            "statesExamined": 1498
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1805,
+            "statesExamined": 1805
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1470,
+            "statesExamined": 1470
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 2347,
+            "statesExamined": 2347
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 25,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 70.19670000000002,
+      "processCpuUs": {
+        "user": 1891000,
+        "system": 609000
+      },
+      "memoryGrowth": 182857728,
+      "maxRSS": 283414528
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 366.4637,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 290.6267,
+      "firstFeasibleMs": 290.6296,
+      "shardCount": 8,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 35,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 362.9864,
+        "nodes": 8656,
+        "aggregateNodes": 8656,
+        "firstExactMs": 290.6267,
+        "firstFeasibleMs": 290.6296,
+        "termination": "budget",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 833,
+            "statesExamined": 833
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1294,
+            "statesExamined": 1294
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 972,
+            "statesExamined": 972
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1220,
+            "statesExamined": 1220
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1790,
+            "statesExamined": 1790
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1696,
+            "statesExamined": 1696
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 851,
+            "statesExamined": 851
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 35,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 77.02470000000002,
+      "processCpuUs": {
+        "user": 2359000,
+        "system": 578000
+      },
+      "memoryGrowth": 237850624,
+      "maxRSS": 361971712
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 1,
+      "name": "duplicates",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 219.5147,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 9.619399999999999,
+      "firstFeasibleMs": 9.615899999999996,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 1,
+      "evaluationMs": 3.6097000000000037,
+      "prunedJoint": 0,
+      "refinedAssignments": 1,
+      "statesExamined": 5,
+      "equivalentItems": 0,
+      "mathEquivalentItems": 0,
+      "mergedStates": 0,
+      "peakStates": 5,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "exactStates": 6,
+      "exactPrunedResidues": 0,
+      "exactExistence": "witness",
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 139.01170000000002,
+        "nodes": 5,
+        "firstExactMs": 19.096300000000014,
+        "firstFeasibleMs": 19.094600000000014,
+        "running": false,
+        "termination": "completed",
+        "stageMs": 150,
+        "coverage": {
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 1,
+          "evaluationMs": 3.6097000000000037,
+          "prunedJoint": 0,
+          "refinedAssignments": 1,
+          "statesExamined": 5,
+          "equivalentItems": 0,
+          "mathEquivalentItems": 0,
+          "mergedStates": 0,
+          "peakStates": 5,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "firstFeasibleMs": 9.615899999999996,
+          "firstExactMs": 9.619399999999999,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "exhausted",
+          "jointProjections": 74,
+          "exactGroups": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "exactStates": 6,
+          "exactPrunedResidues": 0,
+          "exactExistence": "witness",
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 1.4817000000000036,
+      "processCpuUs": {
+        "user": 266000,
+        "system": 47000
+      },
+      "memoryGrowth": 27648000,
+      "maxRSS": 84328448
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 257.99989999999997,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 117.0325,
+      "firstFeasibleMs": 117.03379999999999,
+      "shardCount": 2,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 255.36520000000002,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 117.0325,
+        "firstFeasibleMs": 117.03379999999999,
+        "termination": "completed",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 25.995800000000003,
+      "processCpuUs": {
+        "user": 328000,
+        "system": 157000
+      },
+      "memoryGrowth": 33734656,
+      "maxRSS": 97562624
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 204.1864,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 136.64120000000003,
+      "firstFeasibleMs": 136.64210000000003,
+      "shardCount": 4,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 201.41410000000002,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 136.64120000000003,
+        "firstFeasibleMs": 136.64210000000003,
+        "termination": "completed",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 25.356099999999998,
+      "processCpuUs": {
+        "user": 250000,
+        "system": 297000
+      },
+      "memoryGrowth": 54923264,
+      "maxRSS": 128901120
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 226.1766,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 155.627,
+      "firstFeasibleMs": 155.62779999999998,
+      "shardCount": 6,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 223.21069999999997,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 155.627,
+        "firstFeasibleMs": 155.62779999999998,
+        "termination": "completed",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 31.214100000000002,
+      "processCpuUs": {
+        "user": 593000,
+        "system": 281000
+      },
+      "memoryGrowth": 76656640,
+      "maxRSS": 165203968
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 90,
+        "melee": 100,
+        "grenade": 70,
+        "super": 40,
+        "class": 65,
+        "weapons": 135
+      },
+      "wallMs": 312.3788,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 238.8261,
+      "firstFeasibleMs": 238.8281,
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 309.6106,
+        "nodes": 5,
+        "aggregateNodes": 5,
+        "firstExactMs": 238.8261,
+        "firstFeasibleMs": 238.8281,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 5,
+            "statesExamined": 5
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 51.032100000000014,
+      "processCpuUs": {
+        "user": 735000,
+        "system": 579000
+      },
+      "memoryGrowth": 98140160,
+      "maxRSS": 201490432
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "small",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 374.2979,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 133.45349999999996,
+      "firstFeasibleMs": 133.44989999999996,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 2,
+      "evaluationMs": 3.3953999999999382,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 0,
+      "equivalentItems": 1260,
+      "mathEquivalentItems": 1260,
+      "mergedStates": 0,
+      "peakStates": 0,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "exactStates": 11,
+      "exactPrunedResidues": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 279.1073,
+        "nodes": 0,
+        "firstExactMs": 277.7372,
+        "firstFeasibleMs": 277.73629999999997,
+        "running": false,
+        "termination": "budget",
+        "stageMs": 500,
+        "coverage": {
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 2,
+          "evaluationMs": 3.3953999999999382,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 0,
+          "equivalentItems": 1260,
+          "mathEquivalentItems": 1260,
+          "mergedStates": 0,
+          "peakStates": 0,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "firstFeasibleMs": 133.44989999999996,
+          "firstExactMs": 133.45349999999996,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "budget",
+          "jointProjections": 74,
+          "exactGroups": [
+            8,
+            8,
+            8,
+            8,
+            8
+          ],
+          "exactStates": 11,
+          "exactPrunedResidues": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 15.56819999999999,
+      "processCpuUs": {
+        "user": 329000,
+        "system": 109000
+      },
+      "memoryGrowth": 78950400,
+      "maxRSS": 135495680
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 507.64289999999994,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 489.7506,
+      "firstFeasibleMs": 489.75280000000004,
+      "shardCount": 2,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 495.10460000000006,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 489.7506,
+        "firstFeasibleMs": 489.75280000000004,
+        "termination": "budget",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 105.87630000000007,
+      "processCpuUs": {
+        "user": 922000,
+        "system": 344000
+      },
+      "memoryGrowth": 162680832,
+      "maxRSS": 253423616
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 720.2612,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 678.6912,
+      "firstFeasibleMs": 678.694,
+      "shardCount": 4,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 690.6983,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 678.6912,
+        "firstFeasibleMs": 678.694,
+        "termination": "budget",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 133.471,
+      "processCpuUs": {
+        "user": 2437000,
+        "system": 516000
+      },
+      "memoryGrowth": 281903104,
+      "maxRSS": 400101376
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 973.4713,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 886.6353999999999,
+      "firstFeasibleMs": 886.6397,
+      "shardCount": 6,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 912.2759000000001,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 886.6353999999999,
+        "firstFeasibleMs": 886.6397,
+        "termination": "budget",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 290.85709999999995,
+      "processCpuUs": {
+        "user": 3344000,
+        "system": 734000
+      },
+      "memoryGrowth": 393650176,
+      "maxRSS": 543064064
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 140
+      },
+      "wallMs": 891.8397,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 837.311,
+      "firstFeasibleMs": 837.3137,
+      "shardCount": 8,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 870.1005,
+        "nodes": 0,
+        "aggregateNodes": 0,
+        "firstExactMs": 837.311,
+        "firstFeasibleMs": 837.3137,
+        "termination": "budget",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 271.4255,
+      "processCpuUs": {
+        "user": 4531000,
+        "system": 1203000
+      },
+      "memoryGrowth": 507998208,
+      "maxRSS": 688529408
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "large",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 1,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 274.95189999999997,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 31.269799999999975,
+      "firstFeasibleMs": 31.266999999999996,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 1,
+      "evaluationMs": 7.554300000000012,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 0,
+      "equivalentItems": 73,
+      "mathEquivalentItems": 73,
+      "mergedStates": 0,
+      "peakStates": 0,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxStates": 10000,
+      "maxNodes": 100000,
+      "maxEvaluations": 3000,
+      "maxTimeMs": 200,
+      "termination": "exhausted",
+      "jointProjections": 74,
+      "exactGroups": [
+        2,
+        1,
+        1,
+        1,
+        1
+      ],
+      "exactStates": 6,
+      "exactPrunedResidues": 0,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "elapsedMs": 200.45530000000002,
+        "nodes": 0,
+        "firstExactMs": 46.235600000000005,
+        "firstFeasibleMs": 46.23429999999999,
+        "running": false,
+        "termination": "budget",
+        "stageMs": 500,
+        "coverage": {
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 1,
+          "evaluationMs": 7.554300000000012,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 0,
+          "equivalentItems": 73,
+          "mathEquivalentItems": 73,
+          "mergedStates": 0,
+          "peakStates": 0,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "firstFeasibleMs": 31.266999999999996,
+          "firstExactMs": 31.269799999999975,
+          "maxStates": 10000,
+          "maxNodes": 100000,
+          "maxEvaluations": 3000,
+          "maxTimeMs": 200,
+          "termination": "budget",
+          "jointProjections": 74,
+          "exactGroups": [
+            2,
+            1,
+            1,
+            1,
+            1
+          ],
+          "exactStates": 6,
+          "exactPrunedResidues": 0,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 1.6751000000000005,
+      "processCpuUs": {
+        "user": 297000,
+        "system": 203000
+      },
+      "memoryGrowth": 41787392,
+      "maxRSS": 99586048
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 2,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 304.0621,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 243.06770000000003,
+      "firstFeasibleMs": 243.07059999999998,
+      "shardCount": 2,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 5,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 300.30109999999996,
+        "nodes": 3202,
+        "aggregateNodes": 3202,
+        "firstExactMs": 243.06770000000003,
+        "firstFeasibleMs": 243.07059999999998,
+        "termination": "budget",
+        "parallelism": 2,
+        "workerCount": 2,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 3202,
+            "statesExamined": 3202
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 5,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 73.85359999999997,
+      "processCpuUs": {
+        "user": 859000,
+        "system": 266000
+      },
+      "memoryGrowth": 67076096,
+      "maxRSS": 143196160
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 4,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 330.14739999999995,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 251.77489999999997,
+      "firstFeasibleMs": 251.77880000000002,
+      "shardCount": 4,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 15,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 325.1168,
+        "nodes": 4874,
+        "aggregateNodes": 4874,
+        "firstExactMs": 251.77489999999997,
+        "firstFeasibleMs": 251.77880000000002,
+        "termination": "budget",
+        "parallelism": 4,
+        "workerCount": 4,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1244,
+            "statesExamined": 1244
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1943,
+            "statesExamined": 1943
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1687,
+            "statesExamined": 1687
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 15,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 65.3475,
+      "processCpuUs": {
+        "user": 1547000,
+        "system": 297000
+      },
+      "memoryGrowth": 120881152,
+      "maxRSS": 219885568
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 6,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 348.95189999999997,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 277.0295,
+      "firstFeasibleMs": 277.033,
+      "shardCount": 6,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 25,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 344.90099999999995,
+        "nodes": 5403,
+        "aggregateNodes": 5403,
+        "firstExactMs": 277.0295,
+        "firstFeasibleMs": 277.033,
+        "termination": "budget",
+        "parallelism": 6,
+        "workerCount": 6,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1743,
+            "statesExamined": 1743
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 983,
+            "statesExamined": 983
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 1595,
+            "statesExamined": 1595
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 734,
+            "statesExamined": 734
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 348,
+            "statesExamined": 348
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 25,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 71.68269999999998,
+      "processCpuUs": {
+        "user": 1640000,
+        "system": 594000
+      },
+      "memoryGrowth": 188940288,
+      "maxRSS": 282550272
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 8,
+      "profile": "fast",
+      "targets": {
+        "health": 20,
+        "melee": 80,
+        "grenade": 80,
+        "super": 50,
+        "class": 100,
+        "weapons": 180
+      },
+      "wallMs": 411.5222,
+      "status": "EXACT_TARGET_PROVEN",
+      "verified": true,
+      "firstExactMs": 359.8442,
+      "firstFeasibleMs": 359.8484,
+      "shardCount": 8,
+      "frontierComplete": false,
+      "assignmentComplete": false,
+      "statesExamined": 35,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "fast",
+        "running": false,
+        "elapsedMs": 407.8189,
+        "nodes": 3842,
+        "aggregateNodes": 3842,
+        "firstExactMs": 359.8442,
+        "firstFeasibleMs": 359.8484,
+        "termination": "budget",
+        "parallelism": 8,
+        "workerCount": 8,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 132,
+            "statesExamined": 132
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 793,
+            "statesExamined": 793
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 0,
+            "statesExamined": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 632,
+            "statesExamined": 632
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 573,
+            "statesExamined": 573
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 598,
+            "statesExamined": 598
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 443,
+            "statesExamined": 443
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "budget",
+            "frontierTermination": null,
+            "frontierComplete": false,
+            "nodes": 671,
+            "statesExamined": 671
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": false,
+          "assignmentComplete": false,
+          "statesExamined": 35,
+          "complete": false
+        }
+      },
+      "mainThreadDelayMs": 101.1807,
+      "processCpuUs": {
+        "user": 2156000,
+        "system": 985000
+      },
+      "memoryGrowth": 226062336,
+      "maxRSS": 363347968
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 10,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 12,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    },
+    {
+      "trial": 2,
+      "name": "duplicates",
+      "workers": 14,
+      "failed": "file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133\r\n    throw new RangeError(\"parallelism must be an integer between 1 and 8\");\r\n          ^\r\n\r\nRangeError: parallelism must be an integer between 1 and 8\r\n    at Module.solveInventoryParallelAsync (file:///D:/Dev/GitHub/d2-armor-solver/src/core/armor-engine-client.mjs:133:11)\r\n    at file:///D:/Dev/GitHub/d2-armor-solver/scripts/benchmark-search-performance.mjs:45:33\r\n\r\nNode.js v24.20.0\r\n"
+    }
+  ]
+}

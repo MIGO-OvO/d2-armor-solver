@@ -1,0 +1,6080 @@
+{
+  "label": "verified-deep",
+  "node": "v24.20.0",
+  "hardwareConcurrency": 16,
+  "memoryGiB": 31.309436798095703,
+  "rows": [
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 0,
+      "profile": "deep",
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 472.7347,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 372.49309999999997,
+      "firstFeasibleMs": 264.411,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 466.3816,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 372.49309999999997,
+        "firstFeasibleMs": 264.411,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 8,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 8,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 8,
+          "workerCount": 8,
+          "shardCount": 8,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          151.05349999999999,
+          155.10039999999998,
+          151.6905,
+          157.59070000000003,
+          157.56119999999999,
+          159.2015,
+          158.69310000000002,
+          157.9352
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 58.5308,
+        "finalMergeMs": 11.87239999999997,
+        "cloneMs": 4.2485000000000355,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 79215.67847674394,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 69315.8340185309,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 70.8911,
+      "processCpuUs": {
+        "user": 2703000,
+        "system": 922000
+      },
+      "memoryGrowth": 214470656,
+      "maxRSS": 268464128
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 1,
+      "profile": "deep",
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 32768,
+      "evaluationMs": 651.6756000000116,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 37448,
+      "equivalentItems": 0,
+      "mathEquivalentItems": 0,
+      "mergedStates": 0,
+      "peakStates": 5,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        8,
+        64,
+        512,
+        4096,
+        32768
+      ],
+      "firstFeasibleMs": 298.7265,
+      "firstExactMs": 449.5662,
+      "maxStates": 2000000,
+      "maxNodes": 500000000,
+      "maxEvaluations": 5000000,
+      "maxTimeMs": 120000,
+      "termination": "exhausted",
+      "jointProjections": 0,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 1374.1373999999998,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 1367.4048,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 449.5662,
+        "firstFeasibleMs": 298.7265,
+        "termination": "completed",
+        "parallelism": 1,
+        "workerCount": 1,
+        "requestedWorkers": 1,
+        "successfullyCreatedWorkers": 1,
+        "effectiveWorkers": 1,
+        "creationShortfall": 0,
+        "shardCount": 1,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 1,
+          "workerCount": 1,
+          "shardCount": 1,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          219.1847
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 0,
+        "finalMergeMs": 0,
+        "cloneMs": 0.3439999999999941,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 37448,
+            "statesExamined": 37448,
+            "exactStates": 0,
+            "mathEvaluations": 32768,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 32768,
+          "evaluationMs": 651.6756000000116,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 37448,
+          "equivalentItems": 0,
+          "mathEquivalentItems": 0,
+          "mergedStates": 0,
+          "peakStates": 5,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            8,
+            64,
+            512,
+            4096,
+            32768
+          ],
+          "firstFeasibleMs": 43.649,
+          "firstExactMs": 92.72090000000003,
+          "maxStates": 2000000,
+          "maxNodes": 500000000,
+          "maxEvaluations": 5000000,
+          "maxTimeMs": 120000,
+          "termination": "exhausted",
+          "jointProjections": 0,
+          "complete": true
+        }
+      },
+      "nodesPerSecond": 27252.00551269473,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 23846.232552872807,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 26.120499999999993,
+      "processCpuUs": {
+        "user": 1141000,
+        "system": 328000
+      },
+      "memoryGrowth": 31006720,
+      "maxRSS": 84750336
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 2,
+      "profile": "deep",
+      "shardCount": 2,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 675.4107,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 298.8024,
+      "firstFeasibleMs": 222.9176,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 669.329,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 298.8024,
+        "firstFeasibleMs": 222.9176,
+        "termination": "completed",
+        "parallelism": 2,
+        "workerCount": 2,
+        "requestedWorkers": 2,
+        "successfullyCreatedWorkers": 2,
+        "effectiveWorkers": 2,
+        "creationShortfall": 0,
+        "shardCount": 2,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 2,
+          "workerCount": 2,
+          "shardCount": 2,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          91.70679999999999,
+          91.0555
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 46.6456,
+        "finalMergeMs": 6.838600000000042,
+        "cloneMs": 0.8489000000000004,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 18724,
+            "statesExamined": 18724,
+            "exactStates": 0,
+            "mathEvaluations": 16384,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 18724,
+            "statesExamined": 18724,
+            "exactStates": 0,
+            "mathEvaluations": 16384,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 55444.78344805612,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 48515.66609767953,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 80.88659999999999,
+      "processCpuUs": {
+        "user": 1343000,
+        "system": 484000
+      },
+      "memoryGrowth": 68698112,
+      "maxRSS": 118308864
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 4,
+      "profile": "deep",
+      "shardCount": 4,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 473.58389999999997,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 295.7863,
+      "firstFeasibleMs": 193.77450000000002,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 466.07269999999994,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 295.7863,
+        "firstFeasibleMs": 193.77450000000002,
+        "termination": "completed",
+        "parallelism": 4,
+        "workerCount": 4,
+        "requestedWorkers": 4,
+        "successfullyCreatedWorkers": 4,
+        "effectiveWorkers": 4,
+        "creationShortfall": 0,
+        "shardCount": 4,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 4,
+          "workerCount": 4,
+          "shardCount": 4,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          101.87109999999998,
+          104.1604,
+          102.6828,
+          103.3807
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 39.28039999999987,
+        "finalMergeMs": 7.555000000000064,
+        "cloneMs": 1.8548999999999864,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 79073.63404879262,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 69191.54135096232,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 50.5068,
+      "processCpuUs": {
+        "user": 1438000,
+        "system": 484000
+      },
+      "memoryGrowth": 113926144,
+      "maxRSS": 167645184
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 6,
+      "profile": "deep",
+      "shardCount": 6,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 622.8169,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 351.25379999999996,
+      "firstFeasibleMs": 223.4775,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 617.4434,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 351.25379999999996,
+        "firstFeasibleMs": 223.4775,
+        "termination": "completed",
+        "parallelism": 6,
+        "workerCount": 6,
+        "requestedWorkers": 6,
+        "successfullyCreatedWorkers": 6,
+        "effectiveWorkers": 6,
+        "creationShortfall": 0,
+        "shardCount": 6,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 6,
+          "workerCount": 6,
+          "shardCount": 6,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          108.5158,
+          111.58679999999998,
+          110.09429999999999,
+          114.59060000000001,
+          116.681,
+          115.3228
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 91.86590000000001,
+        "finalMergeMs": 10.169499999999971,
+        "cloneMs": 2.8007999999999953,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 60126.820579210354,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 52612.573615134716,
+      "shardImbalance": 1.5,
+      "mainThreadDelayMs": 62.28169999999997,
+      "processCpuUs": {
+        "user": 2375000,
+        "system": 641000
+      },
+      "memoryGrowth": 157810688,
+      "maxRSS": 222035968
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 8,
+      "profile": "deep",
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 426.7915,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 348.7656,
+      "firstFeasibleMs": 256.4827,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 420.6882,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 348.7656,
+        "firstFeasibleMs": 256.4827,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 8,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 8,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 8,
+          "workerCount": 8,
+          "shardCount": 8,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          136.3796,
+          142.1434,
+          142.1418,
+          141.16910000000001,
+          139.3195,
+          151.3122,
+          149.815,
+          146.28629999999998
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 45.282399999999996,
+        "finalMergeMs": 11.523900000000026,
+        "cloneMs": 4.672499999999999,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 87743.07829467082,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 76777.53657230755,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 65.58789999999996,
+      "processCpuUs": {
+        "user": 2782000,
+        "system": 625000
+      },
+      "memoryGrowth": 214306816,
+      "maxRSS": 270000128
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 10,
+      "profile": "deep",
+      "shardCount": 10,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 491.25870000000003,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 374.0961,
+      "firstFeasibleMs": 280.3157,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 483.805,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 374.0961,
+        "firstFeasibleMs": 280.3157,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 10,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 10,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 10,
+          "workerCount": 8,
+          "shardCount": 10,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          156.374,
+          153.29630000000003,
+          161.4913,
+          159.8234,
+          169.4183,
+          172.78119999999998,
+          171.9048,
+          0.6764999999999759,
+          187.2462,
+          1.037900000000036
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 44.998699999999985,
+        "finalMergeMs": 11.72059999999999,
+        "cloneMs": 5.083600000000018,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 10,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 76228.67544126953,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 66702.12659847041,
+      "shardImbalance": 1.25,
+      "mainThreadDelayMs": 73.92290000000003,
+      "processCpuUs": {
+        "user": 2687000,
+        "system": 969000
+      },
+      "memoryGrowth": 218845184,
+      "maxRSS": 268976128
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 12,
+      "profile": "deep",
+      "shardCount": 12,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 525.5367,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 360.4916,
+      "firstFeasibleMs": 272.317,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 518.8653,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 360.4916,
+        "firstFeasibleMs": 272.317,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 12,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 12,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 12,
+          "workerCount": 8,
+          "shardCount": 12,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          146.6659,
+          145.769,
+          150.602,
+          147.4219,
+          145.5765,
+          146.2158,
+          149.10760000000002,
+          148.7315,
+          4.988499999999988,
+          3.8375000000000057,
+          2.7565999999999917,
+          0.6628999999999792
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 59.19840000000005,
+        "finalMergeMs": 10.346599999999967,
+        "cloneMs": 6.617699999999999,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 10,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 11,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 12,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 71256.67912440748,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 62351.497050539,
+      "shardImbalance": 1.5,
+      "mainThreadDelayMs": 70.6866,
+      "processCpuUs": {
+        "user": 2531000,
+        "system": 812000
+      },
+      "memoryGrowth": 223997952,
+      "maxRSS": 277188608
+    },
+    {
+      "trial": 0,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 14,
+      "profile": "deep",
+      "shardCount": 14,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 447.66270000000003,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 356.9189,
+      "firstFeasibleMs": 269.24190000000004,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 441.20590000000004,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 356.9189,
+        "firstFeasibleMs": 269.24190000000004,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 14,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 14,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 14,
+          "workerCount": 8,
+          "shardCount": 14,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          136.86399999999998,
+          138.45340000000002,
+          136.231,
+          137.9907,
+          136.0205,
+          141.1573,
+          143.28719999999998,
+          142.6434,
+          2.213099999999997,
+          2.2646000000000015,
+          1.3117000000000019,
+          1.0352999999999781,
+          0.6047000000000082,
+          1.0478999999999985
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 51.26320000000004,
+        "finalMergeMs": 16.134400000000028,
+        "cloneMs": 6.288600000000002,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 10,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 11,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 12,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 13,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 14,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 83652.26765598294,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 73197.96802369284,
+      "shardImbalance": 1.7500000000000002,
+      "mainThreadDelayMs": 74.60420000000002,
+      "processCpuUs": {
+        "user": 2750000,
+        "system": 766000
+      },
+      "memoryGrowth": 236711936,
+      "maxRSS": 288649216
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 0,
+      "profile": "deep",
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 424.32910000000004,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 357.5307,
+      "firstFeasibleMs": 256.42100000000005,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 417.3817,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 357.5307,
+        "firstFeasibleMs": 256.42100000000005,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 8,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 8,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 8,
+          "workerCount": 8,
+          "shardCount": 8,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          139.30610000000001,
+          146.94080000000002,
+          145.07999999999998,
+          147.3225,
+          155.012,
+          151.2418,
+          154.9876,
+          160.7518
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 40.61180000000002,
+        "finalMergeMs": 14.158500000000004,
+        "cloneMs": 3.5112000000000023,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 88252.25514818568,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 77223.07991603686,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 60.44349999999997,
+      "processCpuUs": {
+        "user": 2610000,
+        "system": 562000
+      },
+      "memoryGrowth": 215855104,
+      "maxRSS": 269258752
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 1,
+      "profile": "deep",
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 32768,
+      "evaluationMs": 484.9658000000094,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 37448,
+      "equivalentItems": 0,
+      "mathEquivalentItems": 0,
+      "mergedStates": 0,
+      "peakStates": 5,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        8,
+        64,
+        512,
+        4096,
+        32768
+      ],
+      "firstFeasibleMs": 118.99800000000002,
+      "firstExactMs": 269.08099999999996,
+      "maxStates": 2000000,
+      "maxNodes": 500000000,
+      "maxEvaluations": 5000000,
+      "maxTimeMs": 120000,
+      "termination": "exhausted",
+      "jointProjections": 0,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 894.1474000000001,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 888.3910000000001,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 269.08099999999996,
+        "firstFeasibleMs": 118.99800000000002,
+        "termination": "completed",
+        "parallelism": 1,
+        "workerCount": 1,
+        "requestedWorkers": 1,
+        "successfullyCreatedWorkers": 1,
+        "effectiveWorkers": 1,
+        "creationShortfall": 0,
+        "shardCount": 1,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 1,
+          "workerCount": 1,
+          "shardCount": 1,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          81.4508
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 0,
+        "finalMergeMs": 0,
+        "cloneMs": 0.47809999999999775,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 37448,
+            "statesExamined": 37448,
+            "exactStates": 0,
+            "mathEvaluations": 32768,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 32768,
+          "evaluationMs": 484.9658000000094,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 37448,
+          "equivalentItems": 0,
+          "mathEquivalentItems": 0,
+          "mergedStates": 0,
+          "peakStates": 5,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            8,
+            64,
+            512,
+            4096,
+            32768
+          ],
+          "firstFeasibleMs": 19.833699999999993,
+          "firstExactMs": 51.786699999999996,
+          "maxStates": 2000000,
+          "maxNodes": 500000000,
+          "maxEvaluations": 5000000,
+          "maxTimeMs": 120000,
+          "termination": "exhausted",
+          "jointProjections": 0,
+          "complete": true
+        }
+      },
+      "nodesPerSecond": 41881.2379256485,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 36647.201568779376,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 2.4857000000000085,
+      "processCpuUs": {
+        "user": 1015000,
+        "system": 218000
+      },
+      "memoryGrowth": 27742208,
+      "maxRSS": 84975616
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 2,
+      "profile": "deep",
+      "shardCount": 2,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 595.4963,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 277.8496,
+      "firstFeasibleMs": 170.41559999999998,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 588.7018999999999,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 277.8496,
+        "firstFeasibleMs": 170.41559999999998,
+        "termination": "completed",
+        "parallelism": 2,
+        "workerCount": 2,
+        "requestedWorkers": 2,
+        "successfullyCreatedWorkers": 2,
+        "effectiveWorkers": 2,
+        "creationShortfall": 0,
+        "shardCount": 2,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 2,
+          "workerCount": 2,
+          "shardCount": 2,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          82.71820000000001,
+          82.4384
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 37.72980000000004,
+        "finalMergeMs": 4.380400000000009,
+        "cloneMs": 0.9491000000000014,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 18724,
+            "statesExamined": 18724,
+            "exactStates": 0,
+            "mathEvaluations": 16384,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 18724,
+            "statesExamined": 18724,
+            "exactStates": 0,
+            "mathEvaluations": 16384,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 62885.36133641804,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 55026.37044092465,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 49.046899999999994,
+      "processCpuUs": {
+        "user": 1312000,
+        "system": 313000
+      },
+      "memoryGrowth": 68534272,
+      "maxRSS": 118542336
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 4,
+      "profile": "deep",
+      "shardCount": 4,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 402.84720000000004,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 286.5264,
+      "firstFeasibleMs": 185.1812,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 396.838,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 286.5264,
+        "firstFeasibleMs": 185.1812,
+        "termination": "completed",
+        "parallelism": 4,
+        "workerCount": 4,
+        "requestedWorkers": 4,
+        "successfullyCreatedWorkers": 4,
+        "effectiveWorkers": 4,
+        "creationShortfall": 0,
+        "shardCount": 4,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 4,
+          "workerCount": 4,
+          "shardCount": 4,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          91.5491,
+          93.5694,
+          93.56850000000001,
+          94.3688
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 31.001600000000025,
+        "finalMergeMs": 7.011599999999987,
+        "cloneMs": 1.6834999999999951,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 92958.32265931102,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 81341.01465766672,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 52.20780000000002,
+      "processCpuUs": {
+        "user": 1625000,
+        "system": 453000
+      },
+      "memoryGrowth": 112717824,
+      "maxRSS": 168300544
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 6,
+      "profile": "deep",
+      "shardCount": 6,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 458.42920000000004,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 320.5476,
+      "firstFeasibleMs": 217.8603,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 452.3914,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 320.5476,
+        "firstFeasibleMs": 217.8603,
+        "termination": "completed",
+        "parallelism": 6,
+        "workerCount": 6,
+        "requestedWorkers": 6,
+        "successfullyCreatedWorkers": 6,
+        "effectiveWorkers": 6,
+        "creationShortfall": 0,
+        "shardCount": 6,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 6,
+          "workerCount": 6,
+          "shardCount": 6,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          121.3683,
+          119.7123,
+          121.85940000000001,
+          121.6563,
+          122.2569,
+          125.3556
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 33.8537,
+        "finalMergeMs": 8.84680000000003,
+        "cloneMs": 2.7471000000000174,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 81687.64118865028,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 71478.86740198922,
+      "shardImbalance": 1.5,
+      "mainThreadDelayMs": 60.6001,
+      "processCpuUs": {
+        "user": 2078000,
+        "system": 547000
+      },
+      "memoryGrowth": 162684928,
+      "maxRSS": 220602368
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 8,
+      "profile": "deep",
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 455.39509999999996,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 345.3267,
+      "firstFeasibleMs": 254.615,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 448.6184,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 345.3267,
+        "firstFeasibleMs": 254.615,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 8,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 8,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 8,
+          "workerCount": 8,
+          "shardCount": 8,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          131.7522,
+          132.6121,
+          137.4237,
+          136.86360000000002,
+          138.8422,
+          138.5609,
+          137.1991,
+          138.24099999999999
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 56.45259999999996,
+        "finalMergeMs": 28.85419999999999,
+        "cloneMs": 4.3574999999999875,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 82231.89050562908,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 71955.10008781386,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 80.5152,
+      "processCpuUs": {
+        "user": 2703000,
+        "system": 781000
+      },
+      "memoryGrowth": 156237824,
+      "maxRSS": 270393344
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 10,
+      "profile": "deep",
+      "shardCount": 10,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 400.4622,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 337.5879,
+      "firstFeasibleMs": 245.2151,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 393.6184,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 337.5879,
+        "firstFeasibleMs": 245.2151,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 10,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 10,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 10,
+          "workerCount": 8,
+          "shardCount": 10,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          127.01680000000002,
+          128.90230000000003,
+          128.4734,
+          131.2288,
+          134.72859999999997,
+          132.5846,
+          133.5131,
+          136.5623,
+          82.08860000000001,
+          0.98599999999999
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 53.04740000000004,
+        "finalMergeMs": 11.41360000000003,
+        "cloneMs": 4.6377000000000095,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 10,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 93511.9469453047,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 81825.45069172571,
+      "shardImbalance": 1.25,
+      "mainThreadDelayMs": 76.9513,
+      "processCpuUs": {
+        "user": 2672000,
+        "system": 609000
+      },
+      "memoryGrowth": 212463616,
+      "maxRSS": 266428416
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 12,
+      "profile": "deep",
+      "shardCount": 12,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 506.6756,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 366.1354,
+      "firstFeasibleMs": 263.2668,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 500.1285,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 366.1354,
+        "firstFeasibleMs": 263.2668,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 12,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 12,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 12,
+          "workerCount": 8,
+          "shardCount": 12,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          140.76549999999997,
+          150.7984,
+          154.3547,
+          153.5382,
+          152.9678,
+          157.4798,
+          157.364,
+          164.29649999999998,
+          72.40879999999999,
+          5.7391999999999825,
+          4.260400000000004,
+          2.249900000000025
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 42.27420000000001,
+        "finalMergeMs": 14.412400000000048,
+        "cloneMs": 6.987500000000011,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 10,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 11,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 12,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 73909.22317948606,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 64672.54393146226,
+      "shardImbalance": 1.5,
+      "mainThreadDelayMs": 70.52800000000002,
+      "processCpuUs": {
+        "user": 2781000,
+        "system": 703000
+      },
+      "memoryGrowth": 226054144,
+      "maxRSS": 280014848
+    },
+    {
+      "trial": 1,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 14,
+      "profile": "deep",
+      "shardCount": 14,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 487.22829999999993,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 357.19890000000004,
+      "firstFeasibleMs": 251.2737,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 481.56840000000005,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 357.19890000000004,
+        "firstFeasibleMs": 251.2737,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 14,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 14,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 14,
+          "workerCount": 8,
+          "shardCount": 14,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          134.37030000000001,
+          133.79309999999998,
+          135.19009999999997,
+          138.6307,
+          139.39870000000002,
+          137.8673,
+          139.798,
+          139.0611,
+          2.1474000000000046,
+          3.5960000000000036,
+          3.7778000000000134,
+          1.4157000000000153,
+          0.7394999999999925,
+          2.1913999999999874
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 49.4683,
+        "finalMergeMs": 13.524999999999977,
+        "cloneMs": 7.257100000000051,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 10,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 11,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 12,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 13,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 14,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 76859.24647644647,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 67253.89309282733,
+      "shardImbalance": 1.7500000000000002,
+      "mainThreadDelayMs": 58.21300000000002,
+      "processCpuUs": {
+        "user": 2704000,
+        "system": 844000
+      },
+      "memoryGrowth": 225955840,
+      "maxRSS": 280137728
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 0,
+      "profile": "deep",
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 403.3052,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 345.0745,
+      "firstFeasibleMs": 254.06439999999998,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 397.3989,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 345.0745,
+        "firstFeasibleMs": 254.06439999999998,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 8,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 8,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 8,
+          "workerCount": 8,
+          "shardCount": 8,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          134.27100000000002,
+          137.03589999999997,
+          139.6182,
+          138.9364,
+          135.45839999999998,
+          137.5347,
+          138.19920000000002,
+          139.8066
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 45.495600000000024,
+        "finalMergeMs": 12.97670000000005,
+        "cloneMs": 3.6517000000000337,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 92852.7576634271,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 81248.64246729275,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 73.4305,
+      "processCpuUs": {
+        "user": 2485000,
+        "system": 828000
+      },
+      "memoryGrowth": 208646144,
+      "maxRSS": 271527936
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 1,
+      "profile": "deep",
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "shardIndex": 0,
+      "shardCount": 1,
+      "mathCacheHits": 0,
+      "mathEvaluations": 32768,
+      "evaluationMs": 568.4225999999908,
+      "prunedJoint": 0,
+      "refinedAssignments": 0,
+      "statesExamined": 37448,
+      "equivalentItems": 0,
+      "mathEquivalentItems": 0,
+      "mergedStates": 0,
+      "peakStates": 5,
+      "prunedBounds": 0,
+      "prunedSets": 0,
+      "layers": [
+        8,
+        64,
+        512,
+        4096,
+        32768
+      ],
+      "firstFeasibleMs": 119.4589,
+      "firstExactMs": 269.27070000000003,
+      "maxStates": 2000000,
+      "maxNodes": 500000000,
+      "maxEvaluations": 5000000,
+      "maxTimeMs": 120000,
+      "termination": "exhausted",
+      "jointProjections": 0,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 1058.1464,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 1052.6425,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 269.27070000000003,
+        "firstFeasibleMs": 119.4589,
+        "termination": "completed",
+        "parallelism": 1,
+        "workerCount": 1,
+        "requestedWorkers": 1,
+        "successfullyCreatedWorkers": 1,
+        "effectiveWorkers": 1,
+        "creationShortfall": 0,
+        "shardCount": 1,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 1,
+          "workerCount": 1,
+          "shardCount": 1,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          76.58080000000001
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 0,
+        "finalMergeMs": 0,
+        "cloneMs": 0.478900000000003,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 37448,
+            "statesExamined": 37448,
+            "exactStates": 0,
+            "mathEvaluations": 32768,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "shardIndex": 0,
+          "shardCount": 1,
+          "mathCacheHits": 0,
+          "mathEvaluations": 32768,
+          "evaluationMs": 568.4225999999908,
+          "prunedJoint": 0,
+          "refinedAssignments": 0,
+          "statesExamined": 37448,
+          "equivalentItems": 0,
+          "mathEquivalentItems": 0,
+          "mergedStates": 0,
+          "peakStates": 5,
+          "prunedBounds": 0,
+          "prunedSets": 0,
+          "layers": [
+            8,
+            64,
+            512,
+            4096,
+            32768
+          ],
+          "firstFeasibleMs": 22.202499999999986,
+          "firstExactMs": 54.8501,
+          "maxStates": 2000000,
+          "maxNodes": 500000000,
+          "maxEvaluations": 5000000,
+          "maxTimeMs": 120000,
+          "termination": "exhausted",
+          "jointProjections": 0,
+          "complete": true
+        }
+      },
+      "nodesPerSecond": 35390.18797398923,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 30967.35952605424,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 17.01959999999997,
+      "processCpuUs": {
+        "user": 1016000,
+        "system": 188000
+      },
+      "memoryGrowth": 31629312,
+      "maxRSS": 84791296
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 2,
+      "profile": "deep",
+      "shardCount": 2,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 685.5002999999999,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 295.5784,
+      "firstFeasibleMs": 190.77730000000003,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 678.384,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 295.5784,
+        "firstFeasibleMs": 190.77730000000003,
+        "termination": "completed",
+        "parallelism": 2,
+        "workerCount": 2,
+        "requestedWorkers": 2,
+        "successfullyCreatedWorkers": 2,
+        "effectiveWorkers": 2,
+        "creationShortfall": 0,
+        "shardCount": 2,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 2,
+          "workerCount": 2,
+          "shardCount": 2,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          95.8735,
+          97.44250000000001
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 38.101099999999974,
+        "finalMergeMs": 5.340900000000033,
+        "cloneMs": 1.602099999999993,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 18724,
+            "statesExamined": 18724,
+            "exactStates": 0,
+            "mathEvaluations": 16384,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 18724,
+            "statesExamined": 18724,
+            "exactStates": 0,
+            "mathEvaluations": 16384,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 2,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 54628.71423980413,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 47801.583748395155,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 47.33209999999997,
+      "processCpuUs": {
+        "user": 1438000,
+        "system": 390000
+      },
+      "memoryGrowth": 67715072,
+      "maxRSS": 119582720
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 4,
+      "profile": "deep",
+      "shardCount": 4,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 423.9397,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 303.9788,
+      "firstFeasibleMs": 198.7652,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 417.0857,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 303.9788,
+        "firstFeasibleMs": 198.7652,
+        "termination": "completed",
+        "parallelism": 4,
+        "workerCount": 4,
+        "requestedWorkers": 4,
+        "successfullyCreatedWorkers": 4,
+        "effectiveWorkers": 4,
+        "creationShortfall": 0,
+        "shardCount": 4,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 4,
+          "workerCount": 4,
+          "shardCount": 4,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          104.782,
+          107.7078,
+          109.0732,
+          108.124
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 33.129699999999985,
+        "finalMergeMs": 7.869100000000003,
+        "cloneMs": 1.9439999999999884,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 4,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 88333.31721468878,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 77294.01138888384,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 55.58240000000001,
+      "processCpuUs": {
+        "user": 1579000,
+        "system": 625000
+      },
+      "memoryGrowth": 111869952,
+      "maxRSS": 166809600
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 6,
+      "profile": "deep",
+      "shardCount": 6,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 515.9479,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 320.43089999999995,
+      "firstFeasibleMs": 218.3883,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 510.0131,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 320.43089999999995,
+        "firstFeasibleMs": 218.3883,
+        "termination": "completed",
+        "parallelism": 6,
+        "workerCount": 6,
+        "requestedWorkers": 6,
+        "successfullyCreatedWorkers": 6,
+        "effectiveWorkers": 6,
+        "creationShortfall": 0,
+        "shardCount": 6,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 6,
+          "workerCount": 6,
+          "shardCount": 6,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          118.08220000000001,
+          119.8275,
+          119.0271,
+          115.95389999999999,
+          117.39689999999999,
+          118.07990000000001
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 46.916900000000055,
+        "finalMergeMs": 8.6096,
+        "cloneMs": 2.826599999999999,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 9362,
+            "statesExamined": 9362,
+            "exactStates": 0,
+            "mathEvaluations": 8192,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 6,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 72580.97183843562,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 63510.2885388234,
+      "shardImbalance": 1.5,
+      "mainThreadDelayMs": 61.40750000000003,
+      "processCpuUs": {
+        "user": 1938000,
+        "system": 797000
+      },
+      "memoryGrowth": 170557440,
+      "maxRSS": 221356032
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 8,
+      "profile": "deep",
+      "shardCount": 8,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 433.2638,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 372.919,
+      "firstFeasibleMs": 281.19180000000006,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 425.76239999999996,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 372.919,
+        "firstFeasibleMs": 281.19180000000006,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 8,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 8,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 8,
+          "workerCount": 8,
+          "shardCount": 8,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          151.623,
+          157.2612,
+          159.4745,
+          161.9374,
+          164.6759,
+          161.6466,
+          165.2455,
+          166.13959999999997
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 44.79669999999999,
+        "finalMergeMs": 11.7577,
+        "cloneMs": 3.8778999999999826,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 8,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 86432.33060320295,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 75630.59734046555,
+      "shardImbalance": 1,
+      "mainThreadDelayMs": 72.78879999999998,
+      "processCpuUs": {
+        "user": 2656000,
+        "system": 813000
+      },
+      "memoryGrowth": 217038848,
+      "maxRSS": 270479360
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 10,
+      "profile": "deep",
+      "shardCount": 10,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 415.27090000000004,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 340.96569999999997,
+      "firstFeasibleMs": 244.30280000000002,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 408.91139999999996,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 340.96569999999997,
+        "firstFeasibleMs": 244.30280000000002,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 10,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 10,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 10,
+          "workerCount": 8,
+          "shardCount": 10,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          134.4734,
+          135.475,
+          135.7358,
+          134.08569999999997,
+          141.92489999999998,
+          140.3516,
+          143.98989999999998,
+          143.46259999999998,
+          0.8308999999999855,
+          1.0885999999999854
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 45.420699999999954,
+        "finalMergeMs": 12.469400000000007,
+        "cloneMs": 4.945499999999953,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 10,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 90177.27945781898,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 78907.52759222954,
+      "shardImbalance": 1.25,
+      "mainThreadDelayMs": 63.26810000000003,
+      "processCpuUs": {
+        "user": 2610000,
+        "system": 797000
+      },
+      "memoryGrowth": 219070464,
+      "maxRSS": 270848000
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 12,
+      "profile": "deep",
+      "shardCount": 12,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 493.91630000000004,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 374.7564,
+      "firstFeasibleMs": 272.1966,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 487.8099,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 374.7564,
+        "firstFeasibleMs": 272.1966,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 12,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 12,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 12,
+          "workerCount": 8,
+          "shardCount": 12,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          147.75330000000002,
+          149.2016,
+          148.4144,
+          147.76530000000002,
+          147.7078,
+          146.78130000000002,
+          148.5775,
+          152.166,
+          2.7005000000000052,
+          3.03479999999999,
+          1.9723999999999933,
+          1.3155000000000143
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 60.230200000000025,
+        "finalMergeMs": 13.414800000000014,
+        "cloneMs": 5.388600000000068,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 10,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 11,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 12,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 75818.51418954993,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 66343.22455039446,
+      "shardImbalance": 1.5,
+      "mainThreadDelayMs": 81.52920000000003,
+      "processCpuUs": {
+        "user": 2922000,
+        "system": 672000
+      },
+      "memoryGrowth": 223010816,
+      "maxRSS": 277282816
+    },
+    {
+      "trial": 2,
+      "ordering": "pressure",
+      "name": "throughput",
+      "workers": 14,
+      "profile": "deep",
+      "shardCount": 14,
+      "frontierComplete": true,
+      "assignmentComplete": true,
+      "statesExamined": 37448,
+      "targets": {
+        "health": 65,
+        "melee": 80,
+        "grenade": 90,
+        "super": 55,
+        "class": 70,
+        "weapons": 90
+      },
+      "wallMs": 438.406,
+      "status": "EXACT_TARGET_PROVEN",
+      "resultCount": 1,
+      "verified": true,
+      "firstExactMs": 365.2521,
+      "firstFeasibleMs": 274.4774,
+      "search": {
+        "schemaVersion": 1,
+        "operation": "solveInventory",
+        "generation": 1,
+        "profile": "deep",
+        "running": false,
+        "elapsedMs": 432.3001,
+        "nodes": 37448,
+        "aggregateNodes": 37448,
+        "aggregateExactStates": 0,
+        "aggregateMathEvaluations": 32768,
+        "firstExactMs": 365.2521,
+        "firstFeasibleMs": 274.4774,
+        "termination": "completed",
+        "parallelism": 8,
+        "workerCount": 8,
+        "requestedWorkers": 14,
+        "successfullyCreatedWorkers": 8,
+        "effectiveWorkers": 8,
+        "creationShortfall": 0,
+        "shardCount": 14,
+        "scheduling": {
+          "hardwareConcurrency": 16,
+          "requestedWorkers": 14,
+          "workerCount": 8,
+          "shardCount": 14,
+          "cpuLimit": 14,
+          "memoryLimit": 15,
+          "taskLimit": 8,
+          "perWorkerMiB": 33,
+          "estimatedWorkMs": 7864.32,
+          "observedStartupMs": 100,
+          "observedMergeMs": 10,
+          "profile": "deep",
+          "work": {
+            "items": 40,
+            "rows": [
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              },
+              {
+                "physical": 8,
+                "groups": 8
+              }
+            ],
+            "shardableDomain": 8,
+            "physicalCombinations": 32768,
+            "mathCombinations": 32768
+          }
+        },
+        "startupTimes": [
+          134.40439999999998,
+          139.37310000000002,
+          144.09199999999998,
+          145.9469,
+          145.79399999999998,
+          148.9866,
+          147.1594,
+          148.61270000000002,
+          0.5890000000000271,
+          3.7702999999999918,
+          3.8760000000000048,
+          1.4951000000000079,
+          1.1881999999999948,
+          0.6896000000000129
+        ],
+        "failures": 0,
+        "failedAttemptNodes": 0,
+        "progressiveMergeMs": 54.301800000000014,
+        "finalMergeMs": 15.693899999999985,
+        "cloneMs": 6.687899999999956,
+        "mergeIncludesWitnessVerification": true,
+        "budgetScope": "per-shard",
+        "shards": [
+          {
+            "index": 0,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 1,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 2,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 3,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 4,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 5,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 6,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 7,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 8,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 0,
+            "statesExamined": 0,
+            "exactStates": 0,
+            "mathEvaluations": 0,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 9,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 10,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 11,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 12,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          },
+          {
+            "index": 13,
+            "running": false,
+            "termination": "completed",
+            "frontierTermination": "exhausted",
+            "frontierComplete": true,
+            "nodes": 4681,
+            "statesExamined": 4681,
+            "exactStates": 0,
+            "mathEvaluations": 4096,
+            "mathCacheHits": 0,
+            "exactPrunedResidues": 0
+          }
+        ],
+        "coverage": {
+          "shardCount": 14,
+          "frontierComplete": true,
+          "assignmentComplete": true,
+          "statesExamined": 37448,
+          "complete": false
+        }
+      },
+      "nodesPerSecond": 85418.53897984972,
+      "exactStatesPerSecond": 0,
+      "mathEvaluationsPerSecond": 74743.50259804838,
+      "shardImbalance": 1.7500000000000002,
+      "mainThreadDelayMs": 75.3458,
+      "processCpuUs": {
+        "user": 2687000,
+        "system": 532000
+      },
+      "memoryGrowth": 207618048,
+      "maxRSS": 290414592
+    }
+  ]
+}

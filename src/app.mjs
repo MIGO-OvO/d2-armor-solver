@@ -5149,8 +5149,7 @@ async function solveInventoryRequirement({
       onlyPlus5Tuning,
       userConstraints: constraints,
     };
-    const result = await solveInventoryParallelAsync(inventoryRequest, {parallelism: Math.min(4,
-      Math.max(1, Number(globalThis.navigator?.hardwareConcurrency) || 2)), onProgress: (partial) => {
+    const result = await solveInventoryParallelAsync(inventoryRequest, {onProgress: (partial) => {
       if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision) return;
       if (partial?.results?.length) {
         lastInventoryTargets = targets; lastInventoryRequiredStats = requiredStats;

@@ -1,9 +1,13 @@
 import {createSearchSession, withSearchProfile, SearchBudgetExceeded} from "./search-session.mjs";
+import {chooseInventorySchedule} from './worker-scheduler.mjs';
 const workers = new Map();
 const generations = new Map();
 const pendingRequests = new Map();
 let nextRequestId = 1;
 let inventoryBatch = null;
+let observedStartupMs = 100;
+let observedMergeMs = 10;
+const transportError = cause => Object.assign(new Error(cause?.message || 'Armor worker transport failed'), {name: 'WorkerTransportError'});
 const OFFLINE_MODE = typeof __OFFLINE_MODE__ !== "undefined" && __OFFLINE_MODE__ === "true";
 
 function createWorker(operation, workerKey = operation) {
@@ -17,6 +21,8 @@ function createWorker(operation, workerKey = operation) {
   worker.addEventListener("message", ({data}) => {
     const pending = pendingRequests.get(data?.id);
     if (!pending || data.generation !== pending.generation) return;
+    pending.started?.();
+    if (data.type === 'started') return;
     if (data.type === "progress") {
       pending.onProgress?.(data.result, data.search);
       return;
@@ -29,13 +35,15 @@ function createWorker(operation, workerKey = operation) {
       pending.reject(error);
     } else pending.resolve(data.result);
   });
-  worker.addEventListener("error", event => {
+  const failed = event => {
     for (const [id, pending] of pendingRequests) if (pending.workerKey === workerKey) {
       pendingRequests.delete(id); pending.cleanup?.();
-      pending.reject(event.error || new Error(event.message || "Armor worker failed"));
+      pending.reject(transportError(event.error || new Error(event.message || "Armor worker failed")));
     }
     worker.terminate(); workers.delete(workerKey);
-  });
+  };
+  worker.addEventListener('error', failed);
+  worker.addEventListener('messageerror', failed);
   return worker;
 }
 
@@ -60,7 +68,8 @@ export function cancelAllSearches() {
   for (const operation of ["solve", "solveInventory", "analyzeUpgrade", "calculateReachability"]) cancelOperation(operation);
 }
 
-function run(operation, input, {onProgress = null, signal = null} = {}, workerKey = operation) {
+function run(operation, input, {onProgress = null, signal = null, forceInline = false, retainWorker = false,
+  onStartup = null, onClone = null, poolOwned = false} = {}, workerKey = operation) {
   // Only batch-owned workers run concurrently. Ordinary operations supersede
   // pending work instead of queueing behind a synchronous solver invocation.
   if (workerKey === operation && ([...pendingRequests.values()].some(pending => pending.operation === operation)
@@ -68,9 +77,15 @@ function run(operation, input, {onProgress = null, signal = null} = {}, workerKe
   const generation = (generations.get(operation) || 0) + 1;
   generations.set(operation, generation);
   const id = nextRequestId++;
+  const cloneStarted = performance.now();
   const payload = withSearchProfile(operation, structuredClone(input));
-  const activeWorker = createWorker(operation, workerKey);
+  onClone?.(performance.now() - cloneStarted);
+  const activeWorker = forceInline ? null : poolOwned ? workers.get(workerKey) : createWorker(operation, workerKey);
+  if (poolOwned && !forceInline && !activeWorker) return Promise.reject(transportError(new Error('Pool worker unavailable')));
   return new Promise((resolve, reject) => {
+    let startupTimer = null;
+    const startupAt = performance.now();
+    let acknowledged = false;
     const abort = () => {
       const current = pendingRequests.get(id);
       if (!current) return;
@@ -80,16 +95,34 @@ function run(operation, input, {onProgress = null, signal = null} = {}, workerKe
       current.reject(error);
     };
     const pending = {operation, workerKey, generation, resolve, reject, onProgress,
+      started: () => {
+        if (acknowledged) return;
+        acknowledged = true; clearTimeout(startupTimer);
+        const ms = performance.now() - startupAt;
+        observedStartupMs = observedStartupMs * 0.75 + ms * 0.25;
+        onStartup?.(ms);
+      },
       cleanup: () => {
+        clearTimeout(startupTimer);
         signal?.removeEventListener("abort", abort);
-        if (workerKey !== operation) { activeWorker?.terminate(); workers.delete(workerKey); }
+        if (workerKey !== operation && !retainWorker) { activeWorker?.terminate(); workers.delete(workerKey); }
       }};
     pendingRequests.set(id, pending);
     signal?.addEventListener("abort", abort, {once: true});
     if (signal?.aborted) { abort(); return; }
     if (activeWorker) {
+      // Startup deadline only. Never time out an acknowledged exact query.
+      startupTimer = setTimeout(() => {
+        if (!pendingRequests.has(id)) return;
+        pendingRequests.delete(id); pending.cleanup();
+        activeWorker.terminate(); workers.delete(workerKey);
+        reject(transportError(new Error('Worker startup acknowledgement timed out')));
+      }, 10000);
       try { activeWorker.postMessage({type: "start", id, generation, operation, payload}); }
-      catch (error) { pendingRequests.delete(id); pending.cleanup(); reject(error); }
+      catch (error) {
+        pendingRequests.delete(id); pending.cleanup(); activeWorker.terminate(); workers.delete(workerKey);
+        reject(transportError(error));
+      }
       return;
     }
     // Inline fallback uses the same generation/progress contract. It cannot
@@ -117,7 +150,13 @@ function run(operation, input, {onProgress = null, signal = null} = {}, workerKe
 export const solveLoadoutAsync = (payload, options) => run("solve", payload, options);
 export const analyzeUpgradeAsync = (payload, options) => run("analyzeUpgrade", payload, options);
 export const calculateReachabilityAsync = (payload, options) => run("calculateReachability", payload, options);
-export const solveInventoryAsync = (payload, options) => run("solveInventory", payload, options);
+export const solveInventoryAsync = async (payload, options) => {
+  try { return await run('solveInventory', payload, options); }
+  catch (error) {
+    if (error.name !== 'WorkerTransportError' || options?.signal?.aborted) throw error;
+    return run('solveInventory', payload, {...options, forceInline: true});
+  }
+};
 
 // A merge re-verifies every retained witness against the whole vault, which
 // costs hundreds of milliseconds on a 1300-piece inventory. Publishing on every
@@ -128,24 +167,41 @@ export const solveInventoryAsync = (payload, options) => run("solveInventory", p
 const PROGRESS_MERGE_INTERVAL_MS = 150;
 
 // A batch owns separate workers; normal operation workers remain reusable.
-export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...options} = {}) {
-  if (!Number.isSafeInteger(parallelism) || parallelism < 1 || parallelism > 8) {
-    throw new RangeError("parallelism must be an integer between 1 and 8");
-  }
+export async function solveInventoryParallelAsync(payload, {parallelism, shardCount, ...options} = {}) {
+  const schedule = chooseInventorySchedule(payload, {parallelism, shardCount, observedStartupMs, observedMergeMs,
+    workersAvailable: !OFFLINE_MODE && typeof Worker !== 'undefined'});
   // The search profile owns effort. Forcing `exhaustive: true` here silently
   // removed Fast/Balanced early termination (their `exact-witness-quota` stop),
   // so every browser solve paid Deep's cost. The wrapper only forwards the
   // shard coordinates; `withSearchProfile` still honours an explicit
   // `searchLimits.exhaustive === true` from the caller.
   const request = structuredClone({...payload, shardIndex: 0, shardCount: 1});
-  if (parallelism === 1 || OFFLINE_MODE || typeof Worker === "undefined") return solveInventoryAsync(request, options);
+  if (!schedule.workerCount) {
+    const result = await solveInventoryAsync(request, options);
+    if (!result) return result;
+    result.search = {...result.search, scheduling: schedule, requestedWorkers: schedule.requestedWorkers,
+      successfullyCreatedWorkers: 0, effectiveWorkers: 0, shardCount: 1, fallback: 'inline'};
+    return result;
+  }
   cancelOperation('solveInventory');
   const batch = nextRequestId++;
   const controller = new AbortController();
   inventoryBatch = controller;
   const started = performance.now();
-  const partials = Array(parallelism).fill(null);
-  const searches = Array(parallelism).fill(null);
+  const keys = [];
+  for (let i = 0; i < schedule.workerCount; i++) {
+    const key = `solveInventory:${batch}:${i}`;
+    if (!createWorker('solveInventory', key)) break;
+    keys.push(key);
+  }
+  const successfullyCreatedWorkers = keys.length;
+  let effectiveWorkers = keys.length;
+  const count = schedule.shardCount;
+  const partials = Array(count).fill(null);
+  const searches = Array(count).fill(null);
+  const queue = Array.from({length: count}, (_, i) => i);
+  const startupTimes = [];
+  let failures = 0, failedAttemptNodes = 0, progressiveMergeMs = 0, finalMergeMs = 0, cloneMs = 0;
   let firstExactMs = null;
   let firstFeasibleMs = null;
   let mergeModule = null;
@@ -166,10 +222,17 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
       // Kept as an alias: the command bar reads `nodes`.
       nodes: aggregateNodes,
       aggregateNodes,
+      aggregateExactStates: searches.reduce((sum, s) => sum + (s?.coverage?.exactStates || 0), 0),
+      aggregateMathEvaluations: searches.reduce((sum, s) => sum + (s?.coverage?.mathEvaluations || 0), 0),
       firstExactMs, firstFeasibleMs,
       termination: running ? null : searches.some(search => search?.termination === 'budget') ? 'budget' : 'completed',
-      parallelism,
-      workerCount: parallelism,
+      parallelism: successfullyCreatedWorkers,
+      workerCount: effectiveWorkers,
+      requestedWorkers: schedule.requestedWorkers, successfullyCreatedWorkers, effectiveWorkers,
+      creationShortfall: schedule.workerCount - successfullyCreatedWorkers,
+      shardCount: count, scheduling: schedule, startupTimes, failures, failedAttemptNodes,
+      progressiveMergeMs, finalMergeMs, cloneMs,
+      mergeIncludesWitnessVerification: true,
       budgetScope: 'per-shard',
       shards: searches.map((search, index) => ({
         index,
@@ -183,19 +246,35 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
         frontierComplete: search?.frontierComplete ?? null,
         nodes: search?.nodes || 0,
         statesExamined: search?.coverage?.statesExamined ?? null,
+        exactStates: search?.coverage?.exactStates ?? 0,
+        mathEvaluations: search?.coverage?.mathEvaluations ?? 0,
+        mathCacheHits: search?.coverage?.mathCacheHits ?? 0,
+        exactPrunedResidues: search?.coverage?.exactPrunedResidues ?? 0,
       })),
-      coverage: {...result?.searchStats, complete: false},
+      coverage: {...result?.searchStats, complete: count === 1 && result?.certificate?.proof?.complete === true},
     };
   };
   const publishMerge = () => {
     if (!active()) return;
     lastMergeAt = performance.now();
     const revision = ++progressRevision;
+    if (count === 1) {
+      // Preserve the existing single-worker result/proof boundary; there is
+      // no cross-shard evidence to merge or whole-vault clone to verify again.
+      const result = partials[0];
+      if (!result?.results?.length) return;
+      if (result.status === 'EXACT_TARGET_PROVEN') firstExactMs ??= performance.now() - started;
+      if (['EXACT_TARGET_PROVEN', 'RULE_FEASIBLE_PROVEN'].includes(result.status)) firstFeasibleMs ??= performance.now() - started;
+      options.onProgress({...result, search: metadata(true, result)}, metadata(true, result));
+      return;
+    }
     // Reconstruct positive witnesses against the full inventory. Local
     // coverage/negative certificates never become a global proof.
     void engine().then(({mergeInventoryShardResults}) => {
       if (!active() || revision !== progressRevision) return;
-      const merged = mergeInventoryShardResults(request, partials, parallelism);
+      const before = performance.now();
+      const merged = mergeInventoryShardResults(request, partials, count);
+      progressiveMergeMs += performance.now() - before;
       if (!merged.results.length) return;
       const status = merged.certificate.status;
       if (status === 'EXACT_TARGET_PROVEN') firstExactMs ??= performance.now() - started;
@@ -220,6 +299,7 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
     const budgetBound = search?.termination === 'budget';
     searches[shardIndex] = {
       ...search,
+      coverage: {...search?.coverage, ...(!budgetBound ? result?.searchStats : {})},
       nodes: Math.max(search?.nodes || 0, searches[shardIndex]?.nodes || 0),
       // A budget-truncated shard reports a *published snapshot*, whose frontier
       // termination predates the stop and would read as "exhausted" even though
@@ -239,18 +319,47 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
   options.signal?.addEventListener("abort", abort, {once: true});
   if (options.signal?.aborted) abort();
   try {
-    const parts = await Promise.all(Array.from({length: parallelism}, (_, shardIndex) =>
-      run("solveInventory", {...request, shardIndex, shardCount: parallelism}, {
-        signal: controller.signal,
-        onProgress: (result, search) => progress(result, search, shardIndex),
-      }, `solveInventory:${batch}:${shardIndex}`).then(result => {
-        progress(result, result?.search, shardIndex);
-        return result;
-      })));
+    const parts = Array(count).fill(null);
+    const consume = async (key, forceInline = false) => {
+      while (queue.length && active()) {
+        const shardIndex = queue.shift();
+        try {
+          const result = await run('solveInventory', {...request, shardIndex, shardCount: count}, {
+            signal: controller.signal, retainWorker: !forceInline, forceInline, poolOwned: true,
+            onStartup: ms => startupTimes.push(ms),
+            onClone: ms => { cloneMs += ms; },
+            onProgress: (result, search) => progress(result, search, shardIndex),
+          }, key);
+          parts[shardIndex] = result;
+          progress(result, result?.search, shardIndex);
+        } catch (error) {
+          if (error.name !== 'WorkerTransportError' || !active()) throw error;
+          failures++; effectiveWorkers--;
+          failedAttemptNodes += searches[shardIndex]?.nodes || 0;
+          searches[shardIndex] = null; partials[shardIndex] = null;
+          queue.push(shardIndex); // replay only the failed physical shard
+          return;
+        }
+      }
+    };
+    await Promise.all(keys.map(key => consume(key)));
+    while (queue.length && active() && keys.some(key => workers.has(key))) {
+      await Promise.all(keys.filter(key => workers.has(key)).map(key => consume(key)));
+    }
+    // All worker transports failed (or construction failed before the first).
+    // One sequential inline consumer retains the original disjoint partition.
+    if (queue.length && active()) await consume(`solveInventory:${batch}:inline`, true);
     if (controller.signal.aborted) { const error = new Error("Cancelled inventory batch"); error.name = "AbortError"; throw error; }
-    const {mergeInventoryShardResults} = await engine();
+    const merger = count === 1 ? null : await engine();
     if (controller.signal.aborted) { const error = new Error("Cancelled inventory batch"); error.name = "AbortError"; throw error; }
-    const result = mergeInventoryShardResults(request, parts, parallelism);
+    ++progressRevision;
+    const before = performance.now();
+    const result = count === 1 ? parts[0] : merger.mergeInventoryShardResults(request, parts, count);
+    if (!result) return result;
+    finalMergeMs = count === 1 ? 0 : performance.now() - before;
+    if (count > 1) observedMergeMs = observedMergeMs * 0.75 + finalMergeMs * 0.25;
+    if (result.status === 'EXACT_TARGET_PROVEN') firstExactMs ??= performance.now() - started;
+    if (['EXACT_TARGET_PROVEN', 'RULE_FEASIBLE_PROVEN'].includes(result.status)) firstFeasibleMs ??= performance.now() - started;
     result.search = metadata(false, result);
     return result;
   } finally {
@@ -260,6 +369,7 @@ export async function solveInventoryParallelAsync(payload, {parallelism = 2, ...
     }
     if (inventoryBatch === controller) inventoryBatch = null;
     controller.abort();
+    for (const key of keys) { workers.get(key)?.terminate(); workers.delete(key); }
     options.signal?.removeEventListener("abort", abort);
   }
 }
