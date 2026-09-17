@@ -4,6 +4,14 @@ export function certifiedFeasible(result) {
   return ["EXACT_TARGET_PROVEN", "RULE_FEASIBLE_PROVEN"].includes(result?.certificate?.status);
 }
 
+// Count retained, verified candidates, not search nodes or a claim that every
+// candidate satisfies the rules. Upgrade exposes one final plan/baseline.
+export function candidateSolutionCount(result) {
+  const candidates = Array.isArray(result) ? result : Array.isArray(result?.results)
+    ? result.results : [result?.plan?.evaluation || result?.baseline];
+  return candidates.filter(candidate => candidate?.certificate?.witnessVerification?.valid === true).length;
+}
+
 export function proofPresentation(result, search = result?.search) {
   const certificate = result?.certificate;
   const status = certificate?.status;

@@ -66,7 +66,7 @@ import {
   normalizeUpgradePiece,
   resolveCurrentLoadoutTotals,
 } from "./core/upgrade-optimizer.mjs";
-import {certifiedFeasible, proofPresentation} from "./core/solver-presentation.mjs";
+import {candidateSolutionCount, certifiedFeasible, proofPresentation} from "./core/solver-presentation.mjs";
 import {
   EXECUTION_BLOCK_CATEGORY,
   summarizeBlockedReasons,
@@ -140,7 +140,7 @@ function renderSearchStatus(result, search = result?.search) {
   status.textContent = result ? searchProofLabel(result, search)
     : l('正在搜索…','正在搜尋…','Searching…');
   document.getElementById('searchStatistics').textContent = search
-    ? `${Math.round(search.elapsedMs)} ms · ${search.nodes.toLocaleString()} ${l('节点','節點','nodes')}` : '';
+    ? `${Math.round(search.elapsedMs)} ms · ${candidateSolutionCount(result || lastSearchResult).toLocaleString()} ${l('个候选方案','個候選方案','candidate loadouts')}` : '';
   document.getElementById('cancelSearch').disabled = !search?.running && backgroundInventoryRevision !== searchUiRevision;
 }
 function beginSearch() {
@@ -6605,7 +6605,7 @@ function renderAllocationBreakdown(result) {
   </div>${exoticSummary}`;
 }
 
-// Everything here is diagnostic: proofs, canonical identity, search counters and
+// Everything here is diagnostic: proofs, canonical identity, search status and
 // the per-piece recomputation. It stays collapsed so the first screen answers
 // "which loadout, how many owned" instead of "what did the solver prove".
 function renderAdvancedDetails(entry, totals = null) {
@@ -6621,9 +6621,6 @@ function renderAdvancedDetails(entry, totals = null) {
   const searchStats = search
     ? [
       `${Math.round(search.elapsedMs || 0)} ms`,
-      `${Number(search.nodes || 0).toLocaleString()} ${l("节点", "節點", "nodes")}`,
-      coverage.statesExamined !== undefined
-        ? `statesExamined=${Number(coverage.statesExamined).toLocaleString()}` : "",
       search.termination ? `${l("终止原因", "終止原因", "termination")}=${search.termination}` : "",
       coverage.frontierComplete !== undefined ? `frontierComplete=${String(coverage.frontierComplete)}` : "",
       coverage.assignmentComplete !== undefined ? `assignmentComplete=${String(coverage.assignmentComplete)}` : "",

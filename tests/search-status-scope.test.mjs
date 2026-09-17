@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
-import {certifiedFeasible, proofPresentation} from '../src/core/solver-presentation.mjs';
+import {candidateSolutionCount, certifiedFeasible, proofPresentation} from '../src/core/solver-presentation.mjs';
 
 const source = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
 const extract = name => {
@@ -19,7 +19,7 @@ function harness(result) {
   };
   const progressStatuses = [];
   const context = vm.createContext({
-    certifiedFeasible, proofPresentation, l: (...labels) => labels[0],
+    candidateSolutionCount, certifiedFeasible, proofPresentation, l: (...labels) => labels[0],
     document: {getElementById: element, querySelectorAll: () => []},
     calculatorMode: 'solve', searchProfile: 'balanced', searchUiRevision: 1,
     inventorySolveRevision: 0, backgroundInventoryRevision: null, theorySearchRunning: false, lastSearchResult: null, lastInventoryTargets: null,
@@ -48,11 +48,12 @@ test('theory exact + limited inventory with zero owned loadouts keeps both proof
   const owned = inventory('SEARCH_LIMIT_REACHED');
   const {api, element, progressStatuses, context} = harness(owned);
   const theory = Object.assign(Array.from({length: 60}, () => ({
-    certificate: {status: 'EXACT_TARGET_PROVEN'}, farmCount: 4,
+    certificate: {status: 'EXACT_TARGET_PROVEN', witnessVerification: {valid: true}}, farmCount: 4,
   })), {certificate: {status: 'EXACT_TARGET_PROVEN'},
     search: {running: false, termination: 'completed', elapsedMs: 767, nodes: 2599940}});
   api.renderSearchStatus(theory);
   const statistics = element('searchStatistics').textContent;
+  assert.equal(statistics, '767 ms · 60 个候选方案');
   const message = await api.solveInventoryRequirement({targets: {}, fragments: {}, requiredStats: []});
   assert.deepEqual(progressStatuses, ['精确解 · 已证明']);
   assert.equal(element('searchStatus').textContent, '精确解 · 已证明');
@@ -67,6 +68,30 @@ test('theory exact + limited inventory with zero owned loadouts keeps both proof
   api.renderSearchStatus(theory);
   assert.doesNotMatch(element('searchStatus').textContent + message, /未找到达标解/);
   assert.equal(theory.length, 60);
+});
+
+test('candidate counts use verified returned witnesses, never node counts or feasibility guesses', () => {
+  const verified = status => ({certificate: {status, witnessVerification: {valid: true}}});
+  const exact = verified('EXACT_TARGET_PROVEN');
+  const nearMiss = verified('SEARCH_LIMIT_REACHED');
+  assert.equal(candidateSolutionCount([exact, nearMiss, {certificate: {status: 'EXACT_TARGET_PROVEN'}}]), 2);
+  assert.equal(candidateSolutionCount({results: [exact, nearMiss]}), 2);
+  assert.equal(candidateSolutionCount({baseline: exact}), 1);
+  assert.equal(candidateSolutionCount({baseline: exact, plan: {evaluation: nearMiss}}), 1);
+  assert.equal(candidateSolutionCount({search: {nodes: 999999}}), 0);
+  assert.equal(candidateSolutionCount(null), 0);
+});
+
+test('a heartbeat retains current candidate count and a new request starts from zero', () => {
+  const {api, element, context} = harness(null);
+  const result = [{certificate: {status: 'EXACT_TARGET_PROVEN', witnessVerification: {valid: true}}}];
+  api.renderSearchStatus(result, {running: true, elapsedMs: 10, nodes: 10000});
+  api.renderSearchStatus(null, {running: true, elapsedMs: 20, nodes: 20000});
+  assert.equal(element('searchStatistics').textContent, '20 ms · 1 个候选方案');
+  context.lastSearchResult = null; // beginSearch clears the previous request.
+  api.renderSearchStatus(null, {running: true, elapsedMs: 0, nodes: 0});
+  assert.equal(element('searchStatistics').textContent, '0 ms · 0 个候选方案');
+  assert.doesNotMatch(source, /search\.nodes|coverage\.statesExamined/);
 });
 
 test('inventory proof is independent of completion, limit and cancellation', () => {

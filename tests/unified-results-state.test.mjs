@@ -184,7 +184,7 @@ test("the advanced panel reads coverage.*, never a search root field", () => {
   assert.match(advanced, /const coverage = search\?\.coverage \|\| \{\}/);
   assert.match(advanced, /coverage\.frontierComplete/);
   assert.match(advanced, /coverage\.assignmentComplete/);
-  assert.match(advanced, /coverage\.statesExamined/);
+  assert.doesNotMatch(advanced, /statesExamined|search\.nodes/);
   assert.doesNotMatch(advanced, /search\.frontierComplete/);
   assert.doesNotMatch(advanced, /search\.assignmentComplete/);
   assert.doesNotMatch(advanced, /window-entry|entry\.plan\?\.solution\?\.search/);
