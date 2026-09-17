@@ -175,7 +175,7 @@ function renderSearchControls() {
   document.getElementById('cancelSearch').textContent = l('停止搜索','停止搜尋','Stop search');
   document.getElementById('searchProfileHelp').textContent = searchProfile === 'deep'
     ? l('每项搜索预算 120 秒，扩大搜索并尝试证明。可随时停止；搜索未完成不代表无解。','每項搜尋預算 120 秒，擴大搜尋並嘗試證明。可隨時停止；搜尋未完成不代表無解。','120-second budget per search; wider search and proof attempts. Stop at any time; an incomplete search does not mean impossible.')
-    : searchProfile === 'fast' ? l('约 200 ms 搜索预算，优先返回已验证候选。','約 200 ms 搜尋預算，優先回傳已驗證候選。','About 200 ms search budget; verified candidates first.')
+    : searchProfile === 'fast' ? l('理论配装优先找一个达标方案，最多搜索约 3 秒；其他搜索通常为 200 ms。可随时停止。','理論配裝優先找一個達標方案，最多搜尋約 3 秒；其他搜尋通常為 200 ms。可隨時停止。','Theory search seeks one qualifying loadout for up to about 3 seconds; other searches normally use 200 ms. Stop at any time.')
       : l('先显示已验证结果，再继续搜索至 3 秒。','先顯示已驗證結果，再繼續搜尋至 3 秒。','Show verified results first, then continue searching for up to 3 seconds.');
   syncCommandBarLabels();
 }

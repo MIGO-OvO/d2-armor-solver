@@ -5,6 +5,7 @@ import {
   findBestFixedConfigWitness,
   findBestGlobalWitness,
   findExactTargetWitnesses,
+  findExactPartialConfigWitnesses,
   visibleArmorTargets,
 } from "./exact-target-oracle.mjs";
 import {
@@ -558,7 +559,13 @@ export function runSolver(problemSpec, search = null) {
     ? { ...(exoticSelection || {}), config: fixedConfig }
     : null;
   let publishedRank = null;
+  let feasibleIncumbent = null;
+  const feasibilityFirst = Boolean(search && runtimeOptions.feasibilityFirst);
   const publishImprovement = candidate => {
+    if (satisfiesConstraintModel(candidate, problemSpec.constraintModel)
+        && (!feasibleIncumbent || compareScoreRanks(candidate.rank, feasibleIncumbent.rank) < 0)) {
+      feasibleIncumbent = candidate;
+    }
     if (!search || publishedRank && compareScoreRanks(candidate.rank, publishedRank) >= 0) return;
     publishedRank = [...candidate.rank];
     search.publish(candidate);
@@ -568,7 +575,7 @@ export function runSolver(problemSpec, search = null) {
     // Cheap target-directed seeds precede the cold residual index. The same
     // request keeps searching; these candidates cannot prove infeasibility.
     for (let seed = 0; seed < 12; seed++) {
-      search.checkpoint();
+      search.checkpoint(1, feasibilityFirst ? {phase: 'theory-feasibility'} : null);
       const configs = fixedConfig ? [fixedConfig] : [BASE_CONFIGS[(seed * 5) % BASE_CONFIGS.length]];
       const totals = {...configs[0].baseStats};
       while (configs.length < 5) {
@@ -597,9 +604,35 @@ export function runSolver(problemSpec, search = null) {
       }
       if (candidate.rank.every(value => value === 0)) break;
     }
+    if (feasibilityFirst && !feasibleIncumbent) {
+      // Search the actual rule box, not a short list of preferred target
+      // points. The existing partial-config oracle covers exact targets,
+      // intervals and visible clamp preimages, and stops at its first witness.
+      // Fixed Exotic identity and the exact Balanced count remain unchanged.
+      const fixedEntries = fixedConfig ? [{config: fixedConfig, allowBalanced: true,
+        allowedDirectionalStats: STATS}] : [];
+      const [witness] = findExactPartialConfigWitnesses({
+        fixedEntries,
+        freePieceCount: 5 - fixedEntries.length,
+        minimums: problemSpec.constraintModel.rules.map(rule => rule.armorMinimum),
+        maximums: problemSpec.constraintModel.rules.map(rule => rule.armorMaximum),
+        numPlus5, numPlus10, numPlus3,
+        allowedFreePlus3Counts: fixedConfig ? [numPlus3, numPlus3 - 1] : [numPlus3],
+        maxWitnesses: 1,
+        checkpoint: (count = 0) => search.checkpoint(count, {phase: 'theory-feasibility'}),
+      });
+      if (witness) publishImprovement({...witness,
+        rank: scoreStatsRank(witness.totals, target, constraints),
+        score: scoreStats(witness.totals, target, constraints),
+        exoticIndex: fixedConfig ? 0 : null,
+        exoticSelection: exoticSelection || null,
+      });
+    }
     if (runtimeOptions.fastMode) {
-      const result = incumbent ? [incumbent] : [];
-      result.proof = createProofEvidence(problemSpec, {producer: "heuristic-solver", method: "fast-incumbent", truncated: true});
+      const best = feasibleIncumbent || incumbent;
+      const result = best ? [best] : [];
+      result.proof = createProofEvidence(problemSpec, {producer: "heuristic-solver",
+        method: feasibilityFirst ? "first-feasible-theory" : "fast-incumbent", truncated: true});
       return result;
     }
   }

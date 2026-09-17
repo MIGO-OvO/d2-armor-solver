@@ -1433,8 +1433,12 @@ export function findExactPartialConfigWitnesses({
       const stream = (count, vectors, otherSelections, visit) => {
         const low = STATS.map((_, i) => Math.min(...vectors.map(vector => vector[i])));
         const high = STATS.map((_, i) => Math.max(...vectors.map(vector => vector[i])));
-        const otherLow = STATS.map((_, i) => otherSelections ? Math.min(...otherSelections.map(selection => selection.totals[i])) : 0);
-        const otherHigh = STATS.map((_, i) => otherSelections ? Math.max(...otherSelections.map(selection => selection.totals[i])) : 0);
+        const otherLow = STATS.map(() => otherSelections ? Infinity : 0);
+        const otherHigh = STATS.map(() => otherSelections ? -Infinity : 0);
+        for (const selection of otherSelections || []) for (let i = 0; i < STATS.length; i++) {
+          otherLow[i] = Math.min(otherLow[i], selection.totals[i]);
+          otherHigh[i] = Math.max(otherHigh[i], selection.totals[i]);
+        }
         const shiftCount = fixedSelection.shiftTargets.length + freeShiftCount;
         visitModeSelections(count, vectors, visit, interval ? (running, remaining) => {
           checkpoint?.(0);
@@ -1446,14 +1450,22 @@ export function findExactPartialConfigWitnesses({
       };
 
       if (freePlus3Count > 0 && freeShiftCount > 0) {
-        const plus3Selections = buildModeSelections(freePlus3Count, PLUS3_VECTORS)
-          .filter(selection => interval || selection.totals.every((value, index) =>
-            (normalizedTarget[index] - fixedSelection.baseTotals[index] - value) % 5 === 0));
-        stream(freeShiftCount, BASE_VECTORS, plus3Selections, shift => {
-          for (const plus3 of plus3Selections) {
-            if (inspect(plus3, shift)) return true;
-          }
-        });
+        const matchesResidue = plus3 => interval || plus3.totals.every((value, index) =>
+          (normalizedTarget[index] - fixedSelection.baseTotals[index] - value) % 5 === 0);
+        // Retain the smaller mode group and stream the larger one. Four
+        // Balanced pieces otherwise allocate ~250k rows before a first probe.
+        if (freePlus3Count <= freeShiftCount) {
+          const plus3Selections = buildModeSelections(freePlus3Count, PLUS3_VECTORS).filter(matchesResidue);
+          stream(freeShiftCount, BASE_VECTORS, plus3Selections, shift => {
+            for (const plus3 of plus3Selections) if (inspect(plus3, shift)) return true;
+          });
+        } else {
+          const shiftSelections = buildModeSelections(freeShiftCount, BASE_VECTORS);
+          stream(freePlus3Count, PLUS3_VECTORS, shiftSelections, plus3 => {
+            if (!matchesResidue(plus3)) return;
+            for (const shift of shiftSelections) if (inspect(plus3, shift)) return true;
+          });
+        }
       } else if (freePlus3Count > 0) {
         stream(freePlus3Count, PLUS3_VECTORS, null, plus3 =>
           inspect(plus3, { indices: [], totals: STATS.map(() => 0) }));

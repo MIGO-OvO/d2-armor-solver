@@ -126,6 +126,40 @@ try {
   assert.ok(metrics.heartbeatMaximumMs < 250, 'optimization interactions must not freeze for a quarter second');
   assert.deepEqual(errors, []);
   assert.deepEqual(remoteRequests, []);
+  const feasibility = [];
+  for (const profile of ['fast', 'balanced', 'deep']) {
+    // Fresh storage gives the six-exact default request which Fast previously
+    // missed. Exercise the built Worker, certificate projection and real UI.
+    const check = await browser.newContext({viewport: {width: profile === 'fast' ? 390 : 1440, height: 1000}});
+    await check.route('**/*', route => {
+      const url = route.request().url();
+      if (/^https?:/.test(url) && !url.startsWith(`${origin}/`)) return route.abort();
+      return route.continue();
+    });
+    const view = await check.newPage();
+    view.on('pageerror', error => errors.push(error.message));
+    await view.goto(`${origin}/app/`);
+    await view.locator('#searchProfile').selectOption(profile);
+    await view.locator('#btnSolve').click();
+    await view.waitForFunction(() => !document.getElementById('btnSolve').disabled
+      && globalThis.getSelectedUnifiedWitness?.()?.certificate?.status === 'EXACT_TARGET_PROVEN',
+    null, {timeout: 15000});
+    const evidence = await view.evaluate(() => ({
+      statistics: document.getElementById('searchStatistics').textContent,
+      totals: globalThis.getSelectedUnifiedWitness().visibleTotals,
+      verified: globalThis.getSelectedUnifiedWitness().certificate.witnessVerification.valid,
+      overflow: document.documentElement.scrollWidth > innerWidth + 1,
+    }));
+    assert.equal(evidence.verified, true);
+    assert.deepEqual(evidence.totals, {health: 0, melee: 100, grenade: 100, super: 100, class: 100, weapons: 100});
+    assert.match(evidence.statistics, /[1-9]\d* (?:个候选方案|個候選方案|candidate loadouts)/);
+    assert.doesNotMatch(evidence.statistics, /节点|節點|nodes/);
+    assert.equal(evidence.overflow, false);
+    feasibility.push({profile, ...evidence});
+    await check.close();
+  }
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({feasibility}, null, 2));
   console.log(JSON.stringify({environment: 'headless desktop Chrome/Edge, synthetic inputs, no CPU throttle', metrics}, null, 2));
   await context.close();
 } finally {

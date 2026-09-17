@@ -25,6 +25,56 @@ when a budget is reached; no limit can create an infeasibility proof.
 | Balanced | 3 s | 2,000,000 / 50,000 | default search, progressive candidates |
 | Deep | 120 s | 500,000,000 / 2,000,000 | physical inventory frontier within budget; bounded assignment, proveFuzzy for Scratch |
 
+### Foreground theoretical feasibility first
+
+Foreground `solve` requests now share a first-feasible rule-box query after
+the cheap seeds. Fast no longer stops at an unsuccessful heuristic seed: it
+receives the same 3-second / 50-million-probe first-feasible allowance as
+Balanced. Deep retains its larger 120-second / 500-million allowance, including
+this phase. The clock is measured from request start, not restarted per phase.
+These are cooperative limits; one primitive may overshoot. The independent
+`suggest` preview and Upgrade fallback keep their existing bounded behavior.
+
+The query reuses the partial-configuration oracle with one requested witness,
+the normalized Armor rule bounds, fixed Exotic and exact Balanced count. It
+covers intervals and visible 0/200 preimages instead of trying only a few
+preferred target points. Fast returns one verified candidate; Balanced/Deep
+continue their existing alternative/ranking search within their remaining
+profile budgets. Neither an exhausted first query nor a budget interruption
+adds a global negative proof. This improves recall, not universal completeness.
+
+Mixed-mode partial queries retain the smaller mode group and stream the larger
+one; projection extrema use iteration rather than spreading a large array into
+`Math.min`/`Math.max`. This avoids the four-Balanced argument-stack overflow.
+
+The frontend displays retained verified candidate counts, not primitive nodes;
+near misses remain candidates and are not mislabeled as qualifying solutions.
+Existing result caps (60 theoretical exact groups / 12 inventory loadouts) are
+unchanged. A deeper search can improve quality without increasing the count.
+
+The exact-reassignable inventory phase is separate: as implemented in
+`inventory-solver.mjs`, it can exceed these profile deadlines while seeking an
+existence witness. The table describes its subsequent bounded alternatives,
+not a hard wall deadline for every inventory request.
+
+Regression evidence for this change:
+
+- `tests/theory-feasibility-first.test.mjs`: all three profiles recover the
+  `[0,100,100,100,100,100]` exact target with five +10 mods and no Balanced
+  tuning. Fast returns one; Balanced/Deep retain their existing alternatives.
+- Generated reachable cases cover all six Balanced counts, fixed Exotics and
+  independent six-stat reconstruction. Rule-box cases cover lower bounds,
+  visible clipping and Armor-domain values above 200. Expired clocks/node
+  limits cannot authorize a negative proof; Deep keeps its larger allowance.
+- `scripts/verify-optimization-browser.mjs`: built Worker and actual UI pass
+  the same three-profile regression (1 / 60 / 60 candidates), including the
+  390px Fast view and responsive preview/cancellation checks.
+- Local Node suite: 527 tests passed. Offline file:// validation and desktop
+  validation (three languages and six window sizes) passed.
+- `npm run check` (lint, suite, 49 upgrade plans and build), the full browser
+  smoke suite and the targeted optimization browser check passed. Production
+  builds retain the pre-existing large-chunk warning.
+
 Theoretical searches count much smaller primitive probes, so their Balanced /
 Deep node ceilings are 50 million / 500 million. Deep permits up to 5 million
 full evaluations, separately from its 2 million retained-state limit.

@@ -11,6 +11,10 @@ export const SEARCH_PROFILES = Object.freeze({
   deep: Object.freeze({maxTimeMs: 120000, maxNodes: 500000000, maxStates: 2000000, maxEvaluations: 5000000, fastMode: false, proveFuzzy: true, exhaustive: true}),
 });
 export const SEARCH_STAGES_MS = Object.freeze([150, 500, 1500, 3000]);
+// Foreground theoretical requests get at least the same first-feasible effort.
+// Deep retains its larger budget. This is not an existence guarantee; preview
+// stays cheap and ordinary alternative search still uses the profile limits.
+export const THEORY_FEASIBILITY_LIMITS = Object.freeze({maxTimeMs: 3000, maxNodes: 50000000});
 
 export function withSearchProfile(operation, payload = {}) {
   const profile = Object.hasOwn(SEARCH_PROFILES, payload.searchProfile) ? payload.searchProfile : "balanced";
@@ -18,7 +22,8 @@ export function withSearchProfile(operation, payload = {}) {
   const maxNodes = operation === "solveInventory" || profile === "fast" ? options.maxNodes
     : profile === "deep" ? 500000000 : 50000000;
   return {...payload, searchProfile: profile,
-    runtimeOptions: {...payload.runtimeOptions, fastMode: options.fastMode, proveFuzzy: options.proveFuzzy},
+    runtimeOptions: {...payload.runtimeOptions, fastMode: options.fastMode, proveFuzzy: options.proveFuzzy,
+      feasibilityFirst: operation === 'solve'},
     searchLimits: {...payload.searchLimits, maxTimeMs: options.maxTimeMs,
       maxNodes, maxStates: options.maxStates, maxEvaluations: options.maxEvaluations,
       exhaustive: options.exhaustive || payload.searchLimits?.exhaustive === true},
@@ -32,7 +37,6 @@ export class SearchBudgetExceeded extends Error {
 export function createSearchSession({operation, generation, profile = "balanced", onProgress = () => {}, now = () => performance.now()}) {
   const started = now();
   const limits = withSearchProfile(operation, {searchProfile: profile}).searchLimits;
-  const maxTimeMs = limits.maxTimeMs;
   let nodes = 0;
   let firstExactMs = null;
   let firstFeasibleMs = null;
@@ -67,8 +71,11 @@ export function createSearchSession({operation, generation, profile = "balanced"
       // Profiles bound subsequent physical alternatives/fuzzy ranking, not
       // whether an existing witness may be discovered. Worker termination
       // remains the cancellation mechanism, including inside this phase.
+      const activeLimits = operation === 'solve' && statistics?.phase === 'theory-feasibility'
+        ? {maxTimeMs: Math.max(limits.maxTimeMs, THEORY_FEASIBILITY_LIMITS.maxTimeMs),
+          maxNodes: Math.max(limits.maxNodes, THEORY_FEASIBILITY_LIMITS.maxNodes)} : limits;
       if (!(operation === 'solveInventory' && statistics?.phase === 'exact-inventory')
-          && (now() - started >= maxTimeMs || nodes >= limits.maxNodes)) {
+          && (now() - started >= activeLimits.maxTimeMs || nodes >= activeLimits.maxNodes)) {
         budgetReached = true; throw new SearchBudgetExceeded();
       }
     },
