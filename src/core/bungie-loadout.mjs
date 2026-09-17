@@ -25,7 +25,6 @@ import { assignArmorMods, executionProjectionMismatch } from "./armor-mod-assign
 import { buildSocketCapabilities } from "./armor-sockets.mjs";
 import { assertSolutionConsistency, createCanonicalId, createPieceCapability } from "./solver-v3-contract.mjs";
 import { STATS } from "./armor-model.mjs";
-import { buildArmorInventory } from "./bungie-inventory.mjs";
 
 export const CHARACTER_LOADOUTS_COMPONENT = "CharacterLoadouts";
 export const LOADOUT_WRITE_COMPONENTS = [
@@ -875,6 +874,7 @@ export async function verifyLoadoutApplication({
       }
     }
     if (expectedArmorTotals) {
+      const {buildArmorInventory} = await import('./bungie-inventory.mjs');
       const inventory = buildArmorInventory(response).items;
       const requested = new Set(equipItemIds.map(String));
       const actual = Object.fromEntries(STATS.map(stat => [stat, 0]));

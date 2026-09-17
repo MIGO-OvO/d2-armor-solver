@@ -134,6 +134,18 @@ separate from mathematical truth. Search callbacks never enter ProblemSpec.
 - Realtime reachability uses revision guards and bounded caches. Preview and
   foreground requests have independent ownership, and cancellation retains
   idle workers. Derived-plan caches do not invalidate on inventory progress.
+- Proof identities are compact SHA-256 fingerprints of complete canonical
+  domains; internal provenance and witness verification remain required.
+  Verification workers prepare each batch's inventory once and receive compact
+  subsequent merge messages. Exact interior targets also use conservative
+  capped suffix total-stat sets before descending into quotient combinations.
+- `bungie-inventory-model.mjs` owns pure mapping and lightweight metadata.
+  `bungie-inventory.mjs` preserves the catalog-backed synchronous interface and
+  is loaded only for profile import or read-back. Offline builds inline dynamic
+  imports; they never fetch a catalog at runtime.
+- `src/ui/` owns shared modal/editor focus behavior and input ordering, including
+  the desktop bridge's nested DOM. See [optimization-phases.md](optimization-phases.md)
+  for regression evidence and the explicitly deferred OAuth work.
 - Optional Tuning, shared rule-quality ranking, local assignment quality and
   the responsive computation changes are described in
   [complete-optimization.md](complete-optimization.md).

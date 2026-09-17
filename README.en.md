@@ -40,7 +40,7 @@ See [desktop documentation](docs/desktop.md) for requirements and validation det
 The portable browser ZIP is **not a current Release attachment**.
 Push builds retain it as an Actions artifact for 14 days; downloading artifacts normally requires GitHub sign-in.
 Extract the ZIP inside the artifact and open the entry point through `file://`.
-This build runs without Workers, so large inventory searches may briefly block the UI.
+This build uses an embedded Blob Worker and supports cancellation. Browsers without Worker support report computation unavailable rather than blocking the UI.
 Firefox restrictions on `file://` storage may prevent drafts and saved builds from persisting.
 DIM links can be generated offline, but opening DIM or other external sites requires a connection.
 

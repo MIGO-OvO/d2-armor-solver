@@ -1610,10 +1610,24 @@ async function checkBungieAuthFlow(browser) {
     assert.equal(await focusedSelect.evaluate(el => el.isConnected && document.activeElement === el), true,
       'a passive refresh must not destroy the native select being used');
     await page.locator('#setReqMode').selectOption('none');
+    await page.locator('.bungie-loadout-card').hover();
+    assert.equal(await page.locator('.bungie-loadout-detail').isVisible(), false,
+      'hover must not move the Apply target by opening overflowing details');
+    await page.locator('.bungie-loadout-detail-toggle').click();
+    assert.equal(await page.locator('.bungie-loadout-detail').isVisible(), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.bungie-loadout-detail').isVisible(), false);
     await page.locator(".bungie-saved-actions .btn-solve").click();
-    await page.waitForFunction(() => /游戏内配装已完整应用/.test(
-      document.getElementById("upgradeImportSummary")?.textContent || "",
-    ));
+    try {
+      await page.waitForFunction(() => /游戏内配装已完整应用/.test(
+        document.getElementById("upgradeImportSummary")?.textContent || "",
+      ));
+    } catch (cause) {
+      throw new Error('Mock saved-loadout feedback missing: ' + JSON.stringify({
+        summary: await page.locator('#upgradeImportSummary').textContent(),
+        writes: writeRequests.equipLoadout, browserErrors,
+      }), {cause});
+    }
     assert.deepEqual(writeRequests.equipLoadout, [{
       loadoutIndex: 0,
       characterId: "2305843009471208001",
@@ -2787,8 +2801,11 @@ const envWithoutBungie = { ...process.env };
 delete envWithoutBungie.BUNGIE_OAUTH_CLIENT_ID;
 delete envWithoutBungie.BUNGIE_OAUTH_CLIENT_SECRET;
 delete envWithoutBungie.BUNGIE_API_KEY;
-runBuild(envWithoutBungie);
-await startPreview();
+const bungieOnly = process.env.BROWSER_SMOKE_SCOPE === 'bungie';
+if (!bungieOnly) {
+  runBuild(envWithoutBungie);
+  await startPreview();
+}
 
 // The reported DIM CSV: exact arithmetic, no socket capability. The page must
 // present the certificate's numbers, stay UNVERIFIED (never BLOCKED) and never
@@ -3573,6 +3590,7 @@ async function checkExoticConstraintState(browser) {
 }
 
 let browser;
+if (!bungieOnly) {
 try {
   browser = await chromium.launch({
     executablePath: await findChrome(),
@@ -3622,12 +3640,12 @@ try {
   assert.equal(await page.locator("#fragmentGrid .fragment-stepper").count(), 6);
   assert.equal(await page.locator("#targetGrid .stat-mode-controls").count(), 6);
   assert.equal(await page.locator("#targetGrid .stat-mode-control").count(), 12);
-  assert.match(await page.locator("#priorityBadge_health").innerText(), /优先\s*无/);
-  assert.match(await page.locator("#fuzzyBadge_health").innerText(), /规则\s*=\s*精确/);
-  await page.locator("#priorityBadge_health").click();
-  assert.match(await page.locator("#priorityBadge_health").innerText(), /优先\s*高/);
-  await page.locator("#fuzzyBadge_health").click();
-  assert.match(await page.locator("#fuzzyBadge_health").innerText(), /规则\s*≥\s*至少/);
+  assert.equal(await page.locator("#priorityBadge_health").inputValue(), '0');
+  assert.equal(await page.locator("#fuzzyBadge_health").inputValue(), '=');
+  await page.locator("#priorityBadge_health").selectOption('1');
+  assert.match(await page.locator("#priorityBadge_health option:checked").innerText(), /高/);
+  await page.locator("#fuzzyBadge_health").selectOption('>=');
+  assert.match(await page.locator("#fuzzyBadge_health option:checked").innerText(), /至少/);
 
   await page.locator("#onlyPlus5Tuning").check();
   assert.equal(
@@ -4049,6 +4067,7 @@ try {
 } finally {
   await browser?.close();
   await server.close();
+}
 }
 
 // Phase 2: rebuild with fake Bungie secrets and exercise the login/import

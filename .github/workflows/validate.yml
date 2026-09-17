@@ -27,5 +27,6 @@ jobs:
       - run: npm run check
       - run: npm run benchmark:v3
       - run: npm run test:browser
+      - run: node scripts/verify-workbench-interaction.mjs
       - run: npm run verify:offline
       - run: npm run desktop:test

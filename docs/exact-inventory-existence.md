@@ -117,8 +117,9 @@ Expanding those equivalence classes to 1,300 physical items took approximately
 Worst-case time remains exponential in the number of distinct mathematical
 rolls; correctness does not imply a fixed response-time bound. Memory for the
 new residue tables is capped (4,096 entries per suffix, with safe fallback).
-Browser workers remain cancellable. The offline synchronous fallback can block
-its page during a long exact query, as it cannot process UI events mid-call.
+Browser workers remain cancellable. The current offline build embeds a Blob
+worker; browsers without Worker support report computation unavailable instead
+of running an unbounded synchronous query on the interaction thread.
 
 Tests cover the reported DIM positive, duplicate saturation, reversed input,
 Balanced/Deep expired session clocks, physical 2/4/8-way shards, fixed Exotic,

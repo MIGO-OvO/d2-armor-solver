@@ -66,6 +66,7 @@ await build(
       inlineDynamicImports: true,
       rollupOptions: {
         input: path.join(projectRoot, "app", "index.html"),
+        output: {codeSplitting: false},
       },
     },
     define: {

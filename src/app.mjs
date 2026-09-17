@@ -1,5 +1,6 @@
 /* global __BUNGIE_OAUTH_CLIENT_ID__ */
 import {captureEditorFocus, createOverlayController} from './ui/workbench-accessibility.mjs';
+import {arrangeWorkbenchInputs} from './ui/workbench-layout.mjs';
 import {
   ARCHETYPES,
   DEFAULT_TARGETS,
@@ -227,9 +228,8 @@ import {
 } from "./core/bungie-api.mjs";
 import {
   ARMOR_COMPONENTS,
-  buildArmorInventory,
   extractSubclassFragments,
-} from "./core/bungie-inventory.mjs";
+} from "./core/bungie-inventory-model.mjs";
 import {
   LOADOUT_WRITE_COMPONENTS,
   BungieLoadoutApplyError,
@@ -339,12 +339,18 @@ function getStatInputHTML(prefix, stat, val) {
         placeholder="${l('上限', '上限', 'max')}">
       <div class="stat-range-hint" id="rangeHint_${stat}" aria-live="polite"></div>
       <div class="stat-mode-controls" role="group" aria-label="${STAT_LABELS[stat]} ${l('优先级与规则', '優先級與規則', 'priority and rule')}">
-        <button type="button" class="stat-mode-control priority-badge${priority ? ' is-active' : ''}" id="priorityBadge_${stat}" data-level="${priority}" onclick="cyclePriority('${stat}')" title="${priorityTitle}" aria-label="${priorityTitle}">
-          <span class="stat-mode-label">${l('优先', '優先', 'Priority')}</span><span class="stat-mode-value">${priorityLevelName(priority)}</span>
-        </button>
-        <button type="button" class="stat-mode-control fuzzy-badge${fuzzy !== '=' ? ' is-active' : ''}" id="fuzzyBadge_${stat}" data-mode="${fuzzy}" onclick="cycleFuzzyMode('${stat}')" title="${fuzzyTitle}" aria-label="${fuzzyTitle}">
-          <span class="stat-mode-label">${l('规则', '規則', 'Rule')}</span><span class="stat-mode-value">${FUZZY_MODE_SYMBOL[fuzzy]} ${fuzzyModeName(fuzzy)}</span>
-        </button>
+        <label class="stat-mode-control" for="priorityBadge_${stat}">
+          <span class="stat-mode-label">${l('优先', '優先', 'Priority')}</span>
+          <select class="priority-badge${priority ? ' is-active' : ''}" id="priorityBadge_${stat}" data-level="${priority}" onchange="setStatPriority('${stat}',this.value)" title="${priorityTitle}" aria-label="${STAT_LABELS[stat]} ${priorityTitle}">
+            ${[0, 1, 2, 3].map(level => `<option value="${level}" ${level === priority ? 'selected' : ''}>${priorityLevelName(level)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="stat-mode-control" for="fuzzyBadge_${stat}">
+          <span class="stat-mode-label">${l('规则', '規則', 'Rule')}</span>
+          <select class="fuzzy-badge${fuzzy !== '=' ? ' is-active' : ''}" id="fuzzyBadge_${stat}" data-mode="${fuzzy}" onchange="setStatRule('${stat}',this.value)" title="${fuzzyTitle}" aria-label="${STAT_LABELS[stat]} ${fuzzyTitle}">
+            ${FUZZY_MODE_ORDER.map(mode => `<option value="${mode}" ${mode === fuzzy ? 'selected' : ''}>${FUZZY_MODE_SYMBOL[mode]} ${fuzzyModeName(mode)}</option>`).join('')}
+          </select>
+        </label>
       </div>
     </div>`;
 }
@@ -353,18 +359,23 @@ function syncPriorityUI(stat) {
   const badge = document.getElementById('priorityBadge_' + stat);
   if (!badge) return;
   const level = statPriority[stat] || 0;
-  const value = badge.querySelector('.stat-mode-value');
-  if (value) value.textContent = priorityLevelName(level);
+  badge.value = String(level);
   badge.dataset.level = String(level);
   badge.classList.toggle('is-active', level > 0);
   const title = `${l('优先级', '優先級', 'Priority')}：${priorityLevelName(level)}`;
   badge.title = title;
-  badge.setAttribute('aria-label', title);
+  badge.setAttribute('aria-label', `${STAT_LABELS[stat]} ${title}`);
 }
 
 function cyclePriority(stat) {
   const current = statPriority[stat] || 0;
-  const next = (current + 1) % 4;
+  setStatPriority(stat, (current + 1) % 4);
+}
+
+function setStatPriority(stat, value) {
+  const next = Number(value);
+  if (!STATS.includes(stat) || ![0, 1, 2, 3].includes(next)) return;
+  stopSearches();
   if (next === 0) delete statPriority[stat];
   else statPriority[stat] = next;
   syncPriorityUI(stat);
@@ -378,13 +389,12 @@ function syncStatModeUI(stat) {
   const maxInput = document.getElementById('targetMax_' + stat);
   const mode = statFuzzyMode[stat] || '=';
   if (badge) {
-    const value = badge.querySelector('.stat-mode-value');
-    if (value) value.textContent = `${FUZZY_MODE_SYMBOL[mode]} ${fuzzyModeName(mode)}`;
+    badge.value = mode;
     badge.dataset.mode = mode;
     badge.classList.toggle('is-active', mode !== '=');
     const title = `${l('规则', '規則', 'Rule')}：${fuzzyModeName(mode)}`;
     badge.title = title;
-    badge.setAttribute('aria-label', title);
+    badge.setAttribute('aria-label', `${STAT_LABELS[stat]} ${title}`);
   }
   if (maxInput) maxInput.hidden = mode !== 'range';
 }
@@ -392,7 +402,12 @@ function syncStatModeUI(stat) {
 function cycleFuzzyMode(stat) {
   const current = statFuzzyMode[stat] || '=';
   const index = FUZZY_MODE_ORDER.indexOf(current);
-  const next = FUZZY_MODE_ORDER[(index + 1) % FUZZY_MODE_ORDER.length];
+  setStatRule(stat, FUZZY_MODE_ORDER[(index + 1) % FUZZY_MODE_ORDER.length]);
+}
+
+function setStatRule(stat, next) {
+  if (!STATS.includes(stat) || !FUZZY_MODE_ORDER.includes(next)) return;
+  stopSearches();
   if (next === '=') delete statFuzzyMode[stat];
   else statFuzzyMode[stat] = next;
   syncStatModeUI(stat);
@@ -3615,6 +3630,7 @@ async function importInventoryFromBungie({ silent = false } = {}) {
       renderBungieAuthState();
       return;
     }
+    const {buildArmorInventory} = await import('./core/bungie-inventory.mjs');
     const { items, characters, characterInventories } = buildArmorInventory(response, { language: getPageLanguage() });
     const loadoutState = extractBungieLoadoutState(response);
     for (const [characterId, summary] of Object.entries(characters)) {
@@ -4775,6 +4791,7 @@ function setCalculatorMode(mode, persist = true) {
   stopSearches();
   calculatorMode = mode === 'upgrade' ? 'upgrade' : 'solve';
   const isUpgrade = calculatorMode === 'upgrade';
+  arrangeWorkbenchInputs(document, isUpgrade);
   document.body.classList.toggle('is-upgrade-mode', isUpgrade);
   document.getElementById('modeSolveButton')?.setAttribute('aria-pressed', String(!isUpgrade));
   document.getElementById('modeUpgradeButton')?.setAttribute('aria-pressed', String(isUpgrade));
@@ -7838,6 +7855,8 @@ function initializeFloatingJumpVisibility() {
 
 
 Object.assign(window, {
+  setStatPriority,
+  setStatRule,
   adjFragment,
   adjPlus3,
   analyzeArmorUpgrades,

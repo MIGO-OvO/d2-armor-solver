@@ -3130,7 +3130,7 @@ a:focus-visible {
    is visible without relying on tooltip-only symbols. */
 .stat-mode-controls {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: .5rem;
   margin-top: .125rem;
   padding-top: .625rem;
@@ -3172,6 +3172,15 @@ a:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.stat-mode-control select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2rem;
+  padding: .2rem 1.25rem .2rem .35rem;
+  font-size: .8125rem;
+  color: var(--text);
+}
+.stat-mode-control:has(select.is-active) { border-color: var(--accent); }
 .priority-badge[data-level="1"] {
   border-color: #ff6b6b;
   color: #ff6b6b;
@@ -5336,8 +5345,8 @@ a:focus-visible {
   background: var(--card-strong);
   box-shadow: 0 18px 38px rgba(0,0,0,.38);
 }
-.bungie-loadout-card:hover .bungie-loadout-detail,
-.bungie-loadout-card:focus-within .bungie-loadout-detail,
+/* Only an explicit details action opens the panel. Opening on hover/focus can
+   extend document overflow during pointer-down and move the Apply target. */
 .bungie-loadout-card.is-detail-open .bungie-loadout-detail { display: grid; }
 .bungie-loadout-detail-section { display: grid; gap: 8px; }
 .bungie-loadout-detail-section + .bungie-loadout-detail-section {
@@ -5516,7 +5525,7 @@ a:focus-visible {
    Mobile adaptation pass
    ============================================================ */
 @media (pointer: coarse), (max-width: 680px) {
-  /* Priority and rule controls are real buttons, not status badges. Keep the
+  /* Priority and rule controls are native selects, not status badges. Keep the
      whole control easy to hit when the target cards are two columns wide. */
   .stat-mode-control {
     min-height: var(--touch-target);
@@ -6302,4 +6311,38 @@ body.has-overlay { overflow: hidden; }
   }
   .upgrade-piece-mod { font-variant-numeric: tabular-nums; }
   .upgrade-piece-row summary { min-height: 48px; }
+}
+
+/* Narrow workbench: keep the existing command surface within thumb reach.
+   Secondary actions remain available in its own horizontal scrollport. */
+@media (max-width: 680px) {
+  body:not(:has(.desktop-app)) .cmd-bar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 40;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .375rem .5rem;
+    margin: 0;
+    padding: .5rem .75rem calc(.5rem + env(safe-area-inset-bottom));
+    border-radius: 0;
+  }
+  body:not(:has(.desktop-app)) .cmd-bar-status { min-width: 0; }
+  body:not(:has(.desktop-app)) .cmd-bar-depth { min-width: 0; gap: .25rem; }
+  body:not(:has(.desktop-app)) .cmd-bar-depth select { min-height: 2.75rem; }
+  body:not(:has(.desktop-app)) .cmd-bar-actions {
+    grid-column: 1 / -1;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-block: .125rem;
+  }
+  body:not(:has(.desktop-app)) .cmd-bar-actions > button {
+    flex: 0 0 auto;
+    min-height: 2.75rem;
+  }
+  body:not(:has(.desktop-app)) .container {
+    padding-bottom: calc(var(--cmd-bar-offset, 160px) + 1.5rem);
+  }
+  .stat-mode-controls { grid-template-columns: minmax(0, 1fr); }
+  .stat-mode-control select { min-height: 2.75rem; font-size: 1rem; }
 }

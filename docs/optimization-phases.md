@@ -81,3 +81,49 @@ Measured with the existing synthetic fixtures (Node v24.20.0, local Windows):
 These are structural/resource measurements, not a promise of faster CPU time
 for every cold query. Full Node suite: 536 passing. V3 benchmark, lint,
 production build and browser interaction regression passed.
+
+### Stage 4 — experience and maintainability
+
+The scratch workflow moves the existing target controls before optional inventory
+and fragment inputs, preserving keyboard/visual order in both browser and desktop.
+Phone layouts retain the original command bar at the bottom with a scrollable
+secondary-action row; no core action is removed. Rule and priority controls are
+native direct-choice selects with the same persisted values and three languages.
+
+The inventory mapper is separated from its catalog-backed adapter. Existing
+synchronous importers/tests retain their interface; the app imports the large
+catalog only on profile import or execution read-back. The browser regression
+asserts that theoretical solving and saved plans do not fetch the catalog.
+The secret-less online app chunk changes from ~1.80 MB / 438 KB gzip to
+~507 KB / 173 KB gzip. The deferred catalog is still ~1.30 MB; Vite's large-chunk
+warning remains. Offline builds intentionally retain all data in one self-contained
+bundle and continue to use their embedded Worker.
+
+Added catalog version/identity/localization contract checks and CI execution of
+the keyboard regression. Corrected outdated offline Worker and download-channel
+documentation. No new dependency, framework migration or runtime data download
+was introduced.
+
+Full browser validation also caught two integration regressions, reproduced
+before correction: modal background isolation hid the Undo action, and hover
+details could move the saved-loadout Apply target between pointer-down and up.
+Toasts now belong to the active modal; loadout details open only through their
+explicit button. Regressions cover save/delete/undo and actual pointer clicks.
+`BROWSER_SMOKE_SCOPE=bungie` runs only the fully mocked account integration loop
+for focused diagnostics; ordinary smoke runs still execute every phase.
+
+Final verification: 538/538 Node tests; lint; production build; V3 benchmark;
+49 randomized upgrade plans; complete browser smoke (44 mocked Bungie requests,
+zero unhandled/escaped requests); keyboard/Undo/mobile regression; browser
+scheduling regression; file:// offline verification; desktop frontend build and
+six-window-size verification. The final online output was rebuilt after the
+fake-credential smoke build, so test credentials are not the delivered preview.
+
+### Remaining boundaries
+
+- OAuth client-secret exposure and token-refresh behavior are unchanged, by request.
+- Exact existence still has exponential worst cases and is cancellable, not resumable.
+- No real account writes, native Windows installer build, or physical-phone test
+  was performed. Desktop verification covers its frontend/WebView contract.
+- The design detector fell back to text scanning because optional parser
+  dependencies were unavailable; browser observations are the visual evidence.

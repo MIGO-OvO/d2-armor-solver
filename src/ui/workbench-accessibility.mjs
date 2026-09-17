@@ -5,6 +5,7 @@ const available = node => !node.disabled && node.tabIndex >= 0 && node.getClient
 export function createOverlayController(doc) {
   let active = null;
   let trigger = null;
+  let toastHome = null;
   const background = new Map();
   const controls = () => [...active.querySelectorAll(focusable)].filter(available);
   const enter = () => (controls()[0] || active).focus({preventScroll: true});
@@ -26,6 +27,13 @@ export function createOverlayController(doc) {
       trigger = doc.activeElement;
       active = node;
       node.tabIndex = -1;
+      // Undo is part of the modal task, not background UI. Move the existing
+      // live region inside so it stays readable, clickable and in the Tab loop.
+      const toast = doc.getElementById('toastStack');
+      if (toast && !node.contains(toast)) {
+        toastHome = {node: toast, parent: toast.parentNode, next: toast.nextSibling};
+        node.append(toast);
+      }
       // Inert siblings along the ancestor path: works even when the desktop
       // bridge nests overlays inside the results column.
       for (let branch = node; branch && branch !== doc.body; branch = branch.parentElement) {
@@ -46,6 +54,11 @@ export function createOverlayController(doc) {
       doc.removeEventListener('focusin', focusin, true);
       for (const [node, inert] of background) node.inert = inert;
       background.clear();
+      if (toastHome) {
+        toastHome.parent.insertBefore(toastHome.node,
+          toastHome.next?.parentNode === toastHome.parent ? toastHome.next : null);
+        toastHome = null;
+      }
       if (trigger?.isConnected && available(trigger)) trigger.focus({preventScroll: true});
       trigger = null;
     },

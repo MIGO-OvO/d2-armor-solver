@@ -38,7 +38,7 @@ Windows 安装包不需要 Node.js、Rust 或本地服务器；不捆绑或自�
 
 浏览器免安装 ZIP **不是当前 Release 附件**：push 构建生成的 Actions 工件保留 14 天，
 下载通常需要登录 GitHub。解压工件中的 ZIP 后，用 `file://` 打开入口即可。
-该版本不启动 Worker，大型库存搜索可能短暂阻塞界面；Firefox 的 `file://` 存储限制
+该版本使用内嵌 Blob Worker 求解，支持取消；浏览器不支持 Worker 时会明确提示计算不可用。Firefox 的 `file://` 存储限制
 可能导致草稿和保存方案无法持久保留。DIM 导出链接可以离线生成，但打开 DIM 等外链需要联网。
 
 ## 快速上手
