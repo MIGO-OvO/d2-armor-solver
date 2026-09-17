@@ -13,7 +13,7 @@
 //                 and the preflight only reports that capability is unproven.
 //   BLOCKED     — known metadata proves the write cannot happen (energy,
 //                 socket missing from a complete socket list, plug absent from
-//                 a complete candidate/unlock set).
+//                 a complete socket candidate set).
 // `unknown !== blocked`: a missing socket object is only a negative verdict
 // when the instance's socket capability is known complete. Anything a caller
 // cannot disprove lands in unverifiedMods, never in unassignedMods.
@@ -273,17 +273,19 @@ function assignPiece({
   const statSocket = desiredStatHash ? itemSocket(item, SOCKET_ROLE.STAT) : null;
   const tuningSocket = desiredTuningHash ? itemSocket(item, SOCKET_ROLE.TUNING) : null;
 
-  // Tri-state availability (handoff 3.3):
-  //   - a known account/character plug set (Set) rejects plugs absent from it;
-  //   - per-socket candidates from ItemReusablePlugs reject absent plugs when
-  //     the list is complete ("known");
-  //   - missing data (null set / unknown candidates) must NOT reject — the
-  //     write is attempted and the post-write verify confirms it.
+  // Profile/character plug sets are only one source of positive availability
+  // evidence, NOT a complete whitelist. In particular, the real profile can
+  // contain no tuning hashes there while owned armor already uses them.
+  // Absence from that union can downgrade a write to unverified, never block
+  // it or override socket membership. Unknown writes still need post-write
+  // verification; a known incompatible socket remains a hard rejection.
   const canInsert = (socket, hash) => {
-    if (availablePlugHashes instanceof Set && !availablePlugHashes.has(hash)) {
-      return { ok: false, unverified: false };
+    if (socket?.candidatePlugHashes?.has(hash)) {
+      return {
+        ok: true,
+        unverified: availablePlugHashes instanceof Set && !availablePlugHashes.has(hash),
+      };
     }
-    if (socket?.candidatePlugHashes?.has(hash)) return { ok: true, unverified: false };
     if (socket?.candidateState === CANDIDATE_STATE.KNOWN) {
       return { ok: false, unverified: false };
     }
@@ -454,7 +456,8 @@ function pieceTotals(item, { tuningAssignment, statAssignment, projected }) {
 // instances. pieces are the plan pieces (sourceId/hash), inventory the
 // normalized Bungie/DIM items, tuningAssignments/modAssignments the solver
 // output (array or index-keyed object). availablePlugHashes is the target
-// character's plug-set union or null when unknown.
+// character's partial, positive plug-set evidence or null when absent. It is
+// never an exhaustive whitelist of the plugs that the character can use.
 export function assignArmorMods({
   pieces = [],
   inventory = [],

@@ -236,7 +236,8 @@ test("known socket candidates reject a plug that does not fit the socket", () =>
   });
   const modAssignments = SLOTS.map(() => ({ size: 10, stat: "health" })); // health mod not in socket candidates
   const tuningAssignments = SLOTS.map(() => ({ mode: "+5-5", to: "health", from: "weapons" }));
-  const result = assignArmorMods({ pieces: makePieces(), inventory: items, tuningAssignments, modAssignments });
+  const result = assignArmorMods({ pieces: makePieces(), inventory: items, tuningAssignments, modAssignments,
+    availablePlugHashes: new Set(ALL_STAT_HASHES) });
   assert.equal(result.valid, false);
   assert.ok(result.unassignedMods.some(item => item.index === 0 && item.reason === "plugUnavailable"));
 });
@@ -267,7 +268,7 @@ test("unknown candidates never reject: the plan stays valid and writes proceed",
     item.reason === "candidateAvailabilityUnknown"));
 });
 
-test("a known plug set rejects plugs absent from it (known empty blocks)", () => {
+test("partial global plug sets cannot veto socket candidates and leave missing availability unverified", () => {
   const items = defaultItems();
   const modAssignments = SLOTS.map(() => ({ size: 10, stat: "weapons" }));
   const tuningAssignments = SLOTS.map(() => ({ mode: "+5-5", to: "health", from: "weapons" }));
@@ -276,17 +277,19 @@ test("a known plug set rejects plugs absent from it (known empty blocks)", () =>
     inventory: items,
     tuningAssignments,
     modAssignments,
-    // Only the +5 weapons mod and the health tuning are unlocked.
+    // Global sets report only some sources; absence is not a locked verdict.
     availablePlugHashes: new Set([
       statHash("weapons", 5),
       tuningHash("health", "weapons"),
     ]),
   });
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true, JSON.stringify(result.unassignedMods));
+  assert.equal(result.executionStatus, EXECUTION_STATUS.UNVERIFIED);
+  assert.equal(result.plugOperations.length, 10);
   assert.equal(
-    result.unassignedMods.filter(item => item.kind === "stat" && item.reason === "plugUnavailable").length,
+    result.unverifiedMods.filter(item => item.kind === "stat" && item.reason === "candidateAvailabilityUnknown").length,
     5,
-    "the +10 stat mods are not in the known unlock set and must block",
+    "the +10 stat mods are absent from a partial source, not proven locked",
   );
   assert.equal(
     result.unassignedMods.filter(item => item.reason === "plugUnavailable" && item.kind === "tuning").length,

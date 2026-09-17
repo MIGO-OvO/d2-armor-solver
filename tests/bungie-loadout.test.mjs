@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
 import { saveToken } from "../src/core/bungie-api.mjs";
+import { buildArmorInventory } from "../src/core/bungie-inventory.mjs";
 import {
   BungieLoadoutApplyError,
   LOADOUT_WRITE_COMPONENTS,
@@ -128,7 +129,7 @@ test("missing plug-set data is unknown (null), never a known-empty set", () => {
   );
 });
 
-test("an explicitly present plug set stays a known set, even when it is empty", () => {
+test("an explicitly present plug set preserves empty positive evidence, not a complete whitelist", () => {
   const characterId = "2305843000000000001";
   const profile = {
     characters: { data: { [characterId]: { classType: 1 } } },
@@ -585,7 +586,7 @@ test("transient cannot-equip reasons (locked/vaulted/equipped) do not preflight-
   }
 });
 
-test("preflight blocks plug changes when Bungie returns no unlocked armor plugs", () => {
+test("an empty global plug set leaves plug changes unverified instead of blocking them", () => {
   const fixture = customPlanFixture();
   fixture.availablePlugHashes = new Set();
   const plan = buildCustomLoadoutPlan({
@@ -594,8 +595,43 @@ test("preflight blocks plug changes when Bungie returns no unlocked armor plugs"
     classId: "hunter",
     ...fixture,
   });
-  assert.equal(plan.valid, false);
-  assert.equal(plan.errors.filter(error => error.code === "plugUnavailable").length, 10);
+  assert.equal(plan.valid, true, JSON.stringify(plan.errors));
+  assert.equal(plan.assignment.executionStatus, "UNVERIFIED");
+  assert.equal(plan.plugOperations.length, 10);
+});
+
+test("real profile tuning absent from global plug sets does not block loadout preflight", () => {
+  const profile = JSON.parse(readFileSync(new URL("./fixtures/profile-fixture.json", import.meta.url), "utf8"));
+  const state = extractBungieLoadoutState(profile);
+  const inventory = buildArmorInventory(profile).items;
+  const [targetCharacterId] = Object.entries(state.characters).find(([, character]) => character.classId === "hunter");
+  const availablePlugHashes = state.availablePlugHashesByCharacter[targetCharacterId];
+  assert.ok(availablePlugHashes.size > 0, "reproduce a populated but incomplete set, not missing data");
+  assert.equal(availablePlugHashes.has(BALANCED_TUNING_MOD_HASH), false);
+  assert.ok(inventory.some(item => item.sockets.some(socket => socket.currentPlugHash === BALANCED_TUNING_MOD_HASH)),
+    "the same snapshot proves balanced tuning is already installed on owned armor");
+  const chosen = ["helmet", "arms", "chest", "legs", "classItem"].map(slot => inventory.find(item =>
+    item.classId === "hunter" && item.slot === slot && !item.exotic
+    && (item.owner === "Vault" || item.owner === targetCharacterId)
+    && item.sockets.some(socket => socket.role === "tuning")));
+  assert.ok(chosen.every(Boolean), "fixture must contain all five armor slots");
+  const changed = chosen.filter(item => item.tuningMode !== "plus3");
+  assert.ok(changed.length > 0, "exercise a tuning replacement rather than a no-op");
+  const plan = buildCustomLoadoutPlan({
+    membershipType: 3, targetCharacterId, classId: "hunter", inventory, availablePlugHashes,
+    pieces: chosen.map(item => ({ ...item, sourceId: item.id })),
+    tuningAssignments: chosen.map(() => ({ mode: "+3" })),
+    modAssignments: chosen.map(item => item.armorModSize
+      ? { stat: item.armorModStat, size: item.armorModSize } : null),
+  });
+  assert.equal(plan.valid, true, JSON.stringify(plan.errors));
+  assert.equal(plan.assignment.executionStatus, "UNVERIFIED");
+  assert.equal(plan.plugOperations.length, changed.length);
+  for (const item of changed) {
+    assert.ok(plan.plugOperations.some(op => op.itemId === item.id
+      && op.socketIndex === item.sockets.find(socket => socket.role === "tuning").socketIndex
+      && op.plugItemHash === BALANCED_TUNING_MOD_HASH));
+  }
 });
 
 test("applyCustomLoadoutPlan POSTs the manual sequence with JSON bodies", async () => {

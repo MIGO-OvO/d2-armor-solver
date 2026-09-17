@@ -209,10 +209,11 @@ export function extractBungieLoadoutState(profileResponse) {
     };
   }
 
-  // Tri-state availability (handoff 3.3): when neither the profile nor the
-  // character plug-set components were returned, availability is UNKNOWN —
-  // never an empty set, which would wrongly prove every plug locked. The
-  // executor then verifies each write by its result and the post-write read.
+  // Preserve positive availability evidence from these two sources. Neither
+  // a populated nor an empty union is exhaustive: item-scoped and definition
+  // plugs may be absent here. Missing components stay null; missing hashes
+  // must never be interpreted as proof of a locked plug. The executor still
+  // verifies writes by their results and the post-write read.
   const hasProfilePlugSets = Boolean(data.profilePlugSets?.data?.plugs)
     || Boolean(data.profilePlugSets?.plugs);
   const availablePlugHashesByCharacter = {};

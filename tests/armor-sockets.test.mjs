@@ -82,6 +82,18 @@ test("known reusable plugs survive an absent plug-set response (never emptied)",
   );
 });
 
+test("partial global plug evidence never filters socket candidates or the installed plug", () => {
+  const current = statHash("weapons", 10);
+  const desired = statHash("melee", 5);
+  const sockets = [{ plugHash: current, isEnabled: true, isVisible: true }];
+  const reusablePlugs = { 0: [{ plugItemHash: desired, canInsert: true, enabled: true }] };
+  const [socket] = buildSocketCapabilities(sockets, reusablePlugs, new Set([current]));
+  assert.deepEqual(socket.candidatePlugHashes, new Set([desired, current]));
+  const [unknown] = buildSocketCapabilities(sockets, null, new Set());
+  assert.equal(unknown.role, SOCKET_ROLE.STAT);
+  assert.ok(unknown.candidatePlugHashes.has(current));
+});
+
 test("findSocketByRole never falls back to a guessed index", () => {
   assert.equal(findSocketByRole([], SOCKET_ROLE.STAT), null);
   assert.equal(findSocketByRole([{ socketIndex: 0, role: SOCKET_ROLE.OTHER }], SOCKET_ROLE.STAT), null);

@@ -3386,7 +3386,7 @@ function bungiePlanErrorMessage(error) {
     return l("异域职业物品的现有实例词条与方案不匹配。", "異域職業物品的現有實例詞條與方案不相符。", "The owned Exotic class item roll does not match this plan.");
   }
   if (code === "plugUnavailable") {
-    return l("方案使用了该角色尚未解锁的模组。", "方案使用了該角色尚未解鎖的模組。", "This plan uses a mod that the character has not unlocked.");
+    return l("方案中的模组无法用于目标护甲插槽，请刷新库存后重试。", "方案中的模組無法用於目標防具插槽，請重新整理庫存後重試。", "A planned mod cannot be used in the target armor socket. Refresh the inventory and retry.");
   }
   if (code === "energy") {
     return l("方案中一件护甲的能量不足以安装其属性模组；请升级护甲能量后重试。", "方案中一件防具的能量不足以安裝其數值模組；請升級防具能量後重試。", "An armor piece lacks the energy to hold its stat mod. Upgrade the armor energy first.");

@@ -85,10 +85,10 @@ export function classifySocketRole({ currentPlugHash = 0, candidatePlugHashes = 
 //   sockets: itemComponents.sockets.data[instanceId].sockets
 //   reusablePlugs: itemComponents.reusablePlugs.data[instanceId].plugs
 //                  (map of socketIndex -> [{plugItemHash, canInsert, enabled}])
-//   availableHashes: profile+character plug-set union (unlock evidence); when
-//                  absent the reusable plugs stay unverified, which is fine
-//                  because the executor re-checks every write.
-export function buildSocketCapabilities(sockets = [], reusablePlugs = null, availableHashes = null) {
+//   _availableHashes: legacy profile+character plug-set argument. These are
+//                  partial availability sources, not a socket whitelist; do
+//                  not filter candidates or installed plugs against them.
+export function buildSocketCapabilities(sockets = [], reusablePlugs = null, _availableHashes = null) {
   const reusableByIndex = reusablePlugs && typeof reusablePlugs === "object"
     ? reusablePlugs
     : {};
@@ -114,21 +114,6 @@ export function buildSocketCapabilities(sockets = [], reusablePlugs = null, avai
     // socket); adding it keeps availability checks from rejecting the status
     // quo when reusable data is partial.
     if (currentPlugHash) candidatePlugHashes.add(currentPlugHash);
-    if (availableHashes instanceof Set) {
-      // Unlock filtering only removes plugs we can PROVE are absent; an empty
-      // plug-set response must not empty a known candidate list.
-      for (const hash of [...candidatePlugHashes]) {
-        if (!availableHashes.has(hash)) candidatePlugHashes.delete(hash);
-      }
-      if (candidatePlugHashes.size === 0 && candidateState === CANDIDATE_STATE.KNOWN) {
-        // Every reusable plug was filtered out: the item-definition list is
-        // still the socket contract, so re-add it unfiltered and mark partial.
-        for (const entry of reusableEntries) {
-          const hash = Number(entry && typeof entry === "object" ? entry.plugItemHash : entry) || 0;
-          if (hash) candidatePlugHashes.add(hash);
-        }
-      }
-    }
     const role = classifySocketRole({ currentPlugHash, candidatePlugHashes });
     return {
       socketIndex: index,
