@@ -37,3 +37,14 @@ Cross Save now compares platform types, with ordering/int64 regression fixtures.
 Unavailable storage and serialization errors report failure without overwriting
 the last valid record. The four targeted regressions failed before the fix.
 OAuth and token handling are unchanged.
+
+### Stage 2 — interaction
+
+Search initialization now announces idle instead of a fictitious cancellation.
+Running/cancelled candidates no longer display budget-exhaustion warnings.
+Shared overlay focus isolation works through the desktop bridge's nesting;
+armor edits restore logical-field focus. The result list has a single Tab stop
+and arrow/Home/End navigation; armor rows expose cell/rowheader semantics.
+`npm run test:interaction` exercises these behaviors in an isolated browser with
+external requests blocked. Initial browser and lifecycle regressions failed
+before the fix; focused checks now pass at desktop and 390px widths.

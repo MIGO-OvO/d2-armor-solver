@@ -22,7 +22,9 @@ export function proofPresentation(result, search = result?.search) {
   else if (status === "RULE_FEASIBLE_PROVEN") key = running || !complete ? "feasibleSearching" : "feasible";
   else if (status === "INFEASIBLE_PROVEN") key = "infeasible";
   else if (status === "INVALID_INPUT") key = "invalid";
-  else if (status === "SEARCH_LIMIT_REACHED") key = running ? "searching" : "limited";
+  else if (status === "SEARCH_LIMIT_REACHED") key = running ? "searching"
+    : search?.termination === 'cancelled' ? 'cancelled'
+    : search?.termination === 'completed' ? 'unproven' : "limited";
   return {key, status: status || null, feasible: certifiedFeasible(result), running, complete,
     termination: search?.termination || null,
     stats: certificate?.statResults || {}, executionStatus: certificate?.executionStatus || "UNVERIFIED"};

@@ -1,4 +1,5 @@
 /* global __BUNGIE_OAUTH_CLIENT_ID__ */
+import {captureEditorFocus, createOverlayController} from './ui/workbench-accessibility.mjs';
 import {
   ARCHETYPES,
   DEFAULT_TARGETS,
@@ -103,6 +104,8 @@ function searchProofLabel(result, search = result?.search) {
     feasibleSearching: ['满足规则 · 搜索未完成','滿足規則 · 搜尋未完成','Rules satisfied · search incomplete'],
     infeasible: ['已证明不可行','已證明不可行','Infeasibility proven'],
     limited: ['未找到达标解 · 已达到搜索上限','未找到達標解 · 已達搜尋上限','No qualifying solution · search limit reached'],
+    cancelled: ['搜索已停止 · 尚未找到达标解','搜尋已停止 · 尚未找到達標解','Search stopped · no qualifying solution found'],
+    unproven: ['搜索已结束 · 尚未证明可行或不可行','搜尋已結束 · 尚未證明可行或不可行','Search finished · feasibility remains unproven'],
     searching: ['继续搜索中 · 当前候选未达标','繼續搜尋中 · 目前候選未達標','Searching · current candidate does not meet rules'],
     invalid: ['输入无效 · 请检查条件','輸入無效 · 請檢查條件','Invalid input · check the constraints'],
     unverified: ['尚未验证 · 请重新求解','尚未驗證 · 請重新求解','Not verified · solve again'],
@@ -193,7 +196,11 @@ function stopSearches() {
   if (lastSearchResult?.search) lastSearchResult.search = {...lastSearchResult.search, running: false, termination: 'cancelled'};
   document.getElementById('cancelSearch')?.setAttribute('disabled', '');
   const status = document.getElementById('searchStatus');
-  if (status) status.textContent = l('搜索已停止，已验证结果保留','搜尋已停止，已驗證結果保留','Search stopped; verified results retained');
+  if (status) status.textContent = !lastSearchResult
+    ? l('等待开始','等待開始','Ready to search')
+    : candidateSolutionCount(lastSearchResult) > 0
+      ? l('搜索已停止，已验证结果保留','搜尋已停止，已驗證結果保留','Search stopped; verified results retained')
+      : l('搜索已停止 · 尚未找到达标解','搜尋已停止 · 尚未找到達標解','Search stopped · no qualifying solution found');
 }
 import {
   detectEquippedClass,
@@ -2074,6 +2081,10 @@ async function refreshInventoryPlansFromSolutions({ rerender = true, rejectCance
 // because renderSolutionNav needs it on two different paths.
 function appendImperfectWarning() {
   const msgDiv = document.getElementById('messages');
+  // A provisional near miss is not a termination event. The command bar
+  // already announces running/cancelled states, independently of proof truth.
+  if (theorySearchRunning || lastSearchResult?.search?.running
+      || lastSearchResult?.search?.termination === 'cancelled') return;
   if (msgDiv.dataset.imperfectShown === '1') return;
   msgDiv.dataset.imperfectShown = '1';
 
@@ -2081,8 +2092,11 @@ function appendImperfectWarning() {
   const advice = l('可选择深度搜索，或调整目标和规则。', '可選擇深度搜尋，或調整目標與規則。', 'Try Deep search, or adjust the targets and rules.');
 
   const searchLimited = allSolutions.certificate?.status !== 'INFEASIBLE_PROVEN';
+  const exhausted = lastSearchResult?.search?.termination === 'budget';
   const warning = searchLimited
-    ? l(
+    ? !exhausted ? l('尚未找到满足全部规则的方案；可继续搜索或调整条件。',
+      '尚未找到滿足全部規則的方案；可繼續搜尋或調整條件。',
+      'No loadout meets every rule yet. Continue searching or adjust the constraints.') : l(
         '\u641c\u7d22\u8fbe\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u4ec5\u4e3a\u5f53\u524d\u6700\u4f73配装\uff0c\u5c1a\u672a\u8bc1\u660e\u5168\u5c40\u6700\u4f18\u6216\u4e0d\u53ef\u8fbe\u3002',
         '\u641c\u5c0b\u9054\u5230\u9650\u5236\uff1b\u4ee5\u4e0b\u50c5\u70ba\u76ee\u524d\u6700\u4f73配裝\uff0c\u5c1a\u672a\u8b49\u660e\u5168\u57df\u6700\u512a\u6216\u4e0d\u53ef\u9054\u3002',
         'Search limit reached. The entries below are current-best loadouts; global optimality or infeasibility is not proven.'
@@ -4430,6 +4444,7 @@ function renderUpgradeBuildEditor(openIndex = null) {
     ? [...editor.querySelectorAll('.upgrade-piece-row[open]')].map(row => Number(row.dataset.index))
     : [openIndex];
 
+  const restoreFocus = captureEditorFocus(editor);
   editor.innerHTML = `<div class="upgrade-piece-list">${upgradeBuildState.map((piece, index) => {
     const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
     const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
@@ -4538,6 +4553,7 @@ function renderUpgradeBuildEditor(openIndex = null) {
       </div>
     </details>`;
   }).join('')}</div>`;
+  restoreFocus();
   updateUpgradeBudgetSummary();
 }
 
@@ -5811,6 +5827,7 @@ function renderUnifiedResults() {
 function applyPlanSelection() {
   for (const option of document.querySelectorAll("#planList .inventory-result-option")) {
     option.setAttribute("aria-selected", String(Number(option.dataset.planIndex) === selectedUnifiedIndex));
+    option.tabIndex = Number(option.dataset.planIndex) === selectedUnifiedIndex ? 0 : -1;
   }
   const selected = getSelectedUnifiedEntry();
   const detail = document.getElementById("loadoutDetail");
@@ -6064,7 +6081,7 @@ function renderPlanRow(entry, index) {
     ? ` · ${l("精确", "精確", "exact")}` : ""}`;
   return `
     <button type="button" class="inventory-result-option ${entry.current ? "is-current" : ""}"
-      role="option" aria-selected="${index === selectedUnifiedIndex}" data-plan-index="${index}"
+      role="option" tabindex="${index === selectedUnifiedIndex ? 0 : -1}" aria-selected="${index === selectedUnifiedIndex}" data-plan-index="${index}"
       data-plan-key="${escapeHtml(unifiedEntryKey(entry))}" onclick="selectInventorySolution(${index})">
       <span class="inventory-result-rank">${String(index + 1).padStart(2, "0")}</span>
       <span class="inventory-result-option-copy">
@@ -6277,13 +6294,13 @@ function renderArmorRow(row, entry) {
   return `<div class="inventory-result-piece ${row.isOwned ? "is-owned" : "is-farm"}"
     role="row" data-piece-slot="${escapeHtml(row.slot)}" data-assignment-index="${row.assignmentIndex}"
     data-ownership="${row.isOwned ? "owned" : "farm"}">
-    <span class="inventory-result-piece-slot">${getUpgradeSlotLabel(row.slotIndex)}</span>
-    <span class="inventory-result-piece-name">${escapeHtml(name)}${setBadge}</span>
-    <span class="armor-cell armor-archetype">${row.archetypeKey ? escapeHtml(getArchetypeLabel(row.archetypeKey)) : "—"}</span>
-    <span class="armor-cell armor-tertiary"${row.tertiary ? ` style="color:${STAT_COLORS[row.tertiary]}"` : ""}>${row.tertiary ? escapeHtml(STAT_LABELS[row.tertiary]) : "—"}</span>
-    <span class="armor-cell armor-tuning">${escapeHtml(tuningCell)}${requirementNote}</span>
-    <span class="armor-cell armor-mod">${escapeHtml(modCell)}${plannedFlag}</span>
-    <span class="armor-cell armor-state-cell">${stateCell}${sourceTag}${badge}${row.isOwned ? renderOwnedPieceBungieAction(row.ownedItem) : ""}</span>
+    <span role="rowheader" class="inventory-result-piece-slot">${getUpgradeSlotLabel(row.slotIndex)}</span>
+    <span role="cell" class="inventory-result-piece-name">${escapeHtml(name)}${setBadge}</span>
+    <span role="cell" class="armor-cell armor-archetype">${row.archetypeKey ? escapeHtml(getArchetypeLabel(row.archetypeKey)) : "—"}</span>
+    <span role="cell" class="armor-cell armor-tertiary"${row.tertiary ? ` style="color:${STAT_COLORS[row.tertiary]}"` : ""}>${row.tertiary ? escapeHtml(STAT_LABELS[row.tertiary]) : "—"}</span>
+    <span role="cell" class="armor-cell armor-tuning">${escapeHtml(tuningCell)}${requirementNote}</span>
+    <span role="cell" class="armor-cell armor-mod">${escapeHtml(modCell)}${plannedFlag}</span>
+    <span role="cell" class="armor-cell armor-state-cell">${stateCell}${sourceTag}${badge}${row.isOwned ? renderOwnedPieceBungieAction(row.ownedItem) : ""}</span>
   </div>`;
 }
 
@@ -7199,14 +7216,17 @@ function clearSavedBuildStatus() {
 // One scrim, one Escape handler, one state read: the overlays never stack, so
 // closing "everything" is always correct and no overlay can trap focus behind
 // another one.
+const overlayController = createOverlayController(document);
 function setOverlay(id, open) {
   const node = document.getElementById(id);
   if (node) node.hidden = !open;
   const scrim = document.getElementById('overlayScrim');
   if (scrim && open) scrim.hidden = false;
+  if (node && open) overlayController.open(node);
 }
 
 function closeOverlays() {
+  overlayController.close();
   setOverlay('savedBuildsDrawer', false);
   setOverlay('saveBuildDialog', false);
   const scrim = document.getElementById('overlayScrim');
@@ -7926,6 +7946,16 @@ document.addEventListener('toggle', event => {
 }, true);
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeOverlays();
+  const option = event.target.closest?.('#planList [role="option"]');
+  if (!option || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const options = [...document.querySelectorAll('#planList [role="option"]')];
+  const index = options.indexOf(option);
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+    : Math.max(0, Math.min(options.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+  options[next].focus({preventScroll: true});
+  options[next].click();
+  options[next].scrollIntoView({block: 'nearest', inline: 'nearest'});
 });
 document.getElementById('inputCard').addEventListener('input', () => {
   stopSearches();

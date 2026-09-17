@@ -26,6 +26,7 @@
     "benchmark:search": "node scripts/benchmark-search-performance.mjs",
     "test:browser": "npm run build && node scripts/browser-smoke.mjs",
     "test:optimization": "node scripts/verify-optimization-browser.mjs",
+    "test:interaction": "npm run build && node scripts/verify-workbench-interaction.mjs",
     "verify:offline": "node scripts/build-offline.mjs && node scripts/verify-offline.mjs",
     "check": "npm run lint && npm run test && npm run test:upgrade && npm run build",
     "deploy": "npm run build && wrangler deploy",
