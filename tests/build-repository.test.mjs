@@ -65,3 +65,39 @@ test("repository contains malformed or unavailable browser storage", () => {
   assert.equal(unavailable.writeCalculatorMode("upgrade"), false);
   assert.deepEqual(unavailable.readSavedBuilds(), []);
 });
+
+test("unavailable storage never reports a successful save", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  try {
+    for (const descriptor of [
+      {value: undefined},
+      {get() { throw new Error('SecurityError'); }},
+    ]) {
+      Object.defineProperty(globalThis, 'localStorage', {...descriptor, configurable: true});
+      const repository = createBuildRepository();
+      assert.equal(repository.writeSavedBuilds([{id: 'memory-only', name: 'Not saved'}]), false);
+      assert.equal(repository.writeCurrentDraft({targets: {health: 100}}), false);
+      assert.equal(repository.writeLanguage('en'), false);
+      assert.deepEqual(repository.readSavedBuilds(), []);
+    }
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else delete globalThis.localStorage;
+  }
+});
+
+test("serialization and quota failures preserve the previously saved data", () => {
+  const storage = new MemoryStorage();
+  const repository = createBuildRepository(storage);
+  assert.equal(repository.writeCurrentDraft({targets: {health: 100}}), true);
+  const circular = {};
+  circular.self = circular;
+  assert.equal(repository.writeCurrentDraft(circular), false);
+  assert.equal(repository.readCurrentDraft().targets.health, 100);
+  const full = createBuildRepository({
+    getItem: key => storage.getItem(key),
+    setItem() { throw new Error('QuotaExceededError'); },
+  });
+  assert.equal(full.writeCurrentDraft({targets: {health: 200}}), false);
+  assert.equal(full.readCurrentDraft().targets.health, 100);
+});

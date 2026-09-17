@@ -293,8 +293,8 @@ export class NoMembershipError extends Error {
 // --- T5: membership resolution ---
 
 // Resolves the Destiny account to use for inventory calls. Bungie's
-// cross-save semantics: crossSaveOverride holds the membershipId of the
-// primary account, and every non-primary platform account points at it; a
+// cross-save semantics: crossSaveOverride holds the membership TYPE of the
+// primary account (not its int64 membershipId); a
 // value of 0 means the account is not cross-save. Falls back to the first
 // member. Not signed in -> FatalTokenError propagates from
 // getValidAccessToken.
@@ -306,8 +306,7 @@ export async function resolveMemberships() {
   }
   const primary = members.find(
     member => member.crossSaveOverride > 0 &&
-      // crossSaveOverride is a number while membershipId is an int64 string
-      members.some(other => String(other.membershipId) === String(member.crossSaveOverride)),
+      member.membershipType === member.crossSaveOverride,
   );
   const chosen = primary ?? members[0];
   return {

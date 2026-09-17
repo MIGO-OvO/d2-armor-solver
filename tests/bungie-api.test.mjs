@@ -526,8 +526,8 @@ test("resolveMemberships prefers the cross-save primary account", async () => {
   globalThis.fetch = async (url, options) => {
     requests.push({ url, options });
     return jsonResponse(membershipsResponse([
-      member(2, "111"),
-      member(3, "222", { override: 111 }),
+      member(2, "111", { override: 3 }),
+      member(3, "222", { override: 3 }),
     ]));
   };
   try {
@@ -554,6 +554,21 @@ test("resolveMemberships returns the first member when nothing is cross-save", a
     saveToken(liveToken());
     assert.deepEqual(await resolveMemberships(),
       { membershipType: 2, membershipId: "111", displayName: "Guardian-111" });
+  } finally {
+    restoreGlobals();
+  }
+});
+
+test("cross-save selection is independent of member ordering and int64 ids", async () => {
+  installLocalStorage();
+  const active = member(3, "4611686018000000002", { override: 3 });
+  const inactive = member(2, "4611686018000000001", { override: 3 });
+  try {
+    saveToken(liveToken());
+    for (const members of [[inactive, active], [active, inactive]]) {
+      globalThis.fetch = async () => jsonResponse(membershipsResponse(members));
+      assert.equal((await resolveMemberships()).membershipId, active.membershipId);
+    }
   } finally {
     restoreGlobals();
   }

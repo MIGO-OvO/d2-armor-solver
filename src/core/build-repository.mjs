@@ -41,7 +41,8 @@ function readText(storage, key) {
 
 function writeText(storage, key, value) {
   try {
-    storage?.setItem(key, String(value));
+    if (typeof storage?.setItem !== 'function') return false;
+    storage.setItem(key, String(value));
     return true;
   } catch {
     return false;
@@ -68,7 +69,12 @@ function readJson(storage, key, fallback) {
 }
 
 function writeJson(storage, key, value) {
-  return writeText(storage, key, JSON.stringify(value));
+  try {
+    return writeText(storage, key, JSON.stringify(value));
+  } catch {
+    // Serialization must fail before touching the last good record.
+    return false;
+  }
 }
 
 // Drafts and saved solutions from early releases used localized Archetype
