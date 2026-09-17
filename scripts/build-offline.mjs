@@ -9,30 +9,45 @@ const projectRoot = path.resolve(
 );
 const outDir = path.join(projectRoot, "dist-offline");
 
-// Offline-only source rewrites for src/core/armor-engine-client.mjs:
-// - the main-thread fallback is always used offline, so the lazy
-//   import("./armor-engine.mjs") becomes a static import (Rollup cannot
-//   merge a dynamic chunk that shares code with the entry chunk, and a
-//   runtime dynamic import() of an external file is CORS-blocked on file://)
-// - the Worker guard is hard-coded so construction is unreachable; even if
-//   the minifier does not constant-fold the define, no Worker is attempted
+// file:// cannot load an external module worker. Bundle the same engine into a
+// self-contained classic worker and embed its source in the HTML instead. A
+// Blob worker keeps offline solving cancellable and off the interaction thread.
+const workerBuild = await build({
+  configFile: false,
+  build: {
+    write: false,
+    target: 'es2022',
+    lib: {
+      entry: path.join(projectRoot, 'src', 'workers', 'armor-engine.worker.mjs'),
+      name: 'ArmorOfflineWorker',
+      formats: ['iife'],
+    },
+    rollupOptions: {output: {codeSplitting: false}},
+  },
+});
+const workerOutputs = (Array.isArray(workerBuild) ? workerBuild : [workerBuild])
+  .flatMap(result => result.output);
+const workerChunks = workerOutputs.filter(entry => entry.type === 'chunk');
+if (workerChunks.length !== 1 || workerChunks[0].imports.length || workerChunks[0].dynamicImports.length) {
+  throw new Error('Offline worker must be one self-contained chunk');
+}
+const workerSource = workerChunks[0].code;
+
+// Keep engine imports self-contained too. The non-browser test adapter may use
+// the inline engine; no runtime import of an external file may survive file://.
 const offlineEnginePlugin = {
   name: "d2-armor-offline-engine",
   enforce: "pre",
   transform(code, id) {
     if (!id.endsWith("src/core/armor-engine-client.mjs")) return;
-    const dynamicImport = 'import("./armor-engine.mjs").then(engine => {';
-    const guard = /if \(existing \|\| [^\n]+\) return existing \|\| null;/;
-    if (!code.includes(dynamicImport) || !guard.test(code)) {
+    const dynamicImport = /import\((["'])\.\/armor-engine\.mjs\1\)/g;
+    if (!dynamicImport.test(code)) {
       throw new Error("armor-engine-client.mjs changed shape; offline plugin must be updated");
     }
     return {
       code:
         'import * as __offlineArmorEngine from "./armor-engine.mjs";\n' +
-        code.replace(
-          dynamicImport,
-          "Promise.resolve(__offlineArmorEngine).then(engine => {",
-        ).replace(guard, "return existing || null;"),
+        code.replace(dynamicImport, 'Promise.resolve(__offlineArmorEngine)'),
       map: null,
     };
   },
@@ -54,8 +69,7 @@ await build(
       },
     },
     define: {
-      // Chrome blocks Workers and external module scripts on file://, so
-      // armor-engine-client.mjs reads this and falls back to main-thread.
+      // Account access remains disabled; the engine uses the embedded worker.
       __OFFLINE_MODE__: JSON.stringify("true"),
       __BUNGIE_API_KEY__: JSON.stringify(""),
       __BUNGIE_OAUTH_CLIENT_ID__: JSON.stringify(""),
@@ -86,11 +100,13 @@ const jsTag = html.match(
 );
 if (!jsTag) throw new Error("No module script tag found in dist-offline/app/index.html");
 const js = await readFile(path.resolve(path.dirname(builtHtmlPath), jsTag[1]), "utf8");
-html = html.replace(jsTag[0], `<script type="module">\n${js}\n</script>`);
+// Escape HTML script boundaries without changing the JavaScript string value.
+const embeddedWorker = JSON.stringify(workerSource).replaceAll('<', '\\u003c');
+html = html.replace(jsTag[0], () => `<script type="module">\nglobalThis.__ARMOR_OFFLINE_WORKER_SOURCE__ = ${embeddedWorker};\n${js}\n</script>`);
 
 // The inlined page must not fetch anything extra: no external tags, no
-// runtime dynamic import(). The worker chunk stays as an unused file; it is
-// never instantiated offline (createWorker always returns null).
+// runtime dynamic import(). The external worker asset is unused: its embedded
+// equivalent above is the only worker source used on file://.
 if (/href="(?:\.\.\/|\.\/)assets\//.test(html)) {
   throw new Error("External stylesheet link remains");
 }

@@ -43,21 +43,28 @@ export function legalReference(totals, target, constraints = {}, fragments = ZER
 // Exactly the declared tiny domain; integer tuple ranking, written without
 // production scoring helpers. Fixtures use six exact rules plus optional bounds.
 function rankReference(totals, target, constraints, fragments) {
-  const gap = STATS.map(s => Math.abs(totals[s] - target[s]));
-  const violations = gap.filter(x => x !== 0).length;
-  const tiers = [0, 0, 0];
-  let soft = 0;
+  const result = Array(9).fill(0);
   STATS.forEach(s => {
-    const d = totals[s] - target[s];
-    const penalty = d * d * (d < 0 ? 3 : 1);
-    const level = constraints.priorityLevels?.[s];
-    if (level) tiers[level - 1] += penalty; else soft += penalty;
+    const clamp = value => Math.max(0, Math.min(200, value));
+    const explicitLow = constraints.minimums?.[s];
+    const explicitHigh = constraints.maximums?.[s];
+    let low = explicitLow === undefined ? explicitHigh === undefined && !constraints.force0?.[s]
+      && !constraints.le100?.[s] ? target[s] : -Infinity : clamp(explicitLow + (fragments[s] || 0));
+    let high = explicitHigh === undefined ? Infinity : clamp(explicitHigh + (fragments[s] || 0));
+    if (constraints.exact?.[s]) { low = Math.max(low, target[s]); high = Math.min(high, target[s]); }
+    if (constraints.force0?.[s]) { low = Math.max(low, 0); high = Math.min(high, 0); }
+    if (constraints.le100?.[s]) high = Math.min(high, 100);
+    const gap = Math.max(0, low - totals[s]) + Math.max(0, totals[s] - high);
+    const order = constraints.priorityOrder?.indexOf(s) ?? -1;
+    const level = constraints.priorityLevels?.[s] || (order >= 0 ? Math.min(3, order + 1) : constraints.priorities?.[s] ? 1 : 0);
+    const index = level ? 1 + (level - 1) * 2 : 7;
+    if (gap > 0) {
+      if (constraints.exact?.[s] || constraints.force0?.[s] || constraints.le100?.[s]
+          || explicitLow !== undefined || explicitHigh !== undefined) result[0] = 1;
+      result[index]++; result[index + 1] += gap;
+    }
   });
-  const boundaries = STATS.filter(s => (constraints.minimums?.[s] !== undefined && totals[s] < constraints.minimums[s] + fragments[s])
-    || (constraints.maximums?.[s] !== undefined && totals[s] > constraints.maximums[s] + fragments[s])).length;
-  const sum = gap.reduce((a, b) => a + b, 0);
-  return [boundaries, Number(violations > 0), ...tiers, violations, sum, Math.max(...gap),
-    -(6 - violations), sum, -(6 - violations), gap.reduce((a, b) => a + b * b, 0), soft];
+  return result;
 }
 export function compareReference(a, b) {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
@@ -84,9 +91,10 @@ export function exhaustiveInventory({items, target, fragments = ZERO, constraint
   const visitAssignment = (index, tuning, mods) => {
     if (index === 5) { inspect(tuning, mods); return; }
     const p = chosen[index];
-    const tunings = reassign ? [{mode: "+3", from: null, to: null}, ...(p.allowedTuningStats || []).flatMap(to =>
+    const tunings = reassign ? [{mode: 'none', from: null, to: null}, {mode: "+3", from: null, to: null}, ...(p.allowedTuningStats || []).flatMap(to =>
       STATS.filter(from => from !== to).map(from => ({mode: "+5-5", from, to})))]
-      : [p.tuningMode === "plus3" ? {mode: "+3", from: null, to: null} : {mode: "+5-5", from: p.tuningFrom, to: p.tuningTo}];
+      : [p.tuningMode === 'none' || p.tuningInstalled === false ? {mode: 'none', from: null, to: null}
+        : p.tuningMode === "plus3" ? {mode: "+3", from: null, to: null} : {mode: "+5-5", from: p.tuningFrom, to: p.tuningTo}];
     const statMods = !p.armorModSize ? [null] : (reassign ? STATS : [p.armorModStat]).map(stat => ({size: p.armorModSize, stat}));
     for (const action of tunings) for (const mod of statMods) visitAssignment(index + 1, [...tuning, action], [...mods, mod]);
   };

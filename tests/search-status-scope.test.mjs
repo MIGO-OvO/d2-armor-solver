@@ -27,7 +27,7 @@ function harness(result) {
     setRequirement: {type: 'none'}, EXOTIC_CLASSES: {},
     snapshotSetRequirement: () => ({type: 'none'}), sameSetRequirement: () => true,
     getOwnedArmorInputs: () => ({items: [{}]}), getExoticSettings: () => null,
-    renderUnifiedResults() {}, escapeHtml: value => value, icon: () => '', t: value => value,
+    renderUnifiedResults() {}, scheduleUnifiedResults() {}, escapeHtml: value => value, icon: () => '', t: value => value,
     console,
     solveInventoryParallelAsync: async (_request, {onProgress}) => {
       onProgress(result, {...result.search, running: true});

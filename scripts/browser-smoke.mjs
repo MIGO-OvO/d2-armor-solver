@@ -30,6 +30,7 @@ const DIM_FIXTURE = JSON.parse(
 const DIM_ITEMS = DIM_FIXTURE.records.map(normalizeDimItem);
 
 async function checkWitnessDomRoundTrip(page) {
+  await page.locator('#inventoryResults[aria-busy="false"] .witness-breakdown').first().waitFor({state: 'attached'});
   const models = await page.locator('.witness-breakdown').evaluateAll(elements => elements.map(element => {
     const rows = [...element.querySelectorAll('.witness-piece')];
     const values = selector => Object.fromEntries([...element.querySelectorAll(selector)].map(span => [span.dataset.totalStat || span.dataset.fragmentStat, Number(span.dataset.value)]));
@@ -233,10 +234,15 @@ function createWritableProfileFixture() {  const fixture = structuredClone(synth
     itemInstanceId: `10000000000000008${index + 1}`,
   }));
   const currentTuningHash = TUNING_MOD_HASH_BY_TUNING["health:weapons"];
+  // This mocked API explicitly permits clearing each modifier socket. Empty
+  // assignments are now legal search results, so omission here would correctly
+  // block Equip rather than exercise the successful mocked write flow below.
+  const emptyArmorPlugHash = 4256667756;
   const allArmorPlugHashes = [
     ...Object.values(STAT_MOD_HASHES).flatMap(Object.values),
     ...Object.values(TUNING_MOD_HASH_BY_TUNING),
     BALANCED_TUNING_MOD_HASH,
+    emptyArmorPlugHash,
   ];
   data.characters.data[hunterId].stats = {
     392767087: 61,
@@ -327,8 +333,8 @@ function createWritableProfileFixture() {  const fixture = structuredClone(synth
   for (const item of [...armor, ...equippedArmor]) {
     data.itemComponents.reusablePlugs.data[item.itemInstanceId] = {
       plugs: {
-        0: Object.values(STAT_MOD_HASHES).flatMap(sizes =>
-          Object.values(sizes).map(plugItemHash => ({ plugItemHash, canInsert: true, enabled: true }))),
+        0: [emptyArmorPlugHash, ...Object.values(STAT_MOD_HASHES).flatMap(Object.values)]
+          .map(plugItemHash => ({ plugItemHash, canInsert: true, enabled: true })),
         1: allArmorPlugHashes
           .filter(hash => !Object.values(STAT_MOD_HASHES).some(sizes => Object.values(sizes).includes(hash)))
           .map(plugItemHash => ({ plugItemHash, canInsert: true, enabled: true })),
@@ -687,6 +693,9 @@ async function checkInventoryPlanning(browser) {
     assert.match(await reservedChestRow.textContent(), /Farm|待刷|待取得/);
     assert.match(await reservedChestRow.textContent(), /Exotic|异域|異域/);
     await page.locator('#inventoryFixedExoticName').selectOption('');
+    await page.waitForFunction(() => document.querySelector(
+      '#inventoryResults .inventory-result-piece[data-piece-slot="chest"][data-ownership="owned"]',
+    ), null, {timeout: 30000});
     assert.ok(
       await countUnifiedOwnedRows(page, 'Chest') > 0,
       'clearing the reservation permits Legendary chest matches again',

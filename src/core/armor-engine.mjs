@@ -20,6 +20,18 @@ import {
 } from "./solver-v3-contract.mjs";
 import { analyzeUpgradeCandidates, getUpgradeConfig, getUpgradeModifierBudget } from "./upgrade-optimizer.mjs";
 import {SearchBudgetExceeded} from "./search-session.mjs";
+import {rankInventoryPlans} from "./inventory-plan.mjs";
+
+// Worker-owned derived plans. Preserve source indexes across structured clone;
+// object identity cannot be used to reconnect a plan to its UI candidate.
+export function rankOwnedArmorPlans(payload) {
+  return rankInventoryPlans(payload).map(plan => ({...plan,
+    sourceIndex: payload.solutions.indexOf(plan.solution)}));
+}
+
+export function mergeInventoryRequest({request, parts, count}) {
+  return mergeInventoryShardResults(request, parts, count);
+}
 
 function certificateForWitness({
   problemSpec,

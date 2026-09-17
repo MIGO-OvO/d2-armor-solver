@@ -10,6 +10,9 @@ import {residueCompatibleNoWitness} from './helpers/residue-compatible-inventory
 
 test('large quotient with compatible residues exhausts exact existence despite expired ranking budget', t => {
   const payload = {...residueCompatibleNoWitness(), searchLimits: {maxNodes: 1, maxEvaluations: 1, maxTimeMs: 1}};
+  assert.ok(payload.items.every(item => STATS.reduce((sum, stat) => sum + item.baseStats[stat], 0) % 10 === 0));
+  assert.equal(Object.values(payload.targets).reduce((sum, value) => sum + value, 0) % 10, 5,
+    'independent conserved-total invariant proves the optional-tuning fixture impossible');
   let ticks = 0;
   const session = createSearchSession({operation: 'solveInventory', profile: 'balanced', now: () => ticks++ * 200000});
   const result = session.finish(solveInventory(payload, session));
@@ -141,7 +144,7 @@ test('96 independently generated exact inventory witnesses survive residue bound
   }
 });
 
-test('empty Tuning is legal when directional-only is off, including an unknown directional capability', () => {
+test('empty Tuning remains legal with or without the no-Balanced filter, including unknown directional capability', () => {
   const payload = request();
   payload.items = payload.items.filter(p => fixture.builds[1].includes(p.id)).map(p => ({...p,
     tuningMode: 'plus3', tunedStat: null, tuningStat: null, tuningTo: null, tuningFrom: null,
@@ -156,7 +159,9 @@ test('empty Tuning is legal when directional-only is off, including an unknown d
     const result = solveInventory(payload);
     assertExact(result, payload);
     assert.equal(result.results[0].tuningAssignments.filter(t => t.mode === 'none').length, 5 - balancedCount);
-    assert.notEqual(solveInventory({...payload, onlyPlus5Tuning: true}).status, 'EXACT_TARGET_PROVEN');
+    const noBalanced = solveInventory({...payload, onlyPlus5Tuning: true});
+    if (balancedCount === 0) assertExact(noBalanced, payload);
+    else assert.notEqual(noBalanced.status, 'EXACT_TARGET_PROVEN', 'the filter still forbids every Balanced action');
     if (balancedCount === 0) {
       // Stale installed directions cancel in aggregate but have no capability
       // evidence. They tie the valid empty assignment mathematically; that tie

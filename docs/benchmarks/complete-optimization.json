@@ -1,0 +1,43 @@
+{
+  "baselineCommit": "f2e6a43079e5abe02bf9e35c55e25fa318bb08bf",
+  "date": "2026-09-17",
+  "node": "v24.20.0",
+  "scope": "Synthetic fixtures, sequential fresh Node processes on the same Windows host; single observations, not a latency SLA. The optimized domain intentionally also permits empty tuning.",
+  "pairedCases": [
+    {"name": "scratch-four-balanced-one-empty", "beforeMs": 19.869, "afterMs": 27.195, "beforeWitnesses": 0, "afterWitnesses": 1},
+    {"name": "upgrade-remove-one-tuning", "beforeMs": 41.3504, "afterMs": 55.6221, "beforeMet": 4, "afterMet": 6, "afterStatus": "EXACT_TARGET_PROVEN"},
+    {"name": "fixed-five-rule-count", "beforeMs": 3.7927, "afterMs": 2.6189, "beforeMet": 4, "afterMet": 5},
+    {"name": "reachability-2-locks-miss", "beforeMs": 66.4346, "afterMs": 59.4299, "beforeStates": 51440, "afterStates": 12860},
+    {"name": "reachability-3-locks-miss", "beforeMs": 992.3867, "afterMs": 857.016, "beforeStates": 2309370, "afterStates": 769790},
+    {"name": "reachability-4-locks-miss", "beforeMs": 3003.1318, "afterMs": 3051.1592, "beforeStates": 2976669, "afterStates": 2976669},
+    {"name": "reachability-2-locks-hit", "beforeMs": 0.4767, "afterMs": 0.4708},
+    {"name": "reachability-3-locks-hit", "beforeMs": 0.257, "afterMs": 0.4065},
+    {"name": "reachability-4-locks-hit", "beforeMs": 0.4394, "afterMs": 0.3954}
+  ],
+  "existingBenchmarkGate": {
+    "passed": true,
+    "maxRetainedOperationMiB": 19.6,
+    "retainedLimitMiB": 96,
+    "hotSamples": 5,
+    "hotMedianMs": 24.3,
+    "hotEmpiricalP95Ms": 29.3,
+    "fixedInventory8ToThe5Ms": 9.4
+  },
+  "browserProbe": {
+    "environment": "Headless desktop Chrome/Edge; synthetic inputs; no CPU throttle; no account requests",
+    "heartbeatSamples": 130,
+    "heartbeatP95Ms": 11.9,
+    "heartbeatMaximumMs": 70.5,
+    "longTasksMs": [51],
+    "workerCount": 3,
+    "operations": ["calculateReachability", "solve", "rankInventoryPlans"],
+    "note": "Heartbeat intervals are not INP. The probe includes DOM/layout work and does not attribute the observed 51ms task to a solver. No universal zero-long-task claim is made."
+  },
+  "offlineProbe": {
+    "protocol": "file://",
+    "usesBlobWorker": true,
+    "remoteRequests": 0,
+    "heartbeatSamples": 9,
+    "heartbeatMaximumMs": 34
+  }
+}

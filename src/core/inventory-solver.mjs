@@ -3,14 +3,16 @@ import {STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEviden
   satisfiesConstraintModel, hasCompletePieceMath, verifyWitness, matchesFixedExotic} from "./solver-v3-contract.mjs";
 import {applyManualUpgradeModifiers, compareUpgradeMetrics, createUpgradePieceFromItem,
   evaluateUpgradePieces, getUpgradeConfig, getUpgradeTuningCapability} from "./upgrade-optimizer.mjs";
-import {getUpgradeMathKey, refineUpgradeAssignment} from './upgrade-optimizer.mjs';
+import {getUpgradeMathKey, refineUpgradeAssignment, refineUpgradeNeighborhood} from './upgrade-optimizer.mjs';
 import {createResidualBounds, createInventoryResidueBounds} from './residual-bounds.mjs';
 import {createStatPressure} from './stat-pressure.mjs';
+import {compareAssignmentCosts, getAssignmentCost} from './assignment-cost.mjs';
 
 const SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
 const keyOf = pieces => pieces.map(piece => `${piece.slot}:id:${piece.sourceId || piece.id || ""}`).sort().join("|");
 export const compareInventoryResults = (a, b) => Number(b.feasible) - Number(a.feasible)
   || compareUpgradeMetrics((a.evaluation || a).metrics, (b.evaluation || b).metrics)
+  || compareAssignmentCosts((a.evaluation || a).assignmentCost, (b.evaluation || b).assignmentCost)
   || keyOf(a.pieces).localeCompare(keyOf(b.pieces));
 const compare = compareInventoryResults;
 
@@ -88,6 +90,7 @@ export function solveInventoryLoadout({
     maxEvaluations: limit(searchLimits.maxEvaluations, 50000),
     maxTimeMs: limit(searchLimits.maxTimeMs, 3000), termination: "exhausted"};
   const required = [...new Set(requiredStats)].filter(stat => STATS.includes(stat));
+  const refinementReserveMs = reassignModifiers ? Math.min(50, searchStats.maxTimeMs / 10) : 0;
   const locked = new Map((currentPieces || []).filter(piece => piece.locked).map(piece => {
     const source = items.find(item => String(item.id) === String(piece.sourceId || piece.id) && item.slot === piece.slot);
     const current = source ? {...createUpgradePieceFromItem(source, SLOTS.indexOf(piece.slot)), locked: true, classId: source.classId} : piece;
@@ -181,7 +184,7 @@ export function solveInventoryLoadout({
         mathCache.set(mathKey, evaluation);
       }
     } else if (!refined) searchStats.mathCacheHits++;
-    evaluation = {...evaluation, configs: pieces.map(getUpgradeConfig)};
+    evaluation = {...evaluation, configs: pieces.map(getUpgradeConfig), assignmentCost: getAssignmentCost(pieces, evaluation)};
     examined++;
     // A stale current assignment or unknown item must not occupy the identity
     // cache, Top-K list or exact quota and hide a verifiable inventory result.
@@ -189,8 +192,8 @@ export function solveInventoryLoadout({
     const exact = feasible && STATS.every(stat => evaluation.finalTotals[stat] === Number(targets[stat]));
     const entry = {pieces: [...pieces], evaluation, key, feasible};
     const old = results.findIndex(result => result.key === key);
-    if (old >= 0 && compare(entry, results[old]) >= 0) return;
-    if (results.length >= maxResults && compare(entry, results.at(-1)) >= 0) {
+    if (old >= 0 && (compare(entry, results[old]) > 0 || !refined && compare(entry, results[old]) === 0)) return;
+    if (old < 0 && results.length >= maxResults && compare(entry, results.at(-1)) >= 0) {
       return;
     }
     if (problemSpec.runtimeOptions.verifyInventoryCandidates && !verifyWitness(problemSpec, {pieces,
@@ -366,7 +369,7 @@ export function solveInventoryLoadout({
       if (searchStats.statesExamined >= searchStats.maxNodes || examined >= searchStats.maxEvaluations) {
         stop("node-or-evaluation-limit"); break;
       }
-      if (performance.now() - started >= searchStats.maxTimeMs) { stop("time-limit"); break; }
+      if (performance.now() - started >= searchStats.maxTimeMs - refinementReserveMs) { stop("time-limit"); break; }
       if (searchLimits.exhaustive !== true && combinations > 4096 && exactCount >= maxResults) { stop("exact-witness-quota"); break; }
       searchStats.statesExamined++; searchStats.layers[depth]++;
       const exoticCount = exotics + Number(candidate.piece.exotic);
@@ -392,6 +395,16 @@ export function solveInventoryLoadout({
   // After proving no rule-feasible combination, spend remaining resources on
   // a nearest incumbent. This second pass cannot strengthen a negative proof.
   if (!stopped && !feasibleFound && combinations > 4096) visit(0, 0, [0, 0], null, false);
+  // A reserved slice belongs to assignment quality, not the physical frontier.
+  // Walk every displayed result before spending the remainder on exact Top-3.
+  if (reassignModifiers) for (const entry of [...results]) {
+    const refined = refineUpgradeNeighborhood(entry.pieces, targets, fragments, required, onlyPlus5Tuning,
+      userConstraints, entry.evaluation, {checkpoint: search?.checkpoint, modifierBudget,
+        maxTimeMs: Math.max(0, Math.min(15, searchStats.maxTimeMs - (performance.now() - started))), pairMoves: true,
+        onImprovement: value => evaluate(entry.pieces, value)});
+    // Completion metadata also matters when no metric changed.
+    evaluate(entry.pieces, refined);
+  }
   // Refinement never narrows the frontier or authorizes a global proof.
   // Small/finished frontiers can spend their remaining time on local quality.
   if (reassignModifiers && search && performance.now() - started < searchStats.maxTimeMs) {
@@ -417,6 +430,8 @@ export function solveInventoryLoadout({
     }),
     results: results.map(entry => ({pieces: entry.pieces, isCurrent: entry.key === currentKey,
       score: entry.evaluation.score, metrics: entry.evaluation.metrics, finalTotals: entry.evaluation.finalTotals,
-      tuningAssignments: entry.evaluation.tuningAssignments, modAssignments: entry.evaluation.modAssignments})),
+      tuningAssignments: entry.evaluation.tuningAssignments, modAssignments: entry.evaluation.modAssignments,
+      assignmentCost: entry.evaluation.assignmentCost, assignmentOptimal: entry.evaluation.assignmentOptimal,
+      assignmentOptimalScope: entry.evaluation.assignmentOptimalScope, neighborhood: entry.evaluation.neighborhood})),
   };
 }

@@ -6,7 +6,7 @@ import {getUpgradeConfig, getUpgradeTuningCapability} from './upgrade-optimizer.
 export function pressureVectors(piece, onlyPlus5, balancedCount = null) {
   const config = getUpgradeConfig(piece), cap = getUpgradeTuningCapability(piece, onlyPlus5);
   const base = STATS.map(s => config.baseStats[s]);
-  const vectors = onlyPlus5 || balancedCount === 5 ? [] : [base];
+  const vectors = balancedCount === 5 ? [] : [base];
   if (cap.allowBalanced && balancedCount !== 0) vectors.push(base.map((v, i) => v + Number(config.masterworkStats.includes(STATS[i]))));
   if (balancedCount !== 5 && piece.dataConfidence?.tuning !== 'unknown') for (const to of cap.allowedDirectionalStats || []) {
     for (const from of STATS) if (from !== to) vectors.push(base.map((v, i) => v + 5 * (Number(STATS[i] === to) - Number(STATS[i] === from))));
@@ -45,7 +45,7 @@ export function createStatPressure(rules, modBudget, onlyPlus5, suffix, balanced
       }
       // Analytic support of ONE coupled action; equivalent to enumerating
       // pressureVectors, without allocating a vector for every destination.
-      let adjustment = onlyPlus5 || balancedCount === 5 ? -Infinity : 0;
+      let adjustment = balancedCount === 5 ? -Infinity : 0;
       if (entry.balanced.length) adjustment = Math.max(adjustment, entry.balanced.reduce((n, i) => n + weights[i], 0));
       for (const to of entry.destinations) for (let from = 0; from < 6; from++) {
         if (from !== to) adjustment = Math.max(adjustment, 5 * (weights[to] - weights[from]));

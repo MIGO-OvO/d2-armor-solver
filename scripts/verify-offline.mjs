@@ -51,6 +51,25 @@ try {
   });
   const page = await context.newPage();
   const browserErrors = [];
+  const workers = [];
+  const remoteRequests = [];
+  page.on('worker', worker => workers.push(worker.url()));
+  page.on('request', request => {
+    if (/^https?:/.test(request.url())) remoteRequests.push(request.url());
+  });
+  await page.addInitScript(() => {
+    globalThis.__offlineResponsiveness = {ticks: 0, maxGapMs: 0, active: false};
+    let previous = performance.now();
+    setInterval(() => {
+      const now = performance.now();
+      if (globalThis.__offlineResponsiveness.active) {
+        globalThis.__offlineResponsiveness.ticks++;
+        globalThis.__offlineResponsiveness.maxGapMs = Math.max(
+          globalThis.__offlineResponsiveness.maxGapMs, now - previous);
+      }
+      previous = now;
+    }, 10);
+  });
   page.on("pageerror", error => browserErrors.push("pageerror: " + error.message));
   page.on("console", message => {
     if (message.type() === "error") browserErrors.push("console: " + message.text());
@@ -73,9 +92,16 @@ try {
     1,
     "#btnSolve should be present in the offline build",
   );
+  await page.evaluate(() => { globalThis.__offlineResponsiveness.active = true; });
   await page.locator("#btnSolve").click();
-  // Main-thread solving blocks the UI; give it a generous window.
   await page.locator("#results.show").waitFor({ timeout: 30000 });
+  const responsiveness = await page.evaluate(() => {
+    globalThis.__offlineResponsiveness.active = false;
+    return globalThis.__offlineResponsiveness;
+  });
+  assert.ok(workers.some(url => url.startsWith('blob:')), 'file:// solving must use an embedded Blob worker');
+  assert.ok(responsiveness.ticks > 0, 'the interaction thread must run while solving');
+  assert.deepEqual(remoteRequests, [], 'offline solving must not make network requests');
   assert.ok(
     await page.locator("#comparisonGrid .comp-item").count() >= 1,
     "solving should produce a result comparison",
@@ -86,6 +112,7 @@ try {
     "offline page must run with zero console/page errors",
   );
   console.log("offline verify OK: " + indexUrl);
+  console.log('offline worker responsiveness: ' + JSON.stringify(responsiveness));
 } catch (error) {
   console.error("offline verify FAILED: " + error.message);
   process.exitCode = 1;

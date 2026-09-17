@@ -15,14 +15,27 @@ function markMergeError(error) {
 }
 const abortError = () => Object.assign(new Error('Cancelled armor search'), {name: 'AbortError'});
 const OFFLINE_MODE = typeof __OFFLINE_MODE__ !== "undefined" && __OFFLINE_MODE__ === "true";
+const canRunInline = () => typeof document === 'undefined';
+const workerUnavailable = () => Object.assign(new Error('Background computation is unavailable. Enable Web Workers or reopen the app; no search was run on the UI thread.'),
+  {name: 'WorkerUnavailableError', solverFailure: 'transport'});
+const auxiliaryOperations = new Set(['rankInventoryPlans', 'mergeInventoryShardResults']);
 
 function createWorker(operation, workerKey = operation) {
   const existing = workers.get(workerKey);
-  if (existing || OFFLINE_MODE || typeof Worker === "undefined") return existing || null;
+  if (existing || typeof Worker === "undefined") return existing || null;
   let worker;
+  let blobUrl = null;
   try {
-    worker = new Worker(new URL("../workers/armor-engine.worker.mjs", import.meta.url), {type: "module", name: `armor-engine-${operation}`});
+    const source = globalThis.__ARMOR_OFFLINE_WORKER_SOURCE__;
+    if (typeof source === 'string' && source.length) {
+      blobUrl = URL.createObjectURL(new Blob([source], {type: 'text/javascript'}));
+      worker = new Worker(blobUrl, {name: `armor-engine-${operation}`});
+    } else {
+      if (OFFLINE_MODE) return null;
+      worker = new Worker(new URL("../workers/armor-engine.worker.mjs", import.meta.url), {type: "module", name: `armor-engine-${operation}`});
+    }
   } catch { return null; }
+  finally { if (blobUrl) URL.revokeObjectURL(blobUrl); }
   workers.set(workerKey, worker);
   worker.addEventListener("message", ({data}) => {
     const pending = pendingRequests.get(data?.id);
@@ -33,6 +46,7 @@ function createWorker(operation, workerKey = operation) {
       try { pending.onProgress?.(data.result, data.search); }
       catch (error) {
         pendingRequests.delete(data.id); pending.cleanup?.(); pending.reject(error);
+        worker.terminate(); workers.delete(workerKey);
       }
       return;
     }
@@ -59,13 +73,14 @@ function createWorker(operation, workerKey = operation) {
   return worker;
 }
 
-export function cancelOperation(operation) {
+export function cancelOperation(operation, {dispose = false} = {}) {
   if (operation === 'solveInventory' && inventoryBatch) {
     const batch = inventoryBatch;
     inventoryBatch = null;
     batch.abort();
   }
-  for (const [key, worker] of workers) if (key === operation || key.startsWith(`${operation}:`)) {
+  const busyKeys = new Set([...pendingRequests.values()].filter(pending => pending.operation === operation).map(pending => pending.workerKey));
+  for (const [key, worker] of workers) if ((key === operation || key.startsWith(`${operation}:`)) && (dispose || busyKeys.has(key))) {
     worker.terminate(); workers.delete(key);
   }
   generations.set(operation, (generations.get(operation) || 0) + 1);
@@ -76,8 +91,8 @@ export function cancelOperation(operation) {
   }
 }
 
-export function cancelAllSearches() {
-  for (const operation of ["solve", "solveInventory", "analyzeUpgrade", "calculateReachability"]) cancelOperation(operation);
+export function cancelAllSearches(options) {
+  for (const operation of ["solve", "suggest", "solveInventory", "analyzeUpgrade", "calculateReachability", "rankInventoryPlans", "mergeInventoryShardResults"]) cancelOperation(operation, options);
 }
 
 function run(operation, input, {onProgress = null, signal = null, forceInline = false, retainWorker = false,
@@ -91,10 +106,12 @@ function run(operation, input, {onProgress = null, signal = null, forceInline = 
   generations.set(operation, generation);
   const id = nextRequestId++;
   const cloneStarted = performance.now();
-  const payload = withSearchProfile(operation, structuredClone(input));
-  onClone?.(performance.now() - cloneStarted);
   const activeWorker = forceInline ? null : poolOwned ? workers.get(workerKey) : createWorker(operation, workerKey);
+  // postMessage already snapshots synchronously. Do not first clone the full
+  // vault (and every witness) a second time on the UI thread.
+  const payload = withSearchProfile(operation, activeWorker ? input : structuredClone(input));
   if (poolOwned && !forceInline && !activeWorker) return Promise.reject(transportError(new Error('Pool worker unavailable')));
+  if (!activeWorker && !canRunInline()) return Promise.reject(workerUnavailable());
   return new Promise((resolve, reject) => {
     let startupTimer = null;
     const startupAt = performance.now();
@@ -104,6 +121,7 @@ function run(operation, input, {onProgress = null, signal = null, forceInline = 
       if (!current) return;
       if (workerKey === operation) { cancelOperation(operation); return; }
       pendingRequests.delete(id); current.cleanup?.();
+      activeWorker?.terminate(); workers.delete(workerKey);
       const error = new Error(`Cancelled ${operation} request`); error.name = "AbortError";
       current.reject(error);
     };
@@ -131,13 +149,17 @@ function run(operation, input, {onProgress = null, signal = null, forceInline = 
         activeWorker.terminate(); workers.delete(workerKey);
         reject(transportError(new Error('Worker startup acknowledgement timed out')));
       }, 10000);
-      try { activeWorker.postMessage({type: "start", id, generation, operation, payload}); }
+      try {
+        activeWorker.postMessage({type: "start", id, generation, operation, payload});
+        onClone?.(performance.now() - cloneStarted);
+      }
       catch (error) {
         pendingRequests.delete(id); pending.cleanup(); activeWorker.terminate(); workers.delete(workerKey);
         reject(transportError(error));
       }
       return;
     }
+    onClone?.(performance.now() - cloneStarted);
     // Inline fallback uses the same generation/progress contract. It cannot
     // pre-empt JavaScript inside one synchronous checkpoint-free primitive.
     import("./armor-engine.mjs").then(engine => {
@@ -147,13 +169,19 @@ function run(operation, input, {onProgress = null, signal = null, forceInline = 
         if (!pendingRequests.has(id)) return;
         const session = createSearchSession({operation, generation, profile: payload.searchProfile,
           onProgress: event => { if (pendingRequests.has(id)) onProgress?.(event.result, event.search); }});
-        const execute = {solve: engine.solveLoadout, solveInventory: engine.solveInventory,
-          analyzeUpgrade: engine.analyzeUpgrade, calculateReachability: engine.calculateReachability}[operation];
+        const execute = {solve: engine.solveLoadout, suggest: engine.solveLoadout, solveInventory: engine.solveInventory,
+          analyzeUpgrade: engine.analyzeUpgrade, calculateReachability: engine.calculateReachability,
+          rankInventoryPlans: engine.rankOwnedArmorPlans, mergeInventoryShardResults: engine.mergeInventoryRequest}[operation];
+        if (auxiliaryOperations.has(operation)) {
+          const result = execute(payload);
+          if (pendingRequests.has(id)) { pendingRequests.delete(id); pending.cleanup(); resolve(result); }
+          return;
+        }
         let computed;
         try { computed = execute(payload, session); }
         catch (error) {
           if (!(error instanceof SearchBudgetExceeded)) throw error;
-          computed = session.lastResult || engine.createSearchLimitResult(operation, payload);
+          computed = session.lastResult || engine.createSearchLimitResult(operation === 'suggest' ? 'solve' : operation, payload);
         }
         const result = session.finish(computed);
         if (pendingRequests.has(id)) { pendingRequests.delete(id); pending.cleanup(); resolve(result); }
@@ -184,9 +212,12 @@ async function runWithTransportFallback(operation, payload, options = {}) {
   }
 }
 export const solveLoadoutAsync = (payload, options) => runWithTransportFallback("solve", payload, options);
+export const suggestLoadoutAsync = (payload, options) => runWithTransportFallback("suggest", {...payload, searchProfile: 'fast'}, options);
 export const analyzeUpgradeAsync = (payload, options) => run("analyzeUpgrade", payload, options);
 export const calculateReachabilityAsync = (payload, options) => run("calculateReachability", payload, options);
 export const solveInventoryAsync = (payload, options) => runWithTransportFallback('solveInventory', payload, options);
+export const rankInventoryPlansAsync = (payload, options) => runWithTransportFallback('rankInventoryPlans', payload, options);
+export const mergeInventoryResultsAsync = (payload, options) => runWithTransportFallback('mergeInventoryShardResults', payload, options);
 
 // A merge re-verifies every retained witness against the whole vault, which
 // costs hundreds of milliseconds on a 1300-piece inventory. Publishing on every
@@ -200,7 +231,7 @@ const PROGRESS_MERGE_INTERVAL_MS = 1000;
 export async function solveInventoryParallelAsync(payload, {parallelism, shardCount, ...options} = {}) {
   if (options.signal?.aborted) throw abortError();
   const schedule = chooseInventorySchedule(payload, {parallelism, shardCount, observedStartupMs, observedMergeMs,
-    workersAvailable: !OFFLINE_MODE && typeof Worker !== 'undefined'});
+    workersAvailable: typeof Worker !== 'undefined' && (!OFFLINE_MODE || Boolean(globalThis.__ARMOR_OFFLINE_WORKER_SOURCE__))});
   // The search profile owns effort. Forcing `exhaustive: true` here silently
   // removed Fast/Balanced early termination (their `exact-witness-quota` stop),
   // so every browser solve paid Deep's cost. The wrapper only forwards the
@@ -236,13 +267,12 @@ export async function solveInventoryParallelAsync(payload, {parallelism, shardCo
   let fallback = null;
   let firstExactMs = null;
   let firstFeasibleMs = null;
-  let mergeModule = null;
   let progressRevision = 0;
   let mergeError = null;
   let finalizingMerge = false;
   let progressiveTask = Promise.resolve();
   const positiveWitnesses = new Set();
-  const engine = () => mergeModule ||= import('./armor-engine.mjs');
+  const merge = (parts) => mergeInventoryResultsAsync({request, parts, count}, {signal: controller.signal});
   const active = () => !controller.signal.aborted && inventoryBatch === controller;
   // `nodes` is the aggregate across shards; each shard owns the FULL profile
   // budget (maxNodes / maxEvaluations / maxStates / maxTimeMs). The search
@@ -307,11 +337,12 @@ export async function solveInventoryParallelAsync(payload, {parallelism, shardCo
     }
     // Reconstruct positive witnesses against the full inventory. Local
     // coverage/negative certificates never become a global proof.
-    progressiveTask = engine().then(({mergeInventoryShardResults}) => {
+    progressiveTask = progressiveTask.then(async () => {
       if (!active() || revision !== progressRevision) return;
       const before = performance.now();
-      const merged = mergeInventoryShardResults(request, partials, count);
+      const merged = await merge(partials);
       progressiveMergeMs += performance.now() - before;
+      if (!active() || revision !== progressRevision) return;
       if (!merged.results.length) return;
       const status = merged.certificate.status;
       if (status === 'EXACT_TARGET_PROVEN') firstExactMs ??= performance.now() - started;
@@ -382,7 +413,7 @@ export async function solveInventoryParallelAsync(payload, {parallelism, shardCo
           parts[shardIndex] = result;
           progress(result, result?.search, shardIndex);
         } catch (error) {
-          if (error.solverFailure !== 'transport' || !active()) throw error;
+          if (forceInline || error.name === 'WorkerUnavailableError' || error.solverFailure !== 'transport' || !active()) throw error;
           failures++; effectiveWorkers--;
           failedAttemptNodes += searches[shardIndex]?.nodes || 0;
           searches[shardIndex] = null; partials[shardIndex] = null;
@@ -415,12 +446,13 @@ export async function solveInventoryParallelAsync(payload, {parallelism, shardCo
     // must not outrun the rejection handler of an in-flight progressive merge.
     await progressiveTask;
     if (controller.signal.aborted) { const error = new Error("Cancelled inventory batch"); error.name = "AbortError"; throw error; }
+    if (queue.length || parts.some(part => !part)) throw transportError(new Error('Inventory workers did not complete every shard'));
     finalizingMerge = count > 1;
-    const merger = count === 1 ? null : await engine();
     if (controller.signal.aborted) { const error = new Error("Cancelled inventory batch"); error.name = "AbortError"; throw error; }
     ++progressRevision;
     const before = performance.now();
-    const result = count === 1 ? parts[0] : merger.mergeInventoryShardResults(request, parts, count);
+    const result = count === 1 ? parts[0] : await merge(parts);
+    if (!active()) throw abortError();
     if (!result) return result;
     finalMergeMs = count === 1 ? 0 : performance.now() - before;
     if (count > 1) observedMergeMs = observedMergeMs * 0.75 + finalMergeMs * 0.25;
@@ -437,8 +469,11 @@ export async function solveInventoryParallelAsync(payload, {parallelism, shardCo
       clearTimeout(scheduledMerge);
       scheduledMerge = null;
     }
-    if (inventoryBatch === controller) inventoryBatch = null;
+    const ownsBatch = inventoryBatch === controller;
+    if (ownsBatch) inventoryBatch = null;
     controller.abort();
+    // Batch-scoped verification workers never retain the full vault after exit.
+    if (ownsBatch) cancelOperation('mergeInventoryShardResults', {dispose: true});
     for (const key of keys) { workers.get(key)?.terminate(); workers.delete(key); }
     options.signal?.removeEventListener("abort", abort);
   }

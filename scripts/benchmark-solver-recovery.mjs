@@ -83,5 +83,5 @@ if (!name) {
       shards: result.search.shardCount ?? result.search.parallelism ?? 1, peakRSS, memoryGrowth: peakRSS - startRSS, eventLoopDelayMs: delay,
       mergeMs: result.search.progressiveMergeMs === undefined ? null : result.search.progressiveMergeMs + result.search.finalMergeMs,
       status: result.status, verified: result.results.every(r => r.certificate.witnessVerification.valid)}));
-  } finally { clearInterval(timer); client.cancelAllSearches(); }
+  } finally { clearInterval(timer); client.cancelAllSearches({dispose: true}); }
 }

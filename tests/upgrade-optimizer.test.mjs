@@ -10,6 +10,7 @@ import {
   createDefaultUpgradePiece,
   createUpgradePieceFromItem,
   evaluateUpgradePieces,
+  findFromScratchUpgradeWitness,
   getUpgradeConfig,
   getUpgradeMetrics,
   getUpgradeModifierBudget,
@@ -46,6 +47,30 @@ test("current loadout targets prefer Bungie's aggregate stats without adding fra
   const fragments = Object.fromEntries(STATS.map(stat => [stat, 10]));
 
   assert.deepEqual(resolveCurrentLoadoutTotals([], fragments, exactTotals), exactTotals);
+});
+
+test('Scratch fallback keeps owned empty sockets and a locked Exotic when Balanced is disabled', () => {
+  const config = BASE_CONFIGS[0];
+  const target = Object.fromEntries(STATS.map(stat => [stat, 5 * config.baseStats[stat]]));
+  const fragments = Object.fromEntries(STATS.map(stat => [stat, 0]));
+  const constraints = {exact: Object.fromEntries(STATS.map(stat => [stat, true]))};
+  for (const fixedExotic of [false, true]) {
+    const pieces = Array.from({length: 5}, (_, index) => normalizeUpgradePiece({
+      archetypeId: config.archetype, tertiary: config.tertiary, baseStats: {...config.baseStats},
+      sourceId: `owned-${index}`, tuningMode: 'none', tuningInstalled: false,
+      tunedStat: 'weapons', allowedTuningStats: ['weapons'], armorModSize: 0,
+      exotic: fixedExotic && index === 0, locked: fixedExotic && index === 0,
+      dataConfidence: {stats: 'exact', tuning: 'exact'},
+    }, index));
+    const evaluate = (candidate, reassign) => evaluateUpgradePieces(candidate, target, fragments,
+      reassign, [], true, constraints, {currentPieces: pieces});
+    const plan = findFromScratchUpgradeWitness(pieces, target, fragments, true, [], constraints, evaluate, true);
+    assert.ok(plan, `fallback witness must survive fixedExotic=${fixedExotic}`);
+    assert.equal(plan.replacementCount, 0, 'an empty socket does not require a different owned piece');
+    assert.deepEqual(plan.pieces.map(piece => piece.sourceId), pieces.map(piece => piece.sourceId));
+    assert.ok(plan.evaluation.tuningAssignments.every(tuning => tuning.mode === 'none'));
+    assert.deepEqual(plan.evaluation.finalTotals, target);
+  }
 });
 
 test("required targets outrank a smaller total shortfall", () => {
@@ -135,8 +160,8 @@ test("upgrade evaluation preserves priority metadata instead of hiding it behind
     pieces, targets, fragments, false, [], false, constraints,
   );
 
-  assert.equal(evaluation.rank[1], 0,
-    "default exact flags must not pre-empt priority ordering for partial plans");
+  assert.equal(evaluation.rank[1], 1,
+    "the high-priority exact rule remains explicitly unmet, not erased");
   assert.ok(evaluation.rank[2] > 0,
     "the High-priority Weapons gap must survive constraint construction");
 });
@@ -480,12 +505,15 @@ test("Exotic tuning stays free while Legendary +5 destinations stay fixed", () =
     "the Exotic may choose a +5 destination different from its installed value");
 
   const legendaryResult = evaluateUpgradePieces(
-    pieces.map((piece, index) => ({ ...piece, exotic: false, locked: index === 0 })),
+    pieces.map((piece, index) => ({ ...piece, exotic: false, locked: index === 0,
+      tunedStat: piece.tuningTo, allowedTuningStats: [piece.tuningTo] })),
     target, fragments, true, [], false, constraints
   );
   assert.equal(legendaryResult.metrics.allReached, false,
     "the same +5 destination remains fixed on Legendary armor");
-  assert.equal(legendaryResult.tuningAssignments[0].to, "class");
+  assert.ok(legendaryResult.tuningAssignments[0].mode === 'none'
+    || legendaryResult.tuningAssignments[0].to === 'class',
+  'the optional socket may be empty but must never change its fixed +5 destination');
 });
 
 function createReassignTuningFixture() {

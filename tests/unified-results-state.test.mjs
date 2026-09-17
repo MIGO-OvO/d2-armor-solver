@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
+import {compareAssignmentCosts} from '../src/core/assignment-cost.mjs';
+import {rankStatRules} from '../src/core/stat-ranking.mjs';
+import {STATS} from '../src/core/armor-model.mjs';
 
 // The unified result workspace projects two result shapes into one entry and
 // decides which row stays selected. Both are pure over their inputs, so they
@@ -9,16 +12,18 @@ import test from "node:test";
 const source = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
 
 const context = vm.createContext({
+  compareAssignmentCosts, rankStatRules, STATS,
   certifiedFeasible: result =>
     ["EXACT_TARGET_PROVEN", "RULE_FEASIBLE_PROVEN"].includes(result?.certificate?.status),
   // Theory projections are not part of these tests; the inventory list is.
-  createOwnedArmorPlanRequest: () => null,
-  rankInventoryPlans: () => [],
+  getOwnedArmorPlan: () => null,
+  ensureOwnedArmorPlans: async () => [],
   SOLUTION_PREVIEW_COUNT: 1,
 });
 
 const api = vm.runInContext(`(() => {
   let ownedPlanRevision = 0;
+  let ownedPlanResultRevision = 0;
   let inventorySolveRevision = 0;
   let inventoryResultRevision = 0;
   let unifiedCache = { key: null, solutions: null, entries: [] };
@@ -29,6 +34,7 @@ const api = vm.runInContext(`(() => {
     "unifiedPieceIdentity",
     "unifiedEntryKey",
     "compareUnifiedEntries",
+    "unifiedQualityRank",
     "normalizeInventoryEntry",
     "normalizeTheoryPlan",
     "buildUnifiedLoadouts",
@@ -44,6 +50,7 @@ const api = vm.runInContext(`(() => {
       inventoryResultRevision++;
     },
     revision() { return inventoryResultRevision; },
+    setTheory(solutions) { allSolutions = solutions; ownedPlanResultRevision++; },
   };
 })()`, context, {filename: "app-unified.mjs"});
 
@@ -57,7 +64,9 @@ function witness(id, overrides = {}) {
 
 function inventoryResult(ids, search = null) {
   return {
-    results: ids.map(id => witness(id)),
+    // Give each row an explicit quality order. Exact ties now use stable
+    // identity rather than incidental worker arrival order.
+    results: ids.map((id, index) => witness(id, {rank: [0, 0, 0, 0, 0, 0, 0, 0, index]})),
     search: search || {schemaVersion: 1, running: false, termination: "completed",
       coverage: {frontierComplete: true, assignmentComplete: true, statesExamined: 10}},
   };
@@ -93,17 +102,16 @@ test("an unchanged inventory result is still served from the projection cache", 
 });
 
 test('a fully owned exact theory assignment survives dedup against an inventory near miss', t => {
-  const originalRequest = context.createOwnedArmorPlanRequest;
-  const originalRank = context.rankInventoryPlans;
+  const originalPlan = context.getOwnedArmorPlan;
   t.after(() => {
-    context.createOwnedArmorPlanRequest = originalRequest;
-    context.rankInventoryPlans = originalRank;
+    context.getOwnedArmorPlan = originalPlan;
+    api.setTheory([]);
     api.acceptInventory(null);
   });
   const pieces = ['helmet', 'arms', 'chest', 'legs', 'classItem'].map(slot => ({slot, sourceId: slot}));
   const exact = witness('unused', {pieces});
-  context.createOwnedArmorPlanRequest = () => ({});
-  context.rankInventoryPlans = () => [{solution: exact, pieces, feasible: true, ownedCount: 5, farmCount: 0}];
+  context.getOwnedArmorPlan = () => ({solution: exact, pieces, feasible: true, ownedCount: 5, farmCount: 0});
+  api.setTheory([exact]);
   api.acceptInventory({results: [witness('unused', {pieces, certificate: {status: 'SEARCH_LIMIT_REACHED'}})]});
   const merged = api.buildUnifiedLoadouts();
   assert.equal(merged.length, 1);

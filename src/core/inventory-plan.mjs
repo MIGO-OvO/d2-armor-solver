@@ -1,6 +1,7 @@
 import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
 import { compareScoreRanks, farmabilityScore, scoreStatsRank, scoreStats } from "./solver.mjs";
 import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
+import {compareAssignmentCosts, getAssignmentCost} from './assignment-cost.mjs';
 import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers, createCanonicalId,
   satisfiesConstraintModel, STAT_DOMAIN, createPieceCapability, getArmorSolverInput,
   matchesFixedExotic } from "./solver-v3-contract.mjs";
@@ -74,7 +75,7 @@ function getSolutionRequirements(solution, fixedExotic = null) {
       archetypeId: archetypeIdForName(config.archetype),
       tertiary: config.tertiary,
       baseStats: { ...config.baseStats },
-      tuningMode: tuning?.mode === "+3" ? "plus3" : "shift",
+      tuningMode: tuning?.mode === 'none' ? 'none' : tuning?.mode === "+3" ? "plus3" : "shift",
       tuningTo: tuning?.mode === "+3" ? null : tuning?.to,
       exotic: isClassItem || slot === fixedExotic?.slot,
     });
@@ -266,7 +267,7 @@ function getSetTargetLabels(missing, chosen, setRequirement) {
   });
 }
 
-function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequirement) {
+function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequirement, checkpoint = () => {}) {
   let best = null;
   let optimalFound = false;
   const chosen = [];
@@ -309,6 +310,7 @@ function chooseBestAssignment(solution, requirements, candidatesBySlot, setRequi
   }
 
   function walk(index, ownedSoFar) {
+    checkpoint();
     if (optimalFound) return;
     if (best?.feasible && ownedSoFar + requirements.length - index < best.ownedCount) {
       return;
@@ -356,7 +358,7 @@ export function assignmentCanReachExact(solution, chosen) {
     if (tuning.mode === "+3") {
       if (config.masterworkStats?.length !== 3) return false;
       for (const stat of config.masterworkStats) rebuilt[stat]++;
-    } else {
+    } else if (tuning.mode !== 'none') {
       if (!STATS.includes(tuning.from) || !STATS.includes(tuning.to) || tuning.from === tuning.to) return false;
       if (item && !getItemDirectionalStats(item)?.includes(tuning.to)) return false;
       rebuilt[tuning.from] -= 5;
@@ -432,6 +434,9 @@ function comparePlans(left, right) {
     return left.fixedExoticDistance - right.fixedExoticDistance;
   }
   if (left.farmability !== right.farmability) return left.farmability - right.farmability;
+  const cost = compareAssignmentCosts(left.assignmentCost || (left.matchedSolution || left.solution)?.assignmentCost,
+    right.assignmentCost || (right.matchedSolution || right.solution)?.assignmentCost);
+  if (cost) return cost;
   return right.ownedCount - left.ownedCount
     || createCanonicalId(left.solution).localeCompare(createCanonicalId(right.solution));
 }
@@ -489,6 +494,7 @@ function certifyPlan(plan, context, candidate, chosen, slots, setRequirement) {
   const sealed = sealWitness(context.problem, fresh);
   if (!sealed.valid || !satisfiesConstraintModel(sealed.witness, context.problem.constraintModel)) return null;
   const witness = sealed.witness;
+  witness.assignmentCost = getAssignmentCost(chosen.map(item => item || {tuningInstalled: false, armorModSize: 0}), witness);
   witness.certificate = createResultCertificate({problemSpec: witness.problemSpec, witness,
     status: 'EXACT_TARGET_PROVEN'});
   if (witness.certificate.status !== 'EXACT_TARGET_PROVEN') {
@@ -505,7 +511,7 @@ function certifyPlan(plan, context, candidate, chosen, slots, setRequirement) {
       farmSetHash: chosen[index] ? null : config[index].setHash,
       closestItem: closest?.item || null, closestMismatch: closest?.mismatch || null};
   });
-  return {...plan, matchedSolution: witness, requirements: pieces.map(({item: _item, ...r}) => r),
+  return {...plan, matchedSolution: witness, assignmentCost: witness.assignmentCost, requirements: pieces.map(({item: _item, ...r}) => r),
     pieces, slotByConfig: slots, ownedCount: chosen.filter(Boolean).length,
     farmCount: missing.length, setCoverage: getSetCoverage(chosen.filter(Boolean), setRequirement),
     feasible: true, rulesFeasible: true, score: witness.score,
@@ -627,12 +633,14 @@ export function rankInventoryPlans({
       solution.exoticIndex === index, config.sourceId || null,
     ]));
     let assignment = null;
+    let matchingLimited = false;
     const usedSlots = new Set();
     const mapped = [];
     const searchSlots = index => {
+      checkpoint();
       if (assignment?.feasible && assignment.ownedCount === 5) return;
       if (index === 5) {
-        const candidate = chooseBestAssignment(solution, mapped, mapped.map(candidatesFor), normalizedSetRequirement);
+        const candidate = chooseBestAssignment(solution, mapped, mapped.map(candidatesFor), normalizedSetRequirement, checkpoint);
         if (!candidate) return;
         if (!assignment || Number(candidate.feasible) > Number(assignment.feasible)
             || candidate.feasible === assignment.feasible && (candidate.ownedCount > assignment.ownedCount
@@ -654,7 +662,15 @@ export function rankInventoryPlans({
         usedSlots.delete(slot);
       }
     };
-    searchSlots(0);
+    try { searchSlots(0); }
+    catch (error) { if (error !== exhausted) throw error; matchingLimited = true; }
+    if (!assignment && matchingLimited) {
+      // Retain the already-proved all-farm fallback without entering another
+      // combinatorial search. A tiny budget must not erase every plan or its
+      // incomplete-search explanation.
+      requirements = originalRequirements;
+      assignment = chooseBestAssignment(solution, requirements, requirements.map(() => [null]), normalizedSetRequirement);
+    }
     if (!assignment) continue;
     assignment.chosen = repairChosenForExactness(solution, assignment.chosen, normalizedSetRequirement);
     assignment.ownedCount = assignment.chosen.filter(Boolean).length;
@@ -683,7 +699,8 @@ export function rankInventoryPlans({
     let plan = {
       solution,
       slotByConfig: requirements.map(requirement => requirement.slot),
-      matchingProof: {scope: "provided-theoretical-witness", complete: true, slotPermutations: true},
+      matchingProof: {scope: "provided-theoretical-witness", complete: !matchingLimited, slotPermutations: true,
+        ...(matchingLimited ? {matchingSearchLimited: true} : {})},
       requirements,
       pieces,
       ownedCount: assignment.ownedCount,
@@ -696,6 +713,7 @@ export function rankInventoryPlans({
         : fixedExoticPiece?.closestMismatch?.score ?? Number.MAX_SAFE_INTEGER,
       farmability: farmabilityScore(solution.config, solution.exoticIndex),
       score: solution.score,
+      assignmentCost: getAssignmentCost(assignment.chosen.map(item => item || {tuningInstalled: false, armorModSize: 0}), solution),
     };
     const context = planningContext(solution, pool, classId, fixedExotic, normalizedSetRequirement);
     if (context) {

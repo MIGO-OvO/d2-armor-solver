@@ -1,5 +1,6 @@
 import { BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
 import { findExactTargetWitnesses, visibleArmorTargets } from "./exact-target-oracle.mjs";
+import { TUNING_DOMAIN_ID } from './tuning-domain.mjs';
 import {
   RESULT_STATUS, STAT_DOMAIN, createProblemSpec, createProofEvidence,
   getArmorSolverInput, visibleStatFromArmor, createConstraintModel,
@@ -25,6 +26,7 @@ export function buildPieceStateOptions(configs, usePlus3) {
       options.push(totals);
       continue;
     }
+    options.push({...config.baseStats});
     for (const from of STATS) {
       for (const to of STATS) {
         if (from === to) continue;
@@ -42,32 +44,58 @@ export const PURPLE_STATE_OPTIONS = [
   buildPieceStateOptions(BASE_CONFIGS, true),
 ];
 
+// These projections depend only on mathematical locks/objectives and mod
+// counts, never on targets/fragments. Reuse them across nearby previews while
+// bounding retained intermediate data independently of the full-result cache.
+const purpleProjectionCache = new Map();
+const modifierProjectionCache = new Map();
+function cachedProjection(cache, key, build) {
+  const cached = cache.get(key);
+  if (cached) {
+    cache.delete(key);
+    cache.set(key, cached);
+    return cached;
+  }
+  const value = build();
+  cache.set(key, value);
+  while (cache.size > 8) cache.delete(cache.keys().next().value);
+  return value;
+}
+function projectedPurpleOptions(lockedStats, objective) {
+  return cachedProjection(purpleProjectionCache, JSON.stringify([TUNING_DOMAIN_ID, lockedStats, objective]),
+    () => PURPLE_STATE_OPTIONS.map(options => compressStateOptions(options, lockedStats, objective)));
+}
+function projectedModifierOptions(n5, n10, lockedStats, objective) {
+  return cachedProjection(modifierProjectionCache, JSON.stringify([n5, n10, lockedStats, objective]),
+    () => buildModifierStateOptions(n5, n10, lockedStats, objective));
+}
+
 export function compressStateOptions(options, lockedStats, objectiveStat) {
   const compressed = new Map();
+  const objectives = Array.isArray(objectiveStat) ? objectiveStat : [objectiveStat];
   for (const totals of options) {
     const lockValues = lockedStats.map(stat => totals[stat]);
     const key = lockValues.join(',');
-    const objectiveValue = objectiveStat ? totals[objectiveStat] : 0;
-    const existing = compressed.get(key);
+    let existing = compressed.get(key);
     if (!existing) {
-      compressed.set(key, {
+      existing = {
         lockValues,
-        values: new Set([objectiveValue]),
-      });
-    } else {
-      existing.values.add(objectiveValue);
+        values: objectives.map(() => new Set()),
+      };
+      compressed.set(key, existing);
     }
+    objectives.forEach((stat, index) => existing.values[index].add(stat ? totals[stat] : 0));
   }
   return [...compressed.values()].map(option => ({
     lockValues: option.lockValues,
-    values: [...option.values],
+    values: Array.isArray(objectiveStat) ? option.values.map(values => [...values]) : [...option.values[0]],
   }));
 }
 
 export function buildModifierStateOptions(numPlus5, numPlus10, lockedStats, objectiveStat) {
   let states = new Map([['', {
     lockValues: lockedStats.map(() => 0),
-    values: new Set([0]),
+    values: emptyReachableValues(objectiveStat, [0]),
     modAssignments: {},
   }]]);
   const sizes = [
@@ -83,17 +111,19 @@ export function buildModifierStateOptions(numPlus5, numPlus10, lockedStats, obje
           value + (lockedStats[index] === stat ? size : 0)
         );
         const key = lockValues.join(',');
-        const objectiveGain = objectiveStat === stat ? size : 0;
+        const gain = Array.isArray(objectiveStat)
+          ? objectiveStat.map(objective => [objective === stat ? size : 0]) : [objectiveStat === stat ? size : 0];
+        const values = addReachableValues(state.values, gain);
         const existing = next.get(key);
         if (!existing) {
           next.set(key, {
             lockValues,
-            values: new Set([...state.values].map(value => value + objectiveGain)),
+            values,
             modAssignments: {...state.modAssignments,
               [Object.keys(state.modAssignments).length]: {size, stat}},
           });
         } else {
-          for (const value of state.values) existing.values.add(value + objectiveGain);
+          mergeReachableValues(existing.values, values);
         }
       }
     }
@@ -101,17 +131,47 @@ export function buildModifierStateOptions(numPlus5, numPlus10, lockedStats, obje
   }
   return [...states.values()].map(option => ({
     lockValues: option.lockValues,
-    values: [...option.values],
+    values: Array.isArray(objectiveStat) ? option.values.map(values => [...values]) : [...option.values],
     modAssignments: option.modAssignments,
   }));
 }
 
 export function addReachableValues(leftValues, rightValues) {
+  if (Array.isArray(leftValues) && (leftValues[0] instanceof Set || Array.isArray(leftValues[0]))) {
+    return leftValues.map((projection, index) => addReachableValues(projection, rightValues[index]));
+  }
   const sums = new Set();
   for (const left of leftValues) {
     for (const right of rightValues) sums.add(left + right);
   }
   return sums;
+}
+
+function emptyReachableValues(objective, initial = []) {
+  return Array.isArray(objective) ? objective.map(() => new Set(initial)) : new Set(initial);
+}
+
+function cloneReachableValues(values) {
+  return Array.isArray(values) && (values[0] instanceof Set || Array.isArray(values[0]))
+    ? values.map(cloneReachableValues) : new Set(values);
+}
+
+function mergeReachableValues(target, source) {
+  if (Array.isArray(target)) target.forEach((projection, index) => mergeReachableValues(projection, source[index]));
+  else for (const value of source) target.add(value);
+}
+
+function finishReachableRange(reachable, objective, fragments) {
+  if (Array.isArray(objective)) {
+    if (!reachable[0]?.size) return null;
+    return {projections: Object.fromEntries(objective.map((stat, index) =>
+      [stat, finishReachableRange(reachable[index], stat, fragments)]))};
+  }
+  if (!reachable.size) return null;
+  const rawValues = [...reachable].sort((a, b) => a - b);
+  const values = [...new Set(rawValues.map(value => visibleStatFromArmor(value,
+    objective ? fragments[objective] || 0 : 0)))].sort((a, b) => a - b);
+  return {min: values[0], max: values.at(-1), values, rawValues};
 }
 
 export function calculateReachableStatRange(
@@ -134,11 +194,8 @@ export function calculateReachableStatRange(
     compressStateOptions(buildPieceStateOptions([fixedPiece], false), lockedStats, objectiveStat),
     compressStateOptions(buildPieceStateOptions([fixedPiece], true), lockedStats, objectiveStat),
   ];
-  const purpleOptions = [
-    compressStateOptions(PURPLE_STATE_OPTIONS[0], lockedStats, objectiveStat),
-    compressStateOptions(PURPLE_STATE_OPTIONS[1], lockedStats, objectiveStat),
-  ];
-  const modifierOptions = buildModifierStateOptions(
+  const purpleOptions = projectedPurpleOptions(lockedStats, objectiveStat);
+  const modifierOptions = projectedModifierOptions(
     numPlus5, numPlus10, lockedStats, objectiveStat
   );
   const modifierMap = new Map(
@@ -155,10 +212,10 @@ export function calculateReachableStatRange(
         map.set(key, {
           usedPlus3,
           lockValues,
-          values: new Set(values),
+          values: cloneReachableValues(values),
         });
       } else {
-        for (const value of values) existing.values.add(value);
+        mergeReachableValues(existing.values, values);
       }
     };
     const extendWithPurplePiece = states => {
@@ -191,7 +248,7 @@ export function calculateReachableStatRange(
     let purplePairStates = new Map([[stateKey(0, lockedStats.map(() => 0)), {
       usedPlus3: 0,
       lockValues: lockedStats.map(() => 0),
-      values: new Set([0]),
+      values: emptyReachableValues(objectiveStat, [0]),
     }]]);
     purplePairStates = extendWithPurplePiece(purplePairStates);
     purplePairStates = extendWithPurplePiece(purplePairStates);
@@ -221,7 +278,7 @@ export function calculateReachableStatRange(
       }
     }
 
-    const reachableValues = new Set();
+    const reachableValues = emptyReachableValues(objectiveStat);
     for (const left of leftStates.values()) {
       const rightPlus3 = numPlus3 - left.usedPlus3;
       if (rightPlus3 < 0 || rightPlus3 > 2) continue;
@@ -235,24 +292,10 @@ export function calculateReachableStatRange(
         const right = purplePairStates.get(stateKey(rightPlus3, rightLocks));
         if (!right) continue;
         const armorValues = addReachableValues(left.values, right.values);
-        for (const value of addReachableValues(armorValues, modifier.values)) {
-          reachableValues.add(value);
-        }
+        mergeReachableValues(reachableValues, addReachableValues(armorValues, modifier.values));
       }
     }
-    if (reachableValues.size === 0) return null;
-    const fragment = objectiveStat ? (fragments[objectiveStat] || 0) : 0;
-    const rawValues = [...reachableValues].sort((a, b) => a - b);
-    const values = rawValues
-      .map(value => Math.max(0, Math.min(200, value + fragment)))
-      .filter((value, index, array) => array.indexOf(value) === index)
-      .sort((a, b) => a - b);
-    return {
-      min: values[0],
-      max: values[values.length - 1],
-      values,
-      rawValues,
-    };
+    return finishReachableRange(reachableValues, objectiveStat, fragments);
   }
   const modifierTotal = numPlus5 * 5 + numPlus10 * 10;
   const purpleBounds = purpleOptions.map(options =>
@@ -291,7 +334,7 @@ export function calculateReachableStatRange(
       states.set(key, {
         usedPlus3: mode,
         lockValues: option.lockValues,
-        values: new Set(option.values),
+        values: cloneReachableValues(option.values),
       });
     }
   }
@@ -317,7 +360,7 @@ export function calculateReachableStatRange(
           if (!existing) {
             next.set(key, { usedPlus3, lockValues, values });
           } else {
-            for (const value of values) existing.values.add(value);
+            mergeReachableValues(existing.values, values);
           }
         }
       }
@@ -325,7 +368,7 @@ export function calculateReachableStatRange(
     states = next;
   }
 
-  const reachableValues = new Set();
+  const reachableValues = emptyReachableValues(objectiveStat);
   for (const state of states.values()) {
     if (state.usedPlus3 !== numPlus3) continue;
     const neededModifiers = armorTargets.map((target, index) =>
@@ -333,24 +376,10 @@ export function calculateReachableStatRange(
     );
     const modifier = modifierMap.get(neededModifiers.join(','));
     if (!modifier) continue;
-    for (const value of addReachableValues(state.values, modifier.values)) {
-      reachableValues.add(value);
-    }
+    mergeReachableValues(reachableValues, addReachableValues(state.values, modifier.values));
   }
 
-  if (reachableValues.size === 0) return null;
-  const fragment = objectiveStat ? (fragments[objectiveStat] || 0) : 0;
-  const rawValues = [...reachableValues].sort((a, b) => a - b);
-  const values = rawValues
-    .map(value => Math.max(0, Math.min(200, value + fragment)))
-    .filter((value, index, array) => array.indexOf(value) === index)
-    .sort((a, b) => a - b);
-  return {
-    min: values[0],
-    max: values[values.length - 1],
-    values,
-    rawValues,
-  };
+  return finishReachableRange(reachableValues, objectiveStat, fragments);
 }
 
 export function calculateDenseLockRanges(
@@ -420,11 +449,12 @@ function calculateIntervalStatRange(fixed, n5, n10, n3, fragments, locks, object
     const records = new Map();
     for (const config of configs) {
       const tunings = balanced ? [{mode: "+3", from: null, to: null}]
-        : STATS.flatMap(from => STATS.filter(to => to !== from).map(to => ({mode: "+5-5", from, to})));
+        : [{mode: 'none', from: null, to: null},
+          ...STATS.flatMap(from => STATS.filter(to => to !== from).map(to => ({mode: "+5-5", from, to})))];
       for (const tuning of tunings) {
         const totals = {...config.baseStats};
         if (balanced) for (const stat of getMasterworkStats(config)) totals[stat]++;
-        else { totals[tuning.from] -= 5; totals[tuning.to] += 5; }
+        else if (tuning.mode === '+5-5') { totals[tuning.from] -= 5; totals[tuning.to] += 5; }
         const lockValues = locked.map(stat => totals[stat]);
         const key = lockValues.join(",");
         if (!records.has(key)) records.set(key, {lockValues, values: [0], config, tuning});
@@ -434,10 +464,10 @@ function calculateIntervalStatRange(fixed, n5, n10, n3, fragments, locks, object
   };
   const fixedOptions = [false, true].map(mode => tracing ? traceOptions([fixed], mode)
     : compressStateOptions(buildPieceStateOptions([fixed], mode), locked, objective));
-  const purpleOptions = PURPLE_STATE_OPTIONS.map((options, mode) => tracing ? traceOptions(BASE_CONFIGS, mode)
-    : compressStateOptions(options, locked, objective));
-  const mods = buildModifierStateOptions(n5, n10, locked, objective);
-  let states = new Map([["start", {used: 0, locks: locked.map(() => 0), values: new Set([0])}]]);
+  const purpleOptions = tracing ? [false, true].map(mode => traceOptions(BASE_CONFIGS, mode))
+    : projectedPurpleOptions(locked, objective);
+  const mods = projectedModifierOptions(n5, n10, locked, objective);
+  let states = new Map([["start", {used: 0, locks: locked.map(() => 0), values: emptyReachableValues(objective, [0])}]]);
   for (let depth = 0; depth < 6; depth++) {
     const next = new Map();
     for (const state of states.values()) {
@@ -463,21 +493,21 @@ function calculateIntervalStatRange(fixed, n5, n10, n3, fragments, locks, object
           const key = `${used}|${values.join(",")}`;
           let entry = next.get(key);
           if (!entry) {
-            entry = {used, locks: values, values: new Set(), ...(tracing ? {parent: state, option} : {})};
+            entry = {used, locks: values, values: emptyReachableValues(objective), ...(tracing ? {parent: state, option} : {})};
             next.set(key, entry);
           }
-          for (const a of state.values) for (const b of option.values) entry.values.add(a + b);
+          mergeReachableValues(entry.values, addReachableValues(state.values, option.values));
         }
       }
     }
     states = next;
     if (!states.size) return null;
   }
-  const reachable = new Set();
+  const reachable = emptyReachableValues(objective);
   let witness = null;
   for (const state of states.values()) {
     if (state.used !== n3 || rules.some((rule, index) => rule.armorMinimum !== null && state.locks[index] < rule.armorMinimum)) continue;
-    for (const value of state.values) reachable.add(value);
+    mergeReachableValues(reachable, state.values);
     if (tracing && !witness) {
       const config = [];
       const tuningAssignments = [];
@@ -493,17 +523,15 @@ function calculateIntervalStatRange(fixed, n5, n10, n3, fragments, locks, object
         for (const stat of STATS) totals[stat] += piece.baseStats[stat];
         const tuning = tuningAssignments[index];
         if (tuning.mode === "+3") for (const stat of getMasterworkStats(piece)) totals[stat]++;
-        else { totals[tuning.from] -= 5; totals[tuning.to] += 5; }
+        else if (tuning.mode === '+5-5') { totals[tuning.from] -= 5; totals[tuning.to] += 5; }
         const mod = modAssignments[index];
         if (mod) totals[mod.stat] += mod.size;
       });
       witness = {config, tuningAssignments, modAssignments, totals};
     }
   }
-  if (!reachable.size) return null;
-  const rawValues = [...reachable].sort((a, b) => a - b);
-  const values = [...new Set(rawValues.map(value => visibleStatFromArmor(value, fragments[objective] || 0)))].sort((a, b) => a - b);
-  return {min: values[0], max: values.at(-1), values, rawValues, ...(witness ? {witness} : {})};
+  const range = finishReachableRange(reachable, objective, fragments);
+  return range ? {...range, ...(witness ? {witness} : {})} : null;
 }
 
 export function calculateReachableRanges(
@@ -516,6 +544,7 @@ export function calculateReachableRanges(
     .map(stat => `${stat}:${lockedTargets[stat]}`)
     .join(',');
   const cacheKey = [
+    TUNING_DOMAIN_ID,
     fixedKey, getMasterworkStats(fixedPiece)?.join(","), stableSerialize(fixedPiece),
     numPlus5, numPlus10, numPlus3, fragmentKey, lockKey,
   ].join('|');
@@ -538,9 +567,14 @@ export function calculateReachableRanges(
     return finish(result);
   }
   const unlockedStats = STATS.filter(stat => !lockedStats.includes(stat));
+  const sharedProjection = unlockedStats.length > 1;
+  searchStats.projectionCount = sharedProjection ? unlockedStats.length : 1;
+  // Each projection is conditioned on the SAME lock vector and Balanced
+  // count. Marginals may be unioned independently for ranges, but are never
+  // combined into a purported joint witness; point proofs still lock all six.
   const feasibilityProbe = calculateReachableStatRange(
     fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets,
-    unlockedStats[0] || null, searchStats,
+    sharedProjection ? unlockedStats : unlockedStats[0] || null, searchStats,
   );
   if (!feasibilityProbe) {
     const result = { feasible: false, ranges: {} };
@@ -555,10 +589,11 @@ export function calculateReachableRanges(
       values: [lockedTargets[stat]],
     };
   }
-  if (unlockedStats.length > 0) {
+  if (sharedProjection) Object.assign(ranges, feasibilityProbe.projections);
+  else if (unlockedStats.length > 0) {
     ranges[unlockedStats[0]] = feasibilityProbe;
   }
-  for (const stat of unlockedStats.slice(1)) {
+  for (const stat of sharedProjection ? [] : unlockedStats.slice(1)) {
     ranges[stat] = calculateReachableStatRange(
       fixedPiece, numPlus5, numPlus10, numPlus3, fragments, lockedTargets, stat, searchStats,
     );
@@ -608,7 +643,7 @@ export function findReachabilityWitness({
       for (const point of preimage.targets) {
         const pointStats = {checkpoint: search?.checkpoint};
         const found = findExactTargetWitnesses({target: point, numPlus5, numPlus10, numPlus3,
-          fixedConfig: fixedPiece, searchStats: pointStats});
+          fixedConfig: fixedPiece, searchStats: pointStats, checkpoint: search?.checkpoint});
         statesExamined += pointStats.statesExamined;
         if (found[0]) { witness = {...found[0], totals: point}; break; }
       }
@@ -643,6 +678,7 @@ export function findReachabilityWitness({
     numPlus3,
     fixedConfig: fixedPiece,
     searchStats,
+    checkpoint: search?.checkpoint,
   });
   const witness = witnesses[0] || null;
   const proof = createProofEvidence(problemSpec, {

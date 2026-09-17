@@ -64,6 +64,18 @@ test("inventory plans count exact owned identities before farming gaps", () => {
   );
 });
 
+test('an empty-tuning witness retains all five owned pieces instead of farming them', () => {
+  const solution = makeSolution();
+  solution.tuningAssignments = solution.config.map(() => ({mode: 'none', from: null, to: null}));
+  solution.totals = Object.fromEntries(STAT_IDS.map(stat => [stat,
+    solution.config.reduce((sum, config) => sum + config.baseStats[stat], 0)]));
+  const items = solution.config.map((_, index) => makeItem(solution, index, {tuningMode: 'none', tuningInstalled: false}));
+  const [plan] = rankInventoryPlans({solutions: [solution], items, classId: 'hunter'});
+  assert.equal(plan.ownedCount, 5);
+  assert.equal(plan.farmCount, 0);
+  assert.equal(plan.feasible, true);
+});
+
 test('an unowned Exotic reservation cannot be filled by owned Legendary or Exotic armor', () => {
   const solution = makeSolution();
   const items = solution.config.map((_, index) => makeItem(solution, index));
@@ -318,6 +330,22 @@ function solveExoticSolution() {
   }))[0];
 }
 
+// Capability-negative fixtures must actually require directional Tuning.
+// The production solver now legitimately chooses empty sockets for some
+// exact targets, so changing an unused rolled direction is not a mismatch.
+function directionalExoticSolution() {
+  const solution = makeSolution([EXOTIC_SETTINGS.config, ...BASE_CONFIGS.slice(0, 4)], 0);
+  solution.tuningAssignments = solution.config.map(() => ({mode: '+5-5', from: 'health', to: 'melee'}));
+  solution.totals = Object.fromEntries(STAT_IDS.map(stat => [stat,
+    solution.config.reduce((sum, config) => sum + config.baseStats[stat], 0)
+      + (stat === 'health' ? -25 : stat === 'melee' ? 25 : 0)]));
+  const problem = createProblemSpec({target: solution.totals,
+    constraints: {exact: Object.fromEntries(STAT_IDS.map(stat => [stat, true]))},
+    exoticSettings: EXOTIC_SETTINGS});
+  assert.equal(verifyWitness(problem, solution).valid, true, 'directional fixture must be a legal concrete witness');
+  return solution;
+}
+
 const DIM_HEADER = [
   "Name", "Hash", "Id", "Rarity", "Tier", "Type", "Equippable", "Archetype",
   "Tertiary Stat", "Tuning Stat", "Masterwork Tier", "Owner", "Equipped", "Power",
@@ -399,7 +427,7 @@ test("a DIM-imported Exotic Class Item matches its solution slot", () => {
 });
 
 test("legendary pieces whose +5 roll differs from the solution are downgraded to farm", () => {
-  const solution = solveExoticSolution();
+  const solution = directionalExoticSolution();
   const classItem = makeExoticClassItemFromDIM();
   // Helmet is missing; the three provided legendary pieces all rolled a +5
   // that differs from the solution, so every legendary slot must farm.
@@ -416,7 +444,7 @@ test("legendary pieces whose +5 roll differs from the solution are downgraded to
 });
 
 test("every legendary slot with a mismatched +5 roll is farmed, not kept", () => {
-  const solution = solveExoticSolution();
+  const solution = directionalExoticSolution();
   const classItem = makeExoticClassItemFromDIM();
   // All five owned, but all four legendary pieces rolled the wrong +5, so they
   // cannot serve the solution's shift requirements and are farmed instead.

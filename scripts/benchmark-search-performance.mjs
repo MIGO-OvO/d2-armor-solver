@@ -46,7 +46,7 @@ if (!selectedCase) {
     };
     const client = await import('../src/core/armor-engine-client.mjs');
     try { result = await client.solveInventoryParallelAsync(payload, {parallelism: Number(workersArg) || undefined, onProgress() {}}); }
-    finally { client.cancelAllSearches(); }
+    finally { client.cancelAllSearches({dispose: true}); }
   }
   const wallMs = performance.now() - started;
   await new Promise(resolve => setTimeout(resolve, 0)); clearInterval(timer);

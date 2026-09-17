@@ -42,9 +42,11 @@ function rebuild(solution) {
     const tuning = solution.tuningAssignments[index];
     if (tuning.mode === "+3") {
       for (const stat of config.masterworkStats) totals[stat] += 1;
-    } else {
+    } else if (tuning.mode === '+5-5') {
       totals[tuning.from] -= 5;
       totals[tuning.to] += 5;
+    } else {
+      assert.equal(tuning.mode, 'none', 'unknown tuning action');
     }
     const mod = solution.modAssignments[index];
     if (mod) totals[mod.stat] += mod.size;

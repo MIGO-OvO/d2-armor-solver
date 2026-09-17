@@ -4,7 +4,6 @@ import {
   DEFAULT_TARGETS,
   EXOTIC_CLASSES,
   EXOTIC_CLASS_LABELS,
-  SOLUTION_PREVIEW_COUNT,
   STATS,
   STAT_COLORS,
   STAT_LABELS,
@@ -29,6 +28,8 @@ import {
   calculateReachabilityAsync,
   solveInventoryParallelAsync,
   solveLoadoutAsync,
+  suggestLoadoutAsync,
+  rankInventoryPlansAsync,
   cancelAllSearches,
   cancelOperation,
 } from "./core/armor-engine-client.mjs";
@@ -39,7 +40,9 @@ import {
   createTargetConstraints,
   visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
-import { rankInventoryPlans } from "./core/inventory-plan.mjs";
+import { createOwnedPlanCache } from "./core/owned-plan-cache.mjs";
+import { compareAssignmentCosts } from "./core/assignment-cost.mjs";
+import { rankStatRules } from "./core/stat-ranking.mjs";
 import { createCanonicalId, createRulesetId, createSolutionDisplayModel, assertSolutionConsistency, EXECUTION_STATUS, SOLVER_V3_SCHEMA_VERSION } from "./core/solver-v3-contract.mjs";
 import {
   SAVED_BUILD_LIMIT,
@@ -74,6 +77,25 @@ let searchUiRevision = 0;
 let lastSearchResult = null;
 let backgroundInventoryRevision = null;
 let theorySearchRunning = false;
+let theoryProgressFrame = null;
+let latestTheoryProgress = null;
+let displayedTheoryProgressKey = null;
+function renderTheoryProgress(partial, targets, fragments, revision) {
+  allSolutions = partial;
+  currentSolutionIdx = 0;
+  latestTheoryProgress = {partial, targets, fragments, revision};
+  if (theoryProgressFrame !== null) return;
+  theoryProgressFrame = requestAnimationFrame(() => {
+    theoryProgressFrame = null;
+    const next = latestTheoryProgress;
+    if (!next || next.revision !== searchUiRevision || next.partial !== allSolutions) return;
+    const candidate = next.partial[0];
+    const key = `${candidate.canonicalId || createCanonicalId(candidate)}|${candidate.certificate?.status}`;
+    if (key === displayedTheoryProgressKey) return;
+    displayedTheoryProgressKey = key;
+    displayAllResults(candidate, next.targets, next.fragments, {scroll: false, refreshList: false});
+  });
+}
 function searchProofLabel(result, search = result?.search) {
   const labels = {
     exact: ['精确解 · 已证明','精確解 · 已證明','Exact solution · proven'],
@@ -122,9 +144,14 @@ function renderSearchStatus(result, search = result?.search) {
   document.getElementById('cancelSearch').disabled = !search?.running && backgroundInventoryRevision !== searchUiRevision;
 }
 function beginSearch() {
+  cancelRealtimePreview();
   cancelAllSearches();
   backgroundInventoryRevision = null;
   lastSearchResult = null;
+  ownedPlanningPaused = false;
+  failedOwnedPlanKeys.clear();
+  ownedPlanError = null;
+  displayedTheoryProgressKey = null;
   const revision = ++searchUiRevision;
   renderSearchStatus(null, {running: true, elapsedMs: 0, nodes: 0});
   return revision;
@@ -153,6 +180,8 @@ function renderSearchControls() {
   syncCommandBarLabels();
 }
 function stopSearches() {
+  cancelRealtimePreview();
+  ownedPlanningPaused = true;
   searchUiRevision++;
   backgroundInventoryRevision = null;
   theorySearchRunning = false;
@@ -928,6 +957,15 @@ async function calculateExoticRanges(exoticConfig, numPlus5, numPlus10, numPlus3
 
 let realtimeRangeTimer = null;
 let realtimeRangeRevision = 0;
+const realtimeRangeCache = new Map();
+
+function cancelRealtimePreview() {
+  clearTimeout(realtimeRangeTimer);
+  realtimeRangeTimer = null;
+  realtimeRangeRevision++;
+  cancelOperation('calculateReachability');
+  cancelOperation('suggest');
+}
 let draftSaveTimer = null;
 const nearestTargetCache = new Map();
 let nearestTargetSuggestion = null;
@@ -1177,7 +1215,8 @@ async function getNearestTargetSuggestion(exoticSettings, numPlus5, numPlus10, n
   const cached = nearestTargetCache.get(cacheKey);
   if (cached) return cached;
 
-  const result = (await solveLoadoutAsync({
+  const result = (await suggestLoadoutAsync({
+    searchProfile: 'fast',
     target: targets,
     fragments,
     targetDomain: 'visible',
@@ -1186,7 +1225,6 @@ async function getNearestTargetSuggestion(exoticSettings, numPlus5, numPlus10, n
     numPlus3,
     constraints: buildVisibleTargetConstraints(),
     exoticSettings,
-    runtimeOptions: { fastMode: true },
   }))[0];
   if (!result) return null;
 
@@ -1194,7 +1232,7 @@ async function getNearestTargetSuggestion(exoticSettings, numPlus5, numPlus10, n
     stat, Math.max(0, Math.min(200, result.totals[stat] + (fragments[stat] || 0))),
   ]));
   const distance = STATS.reduce((sum, stat) =>
-    sum + Math.abs(totals[stat] - getVal('target_' + stat)), 0);
+    sum + Math.abs(totals[stat] - targets[stat]), 0);
   const suggestion = { totals, distance, score: result.score };
   nearestTargetCache.set(cacheKey, suggestion);
   if (nearestTargetCache.size > 12) {
@@ -1269,14 +1307,24 @@ async function updateRealtimeRanges() {
   );
   let reachable;
   try {
-    reachable = await calculateReachabilityAsync({
+    const request = {
       fixedPiece: exoticSettings.config,
       numPlus5,
       numPlus10,
       numPlus3,
       fragments,
       lockedTargets,
-    });
+    };
+    const key = JSON.stringify(request);
+    reachable = realtimeRangeCache.get(key);
+    if (!reachable) {
+      reachable = await calculateReachabilityAsync(request);
+      if (revision !== realtimeRangeRevision) return;
+      if (certifiedFeasible(reachable) || reachable.certificate?.status === 'INFEASIBLE_PROVEN') {
+        if (realtimeRangeCache.size >= 24) realtimeRangeCache.delete(realtimeRangeCache.keys().next().value);
+        realtimeRangeCache.set(key, reachable);
+      }
+    }
   } catch (error) {
     if (revision === realtimeRangeRevision) {
       // Every other solver call site treats an AbortError as superseded work and
@@ -1284,12 +1332,16 @@ async function updateRealtimeRanges() {
       // listener (and `scheduleRealtimeRanges`, which calls `stopSearches()`)
       // cancels the in-flight probe 180ms before the next one starts, so a
       // cancellation is routine and must not be reported as a failure.
-      if (error.name !== 'AbortError') {
+      if (error.name !== 'AbortError' && error.name !== 'WorkerUnavailableError') {
         console.error('Reachability calculation failed', error);
       }
       // The stale hint still has to go: after a stop nothing re-probes, so
       // keeping it would describe the previous inputs.
       resetRealtimeRangeUI();
+      if (error.name === 'WorkerUnavailableError') {
+        summary.textContent = l('后台计算不可用，请启用浏览器 Worker 或重新打开应用。', '背景運算無法使用，請啟用瀏覽器 Worker 或重新開啟應用程式。', 'Background computation is unavailable. Enable Web Workers or reopen the app.');
+        summary.style.display = 'block';
+      }
     }
     return;
   }
@@ -1347,12 +1399,14 @@ async function updateRealtimeRanges() {
 
 function scheduleRealtimeRanges() {
   stopSearches();
-  clearTimeout(realtimeRangeTimer);
   if (calculatorMode === 'upgrade') {
     resetRealtimeRangeUI();
     return;
   }
-  realtimeRangeTimer = setTimeout(updateRealtimeRanges, 180);
+  realtimeRangeTimer = setTimeout(() => {
+    realtimeRangeTimer = null;
+    void updateRealtimeRanges();
+  }, 180);
 }
 
 // ============================================================
@@ -1444,8 +1498,7 @@ async function solve() {
       if (revision !== searchUiRevision) return;
       renderSearchStatus(partial, search);
       if (partial?.[0]) {
-        allSolutions = partial; currentSolutionIdx = 0;
-        displayAllResults(partial[0], targets, fragments, {scroll: false, refreshList: false});
+        renderTheoryProgress(partial, targets, fragments, revision);
       }
     }});
     if (importedInventory.length || manualOwnedItems.length) {
@@ -1472,17 +1525,25 @@ async function solve() {
     // theoretical proof label is not repeated as a message banner here.
     msgs.innerHTML = inventoryMessage || '';
     if (allSolutions[0]) {
-      refreshInventoryPlansFromSolutions({rerender: false});
+      // Completion means the derived workspace is ready, not merely that its
+      // worker was dispatched. This await never waits for background inventory
+      // search and leaves the UI event loop free for progress and cancellation.
+      theorySearchRunning = true;
+      document.getElementById('cancelSearch').disabled = false;
+      await refreshInventoryPlansFromSolutions({rerender: false, rejectCancelled: true});
+      if (revision !== searchUiRevision) return;
       displayAllResults(allSolutions[0], targets, fragments, {forceOwnedPlan: true, scroll: !lastInventoryResult?.results?.length});
     }
   } catch (error) {
     if (revision !== searchUiRevision || error.name === 'AbortError') return;
     console.error('Armor solver failed', error);
-    theoryErrorMessage = '<div class="msg error">' + icon('block') + l(
+    theoryErrorMessage = '<div class="msg error">' + icon('block') + (error.name === 'WorkerUnavailableError'
+      ? l('后台计算不可用，请启用浏览器 Worker 或重新打开应用；未在页面线程运行搜索。', '背景運算無法使用，請啟用瀏覽器 Worker 或重新開啟應用程式；未在頁面執行搜尋。', 'Background computation is unavailable. Enable Web Workers or reopen the app; no search ran on the UI thread.')
+      : l(
       '求解过程中发生错误，请重试。',
       '求解過程中發生錯誤，請重試。',
       'The solver failed. Please try again.'
-    ) + '</div>';
+    )) + '</div>';
     msgs.innerHTML = inventoryMessage + theoryErrorMessage;
   } finally {
     if (revision === searchUiRevision) {
@@ -1643,7 +1704,7 @@ async function refineWithPriorities() {
     }, {onProgress: (partial, search) => {
       if (revision !== searchUiRevision) return;
       renderSearchStatus(partial, search);
-      if (partial?.[0]) { allSolutions = partial; currentSolutionIdx = 0; displayAllResults(partial[0], lastTargets, lastFragments, {scroll: false, refreshList: false}); }
+      if (partial?.[0]) renderTheoryProgress(partial, lastTargets, lastFragments, revision);
     }});
     const newResult = newSolutions[0];
     if (revision !== searchUiRevision) return;
@@ -1842,6 +1903,7 @@ function renderExoticRangeSummary(result) {
 }
 
 function formatInventoryItemTuning(item) {
+  if (item?.tuningMode === 'none' || item?.tuningInstalled === false) return l('无调整', '無調校', 'No Tuning');
   if (item?.tuningMode === 'plus3') return l('+3调整', '+3調校', '+3 Tuning');
   const tuningTo = item?.tuningTo || item?.tuningStat;
   return tuningTo
@@ -1888,11 +1950,38 @@ function getOwnedArmorInputs() {
 // plus an explicit revision of every input that can mutate the match, so
 // progressive partials do not re-rank a 1300-item inventory on every arrival.
 let ownedPlanRevision = 0;
-const ownedPlanCache = new Map();
-const OWNED_PLAN_CACHE_LIMIT = 64;
+let ownedPlanningPaused = false;
+let ownedPlanResultRevision = 0;
+let ownedPlanError = null;
+const failedOwnedPlanKeys = new Set();
+const pendingOwnedPlanRequests = new Map();
+const ownedPlanCache = createOwnedPlanCache({calculate: rankInventoryPlansAsync, onUpdate() {
+  ownedPlanResultRevision++;
+  ownedPlanError = null;
+  scheduleOwnedPlanRender();
+}});
+let ownedPlanRenderFrame = null;
+let ownedPlanRenderRevision = 0;
+function scheduleOwnedPlanRender() {
+  ownedPlanRenderRevision = searchUiRevision;
+  if (ownedPlanRenderFrame !== null) return;
+  ownedPlanRenderFrame = requestAnimationFrame(() => {
+    ownedPlanRenderFrame = null;
+    if (calculatorMode !== 'solve' || ownedPlanRenderRevision !== searchUiRevision) return;
+    const solution = allSolutions[currentSolutionIdx];
+    if (solution && lastTargets && lastFragments) {
+      displayAllResults(solution, lastTargets, lastFragments, {scroll: false, refreshList: false});
+    }
+    renderUnifiedResults();
+  });
+}
 function invalidateOwnedPlanCache() {
   ownedPlanRevision++;
-  ownedPlanCache.clear();
+  ownedPlanResultRevision++;
+  ownedPlanCache.invalidate();
+  failedOwnedPlanKeys.clear();
+  pendingOwnedPlanRequests.clear();
+  ownedPlanError = null;
 }
 
 function ownedPlanCacheKey(solution, allowEmpty) {
@@ -1912,40 +2001,69 @@ function ownedPlanCacheKey(solution, allowEmpty) {
   return `${ownedPlanRevision}|${Number(Boolean(allowEmpty))}|${canonicalId}|${rulesetId}|${requirementKey}|${classId || ''}|${exoticKey}`;
 }
 
-function getOwnedArmorPlan(solution, { allowEmpty = true, force = false } = {}) {
-  const key = ownedPlanCacheKey(solution, allowEmpty);
-  if (key && !force && ownedPlanCache.has(key)) return ownedPlanCache.get(key);
-  const request = createOwnedArmorPlanRequest([solution], 1, { allowEmpty });
-  if (!request) return null;
-  const plan = rankInventoryPlans(request)[0] || null;
-  if (key && !ownedPlanCache.has(key) && ownedPlanCache.size >= OWNED_PLAN_CACHE_LIMIT) {
-    ownedPlanCache.delete(ownedPlanCache.keys().next().value);
+function ensureOwnedArmorPlans(solutions, {allowEmpty = true} = {}) {
+  const keys = solutions.map(solution => ownedPlanCacheKey(solution, allowEmpty));
+  if (keys.every(key => ownedPlanCache.has(key))) {
+    return Promise.resolve(solutions.map((solution, index) => ownedPlanCache.peek(keys[index], solution)).filter(Boolean));
   }
-  if (key) ownedPlanCache.set(key, plan);
-  return plan;
+  if (ownedPlanningPaused) return Promise.resolve([]);
+  if (keys.some(key => failedOwnedPlanKeys.has(key))) return Promise.resolve([]);
+  const batchKey = keys.join('\n');
+  if (pendingOwnedPlanRequests.has(batchKey)) return pendingOwnedPlanRequests.get(batchKey);
+  const request = createOwnedArmorPlanRequest(solutions, solutions.length, {allowEmpty});
+  if (!request) return Promise.resolve([]);
+  const revision = ownedPlanRevision;
+  document.getElementById('inventoryResults')?.setAttribute?.('aria-busy', 'true');
+  const pending = ownedPlanCache.ensure(request, keys).catch(error => {
+    if (error.name === 'AbortError') throw error;
+    if (error.name !== 'AbortError' && revision === ownedPlanRevision) {
+      keys.forEach(key => failedOwnedPlanKeys.add(key));
+      ownedPlanError = error;
+      scheduleOwnedPlanRender();
+      console.error('Owned armor planning failed', error);
+    }
+    return [];
+  }).finally(() => {
+    if (pendingOwnedPlanRequests.get(batchKey) === pending) pendingOwnedPlanRequests.delete(batchKey);
+  });
+  pendingOwnedPlanRequests.set(batchKey, pending);
+  return pending;
 }
 
-function refreshInventoryPlansFromSolutions({ rerender = true } = {}) {
+function getOwnedArmorPlan(solution, { allowEmpty = true, schedule = true } = {}) {
+  const key = ownedPlanCacheKey(solution, allowEmpty);
+  if (!key) return null;
+  if (schedule && !ownedPlanCache.has(key)) {
+    const candidates = allSolutions.includes(solution) ? allSolutions : [solution];
+    void ensureOwnedArmorPlans(candidates, {allowEmpty}).catch(() => {});
+  }
+  return ownedPlanCache.peek(key, solution);
+}
+
+async function refreshInventoryPlansFromSolutions({ rerender = true, rejectCancelled = false } = {}) {
+  ownedPlanningPaused = false;
   const selectedSolution = rerender ? allSolutions[currentSolutionIdx] : null;
-  const request = createOwnedArmorPlanRequest(
-    allSolutions,
-    Math.max(SOLUTION_PREVIEW_COUNT, 12),
-  );
-  if (!request) {
-    if (calculatorMode === 'solve' && rerender && allSolutions.length > 0 && lastTargets && lastFragments) {
-      displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false });
-    }
+  const solutions = allSolutions;
+  const revision = ownedPlanRevision;
+  const searchRevision = searchUiRevision;
+  let plans;
+  try { plans = await ensureOwnedArmorPlans(solutions); }
+  catch (error) {
+    if (error.name !== 'AbortError' || rejectCancelled) throw error;
     return;
   }
-  const plans = rankInventoryPlans(request);
+  if (solutions !== allSolutions || revision !== ownedPlanRevision || searchRevision !== searchUiRevision) {
+    if (rejectCancelled) throw Object.assign(new Error('Owned plan inputs changed'), {name: 'AbortError'});
+    return;
+  }
+  plans.sort((left, right) => compareUnifiedEntries(normalizeTheoryPlan(left), normalizeTheoryPlan(right)));
   const rank = new Map(plans.map((plan, index) => [plan.solution, index]));
   allSolutions.sort((left, right) =>
     (rank.get(left) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right) ?? Number.MAX_SAFE_INTEGER)
   );
   currentSolutionIdx = Math.max(0, allSolutions.indexOf(selectedSolution || plans[0]?.solution));
-  if (rerender && allSolutions.length > 0) {
-    displayAllResults(allSolutions[currentSolutionIdx], lastTargets, lastFragments, { scroll: false, forceOwnedPlan: true });
-  }
+  ownedPlanResultRevision++;
+  if (allSolutions.length > 0) scheduleOwnedPlanRender();
 }
 
 // ============================================================
@@ -2011,7 +2129,8 @@ function getManualOwnedDefault(plan) {
     slot: piece?.slot || 'helmet',
     archetypeId: normalizeArchetypeId(piece?.archetype) || ARCHETYPES[0].id,
     tertiary: piece?.tertiary || STATS[0],
-    tuning: piece?.tuningMode === 'plus3' ? '+3' : piece?.tuningTo || '+3',
+    tuning: piece?.tuningMode === 'none' || piece?.tuningInstalled === false ? 'none'
+      : piece?.tuningMode === 'plus3' ? '+3' : piece?.tuningTo || '+3',
   };
 }
 
@@ -2041,7 +2160,7 @@ function renderOwnedPieceRequirement(piece) {
 
 function renderManualOwnedItem(item, index) {
   const slotIndex = UPGRADE_SLOTS.findIndex(slot => slot.id === item.slot);
-  const tuning = item.tuningMode === 'plus3' ? l('+3调整', '+3調校', '+3 Tuning') : `+5 ${STAT_LABELS[item.tuningTo]}`;
+  const tuning = formatInventoryItemTuning(item);
   const removeLabel = l(`移除手动护甲 ${index + 1}`, `移除手動防具 ${index + 1}`, `Remove manual armor ${index + 1}`);
   return `<li>
     <span>${getUpgradeSlotLabel(slotIndex)}</span>
@@ -2100,6 +2219,7 @@ function buildOwnedGearSection(_finalTotals, _targets) {
         ${tertiaryOptions.map(stat => `<option value="${stat}" ${stat === defaultPiece.tertiary ? 'selected' : ''}>${STAT_LABELS[stat]}</option>`).join('')}
       </select></label>
       <label><span>${l('调整', '調校', 'Tuning')}</span><select id="manualOwnedTuning">
+        <option value="none" ${defaultPiece.tuning === 'none' ? 'selected' : ''}>${l('无调整', '無調校', 'No Tuning')}</option>
         <option value="+3" ${defaultPiece.tuning === '+3' ? 'selected' : ''}>${l('+3模式', '+3模式', '+3 mode')}</option>
         ${STATS.map(stat => `<option value="${stat}" ${stat === defaultPiece.tuning ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
       </select></label>
@@ -2152,14 +2272,16 @@ function addManualOwnedArmor() {
     exotic: false,
     archetypeId,
     tertiary,
-    tuningMode: tuning === '+3' ? 'plus3' : 'shift',
-    tuningTo: tuning === '+3' ? null : tuning,
+    tuningMode: tuning === 'none' ? 'none' : tuning === '+3' ? 'plus3' : 'shift',
+    tuningInstalled: tuning !== 'none',
+    tuningTo: tuning === '+3' || tuning === 'none' ? null : tuning,
     setHash: null,
     manualOwned: true,
   });
   invalidateOwnedPlanCache();
   manualOwnedEditorOpen = true;
   saveUpgradeDraft();
+  buildOwnedGearSection();
   refreshInventoryPlansFromSolutions();
 }
 
@@ -2167,6 +2289,7 @@ function removeManualOwnedArmor(sourceId) {
   manualOwnedItems = manualOwnedItems.filter(item => item.sourceId !== sourceId);
   invalidateOwnedPlanCache();
   saveUpgradeDraft();
+  buildOwnedGearSection();
   refreshInventoryPlansFromSolutions();
 }
 
@@ -2174,6 +2297,7 @@ function clearOwnedGear() {
   manualOwnedItems = [];
   invalidateOwnedPlanCache();
   saveUpgradeDraft();
+  buildOwnedGearSection();
   refreshInventoryPlansFromSolutions();
 }
 
@@ -3064,7 +3188,8 @@ function renderSavedBungieLoadoutStats(totals) {
 }
 
 function formatSavedArmorModifier(item) {
-  const tuning = item.tuningMode === "plus3"
+  const tuning = item.tuningMode === 'none' || item.tuningInstalled === false
+    ? l('无调整', '無調校', 'No Tuning') : item.tuningMode === "plus3"
     ? l("+3 调整", "+3 調校", "+3 Tuning")
     : item.tuningTo && item.tuningFrom
       ? l(
@@ -4276,6 +4401,10 @@ function getUpgradeSlotLabel(slotIndex) {
 
 
 function updateUpgradeTuningChoice(index, value) {
+  if (value === 'none') {
+    updateUpgradePiece(index, 'tuningMode', 'none', true);
+    return;
+  }
   if (value === 'plus3') {
     updateUpgradePiece(index, 'tuningMode', 'plus3', true);
     return;
@@ -4304,7 +4433,8 @@ function renderUpgradeBuildEditor(openIndex = null) {
   editor.innerHTML = `<div class="upgrade-piece-list">${upgradeBuildState.map((piece, index) => {
     const archetype = ARCHETYPES.find(item => item.id === piece.archetypeId) || ARCHETYPES[0];
     const tertiaryOptions = STATS.filter(stat => stat !== archetype.primary && stat !== archetype.secondary);
-    const tuning = piece.tuningMode === 'plus3'
+    const tuning = piece.tuningMode === 'none' || piece.tuningInstalled === false
+      ? l('无调整', '無調校', 'No Tuning') : piece.tuningMode === 'plus3'
       ? l('调整 +3', '調校 +3', 'Tuning +3')
       : l(
           `调整 -5${STAT_LABELS[piece.tuningFrom]} / +5${STAT_LABELS[piece.tuningTo]}`,
@@ -4377,11 +4507,12 @@ function renderUpgradeBuildEditor(openIndex = null) {
         <label class="input-group field-tuning">
           <span>${t('tuningMod')}</span>
           <select onchange="updateUpgradeTuningChoice(${index},this.value)">
-            <option value="plus3" ${piece.tuningMode === 'plus3' ? 'selected' : ''}>+3</option>
-            ${STATS.map(stat => `<option value="plus5:${stat}" ${piece.tuningMode !== 'plus3' && piece.tuningTo === stat ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
+            <option value="none" ${piece.tuningMode === 'none' || piece.tuningInstalled === false ? 'selected' : ''}>${l('无调整', '無調校', 'No Tuning')}</option>
+            <option value="plus3" ${piece.tuningMode === 'plus3' && piece.tuningInstalled !== false ? 'selected' : ''}>+3</option>
+            ${STATS.map(stat => `<option value="plus5:${stat}" ${piece.tuningMode === 'shift' && piece.tuningInstalled !== false && piece.tuningTo === stat ? 'selected' : ''}>+5 ${STAT_LABELS[stat]}</option>`).join('')}
           </select>
         </label>
-        ${piece.tuningMode === 'shift' ? `
+        ${piece.tuningMode === 'shift' && piece.tuningInstalled !== false ? `
         <label class="input-group field-tuning-from">
           <span>${l('调整来源（-5，可自选）','調校來源（-5，可自選）','Tuning source (-5, your pick)')}</span>
           <select onchange="updateUpgradePiece(${index},'tuningFrom',this.value,true)">
@@ -4456,6 +4587,7 @@ function updateUpgradePiece(index, field, value, rerender = false) {
       'requiresMasterwork', 'sockets', 'energy', 'dataConfidence', 'tuningInstalled']) delete upgradeBuildState[index][key];
   }
   upgradeBuildState[index][field] = value;
+  if (field === 'tuningMode') upgradeBuildState[index].tuningInstalled = value !== 'none';
   if (field === 'locked') manualLocked[index] = Boolean(value);
   upgradeBuildState[index] = normalizeUpgradePiece(upgradeBuildState[index], index);
   if (field === 'locked') syncUpgradeLocks();
@@ -4562,9 +4694,9 @@ function updateUpgradeBudgetSummary() {
   const onlyPlus5 = document.getElementById('upgradeOnlyPlus5')?.checked === true;
   const restriction = onlyPlus5 && budget.numPlus3 > 0
     ? `<small>${l(
-      `当前装备记录中仍有 ${budget.numPlus3} 件 +3；求解和已有护甲方案会把它们重新配置为 +5/-5，最终方案不会使用 +3。`,
-      `目前裝備記錄中仍有 ${budget.numPlus3} 件 +3；求解和已有防具方案會把它們重新配置為 +5/-5，最終方案不會使用 +3。`,
-      `${budget.numPlus3} currently equipped piece(s) still show +3; solved and owned-armor loadouts reconfigure them to +5/-5, so the final setup contains no +3.`
+      `当前装备记录中仍有 ${budget.numPlus3} 件 +3；求解会按需要使用 +5/-5 或不装调整模组，最终方案不会使用 +3。`,
+      `目前裝備記錄中仍有 ${budget.numPlus3} 件 +3；求解會視需要使用 +5/-5 或不裝調校模組，最終方案不會使用 +3。`,
+      `${budget.numPlus3} currently equipped piece(s) still show +3; solved loadouts use +5/-5 or no Tuning mod as needed, never +3.`
     )}</small>`
     : '';
   summary.innerHTML = currentBudget + restriction;
@@ -4672,7 +4804,7 @@ function initializeUpgradeOptimizer() {
 
 function formatUpgradeTuning(assignment) {
   if (!assignment) return l('未知调整', '未知調校', 'Unknown Tuning');
-  if (assignment.mode === 'none') return t('none');
+  if (assignment.mode === 'none') return l('无调整', '無調校', 'No Tuning');
   if (assignment.mode === '+3') return '+3';
   const from = STAT_LABELS[assignment.from];
   const to = STAT_LABELS[assignment.to];
@@ -5311,16 +5443,38 @@ function unifiedEntryKey(entry) {
   return entry.pieces.map(unifiedPieceIdentity).sort().join('|');
 }
 
-// 达标优先 → 精确达成 → 已有护甲更完整 → 刷取更少 → 理论排名 → 易刷程度.
+// Rule quality always precedes ownership. Exactness only refines proven
+// feasible candidates; a label on an unmappable skeleton is not a trump card.
 function compareUnifiedEntries(left, right) {
   if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
-  if (left.exact !== right.exact) return left.exact ? -1 : 1;
-  if (left.ownedCount !== right.ownedCount) return right.ownedCount - left.ownedCount;
-  if (left.farmCount !== right.farmCount) return left.farmCount - right.farmCount;
+  if (left.feasible && left.exact !== right.exact) return left.exact ? -1 : 1;
   const rankOrder = compareRankTuples(left.rank, right.rank);
   if (rankOrder !== 0) return rankOrder;
+  if (left.ownedCount !== right.ownedCount) return right.ownedCount - left.ownedCount;
+  if (left.farmCount !== right.farmCount) return left.farmCount - right.farmCount;
+  const costOrder = compareAssignmentCosts(left.assignmentCost, right.assignmentCost);
+  if (costOrder) return costOrder;
   if (left.farmability !== right.farmability) return left.farmability - right.farmability;
-  return 0;
+  if (left.kind !== right.kind) return Number(left.kind === 'theory') - Number(right.kind === 'theory');
+  return String(left.witness?.canonicalId || unifiedEntryKey(left))
+    .localeCompare(String(right.witness?.canonicalId || unifiedEntryKey(right)));
+}
+
+function unifiedQualityRank(witness) {
+  if (witness.metrics?.qualityRank) return witness.metrics.qualityRank;
+  const model = witness.problemSpec?.constraintModel;
+  const armor = witness.armorTotals || witness.totals;
+  const visible = witness.visibleTotals || witness.finalTotals || (armor && Object.fromEntries(STATS.map(stat =>
+    [stat, Math.max(0, Math.min(200, Number(armor[stat]) + Number(model?.fragments?.[stat] || 0)))])));
+  if (!model?.rules || !visible) return witness.rank || [];
+  const target = {}, constraints = {minimums: {}, maximums: {}, priorityLevels: {}};
+  for (const rule of model.rules) {
+    target[rule.stat] = rule.preferredVisible;
+    if (rule.visibleMinimum !== null) constraints.minimums[rule.stat] = rule.visibleMinimum;
+    if (rule.visibleMaximum !== null) constraints.maximums[rule.stat] = rule.visibleMaximum;
+    constraints.priorityLevels[rule.stat] = rule.priority;
+  }
+  return rankStatRules(visible, target, constraints);
 }
 
 function normalizeInventoryEntry(entry, search) {
@@ -5332,7 +5486,8 @@ function normalizeInventoryEntry(entry, search) {
     farmCount: 0,
     feasible: certifiedFeasible(entry),
     exact: entry.certificate?.status === "EXACT_TARGET_PROVEN",
-    rank: entry.rank || [],
+    rank: unifiedQualityRank(entry),
+    assignmentCost: entry.assignmentCost,
     farmability: 0,
     current: entry.isCurrent === true,
     tuningAssignments: entry.tuningAssignments,
@@ -5368,7 +5523,8 @@ function normalizeTheoryPlan(plan, search) {
     planFeasible,
     feasible: ruleFeasible && planFeasible,
     exact: witness.certificate?.status === "EXACT_TARGET_PROVEN",
-    rank: witness.rank || [],
+    rank: unifiedQualityRank(witness),
+    assignmentCost: plan.assignmentCost || witness.assignmentCost,
     farmability: Number(plan.farmability) || 0,
     current: false,
     tuningAssignments: witness.tuningAssignments,
@@ -5382,18 +5538,18 @@ function buildUnifiedLoadouts() {
   // Progressive search replaces the Top-K with better candidates while its
   // length stays at maxResults, so identity of the inventory result revision —
   // not its size — is what invalidates this projection.
-  const cacheKey = `${ownedPlanRevision}|${inventorySolveRevision}|${inventoryResultRevision}`;
+  const cacheKey = `${ownedPlanRevision}|${ownedPlanResultRevision}|${inventorySolveRevision}|${inventoryResultRevision}`;
   if (unifiedCache.key === cacheKey && unifiedCache.solutions === allSolutions) {
     return unifiedCache.entries;
   }
   const entries = (lastInventoryResult?.results || [])
     .map(entry => normalizeInventoryEntry(entry, lastInventoryResult?.search));
-  const request = createOwnedArmorPlanRequest(
-    allSolutions, Math.max(SOLUTION_PREVIEW_COUNT, allSolutions.length), { allowEmpty: true },
-  );
-  if (request) {
+  if (allSolutions.length) {
+    void ensureOwnedArmorPlans(allSolutions).catch(() => {});
     const theorySearch = allSolutions?.search || null;
-    for (const plan of rankInventoryPlans(request)) {
+    for (const solution of allSolutions) {
+      const plan = getOwnedArmorPlan(solution, {schedule: false});
+      if (!plan) continue;
       const entry = normalizeTheoryPlan(plan, theorySearch);
       if (entry) entries.push(entry);
     }
@@ -5421,7 +5577,17 @@ function renderInventoryResults(result) {
     // the same Top-K size — advances the projection revision.
     inventoryResultRevision++;
   }
-  renderUnifiedResults();
+  scheduleUnifiedResults();
+}
+
+let unifiedRenderFrame = null;
+let renderedUnifiedKey = null;
+function scheduleUnifiedResults() {
+  if (unifiedRenderFrame !== null) return;
+  unifiedRenderFrame = requestAnimationFrame(() => {
+    unifiedRenderFrame = null;
+    renderUnifiedResults();
+  });
 }
 
 // --- Plan browser view projection (filter + sort) ---------------------------
@@ -5583,17 +5749,27 @@ function renderUnifiedResults() {
   renderingUnifiedList = true;
   try {
     const all = buildUnifiedLoadouts();
+    el.setAttribute('aria-busy', String(calculatorMode === 'solve' && !ownedPlanningPaused
+      && allSolutions.some(solution => {
+        const key = ownedPlanCacheKey(solution, true);
+        return !ownedPlanCache.has(key) && !failedOwnedPlanKeys.has(key);
+      })));
     const view = projectPlanView(all);
     lastUnifiedLoadouts = view;
     if (all.length === 0) {
-      el.innerHTML = "";
-      el.hidden = true;
+      renderedUnifiedKey = null;
+      const pending = calculatorMode === 'solve' && allSolutions.length > 0;
+      el.innerHTML = pending ? `<p class="plan-empty" role="status">${ownedPlanError
+        ? l('后台匹配不可用，请检查浏览器 Worker 支持后重试。', '背景配對無法使用，請檢查瀏覽器 Worker 支援後重試。', 'Background matching is unavailable. Check Web Worker support and retry.')
+        : l('正在后台匹配已有护甲与刷取方案…', '正在背景配對已有防具與取得方案…', 'Matching owned armor and farming plans in the background…')}</p>` : '';
+      el.hidden = !pending;
       syncCommandBarActions();
       return;
     }
     // A filter that matches nothing must never destroy the toolbar, or the
     // reader has no way back to the other filters.
     if (view.length === 0) {
+      renderedUnifiedKey = null;
       selectedEntryKey = null;
       selectedUnifiedIndex = 0;
       el.hidden = false;
@@ -5609,6 +5785,17 @@ function renderUnifiedResults() {
     selectedUnifiedIndex = index;
     selectedEntryKey = unifiedEntryKey(view[index]);
     planRenderLimit = Math.min(Math.max(PLAN_PAGE_SIZE, planRenderLimit), view.length);
+    // Node/time-only progress must not destroy the plan list/detail DOM. The
+    // current model still receives fresh search metadata; terminal transitions,
+    // changed candidates, selection, filters and language rebuild the surface.
+    const renderKey = JSON.stringify([getPageLanguage(), planFilter, planSort, planRenderLimit,
+      selectedEntryKey, ownedPlanResultRevision, view.map(entry => [
+        entry.witness?.canonicalId || unifiedEntryKey(entry), entry.feasible, entry.farmCount,
+        entry.certificate?.status, entry.witness?.executionStatus,
+        entry.search?.running, entry.search?.termination,
+      ])]);
+    if (renderedUnifiedKey === renderKey) return;
+    renderedUnifiedKey = renderKey;
     el.hidden = false;
     el.innerHTML = renderResultWorkspace(all, view, index);
   } finally {
@@ -5983,7 +6170,8 @@ function createEntryPieceRows(entry) {
       armorModAssignment: modAssignments[assignmentIndex] || null,
       // What the drop itself must roll. The +5 side of a Legendary Tuning mod is
       // fixed by the item; it is not a free choice the player makes later.
-      intrinsicTuningMode: piece?.tuningMode === "plus3" ? "plus3" : "shift",
+      intrinsicTuningMode: piece?.tuningMode === 'none' || piece?.tuningInstalled === false ? 'none'
+        : piece?.tuningMode === "plus3" ? "plus3" : "shift",
       intrinsicTuningTo: piece?.tuningTo || null,
       // Acquisition-only facts, available when the piece has no owned instance.
       farmSetHash,
@@ -6021,6 +6209,7 @@ function renderOwnedPieceBungieAction(ownedItem) {
 // configures once it is acquired. A missing piece still has a plan — it simply
 // has no execution preflight — so both are shown for farm rows too.
 function formatIntrinsicTuning(row) {
+  if (row.intrinsicTuningMode === 'none') return l('无需调整', '無需調校', 'No Tuning required');
   if (row.intrinsicTuningMode === "plus3") return l("+3 均衡", "+3 均衡", "+3 Balanced");
   if (!row.intrinsicTuningTo) return "—";
   return `+5 ${STAT_LABELS[row.intrinsicTuningTo]}`;

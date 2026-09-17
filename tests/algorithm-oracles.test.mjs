@@ -41,9 +41,11 @@ function rebuildSolverTotals(solution) {
     const tuning = solution.tuningAssignments[index];
     if (tuning.mode === "+3") {
       for (const stat of config.masterworkStats) totals[stat] += 1;
-    } else {
+    } else if (tuning.mode === '+5-5') {
       totals[tuning.from] -= 5;
       totals[tuning.to] += 5;
+    } else {
+      assert.equal(tuning.mode, 'none');
     }
     const mod = solution.modAssignments[index];
     if (mod) totals[mod.stat] += mod.size;
@@ -71,7 +73,7 @@ test("structural score preserves soft ordering beside a hard-constraint penalty"
   );
 });
 
-test("hard-minimum evaluation searches both sides of free tuning shifts", () => {
+test("priority-minimum evaluation searches both sides of free tuning shifts", () => {
   const specs = [
     ["Skirmisher", "health"],
     ["Grenadier", "health"],
@@ -98,18 +100,12 @@ test("hard-minimum evaluation searches both sides of free tuning shifts", () => 
     0,
     2,
     3,
-    { minimums: { weapons: 120, super: 80 } },
+    { minimums: { weapons: 120, super: 80 }, priorityLevels: {weapons: 1, super: 1} },
   );
 
-  assert.equal(result.score, 17697);
-  assert.deepEqual(result.totals, {
-    health: 57,
-    melee: 67,
-    grenade: 96,
-    super: 85,
-    class: 53,
-    weapons: 121,
-  });
+  assert.ok(result.totals.weapons >= 120);
+  assert.ok(result.totals.super >= 80);
+  assert.deepEqual(rebuildSolverTotals({...result, config: configs}), result.totals);
 });
 
 test("fixed-five evaluator matches an independent joint tuning and mod oracle", () => {
@@ -146,17 +142,18 @@ test("fixed-five evaluator matches an independent joint tuning and mod oracle", 
     }
   }
   let oracleRank = null;
-  for (const from of STATS) {
-    for (const to of STATS) {
-      if (from === to) continue;
-      for (const modStat of STATS) {
-        const totals = { ...plus3Base };
+  const actions = [null, ...STATS.flatMap(from => STATS.filter(to => from !== to).map(to => ({from, to})))];
+  for (const action of actions) {
+    for (const modStat of STATS) {
+      const totals = { ...plus3Base };
+      if (action) {
+        const {from, to} = action;
         totals[from] -= 5;
         totals[to] += 5;
-        totals[modStat] += 5;
-        const rank = scoreStatsRank(totals, target, constraints);
-        if (!oracleRank || compareScoreRanks(rank, oracleRank) < 0) oracleRank = rank;
       }
+      totals[modStat] += 5;
+      const rank = scoreStatsRank(totals, target, constraints);
+      if (!oracleRank || compareScoreRanks(rank, oracleRank) < 0) oracleRank = rank;
     }
   }
 

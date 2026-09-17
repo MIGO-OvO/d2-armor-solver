@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {BASE_CONFIGS, STATS} from "../src/core/armor-model.mjs";
-import {solveInventory} from "../src/core/armor-engine.mjs";
+import {solveInventory, mergeInventoryRequest} from "../src/core/armor-engine.mjs";
 import {Worker as NodeWorker} from "node:worker_threads";
 import {crowdedDimRequest} from './helpers/dim-exact-inventory.mjs';
 import {fixture as performanceFixture} from '../scripts/fixtures/search-performance.mjs';
@@ -23,9 +23,20 @@ function request(count = 2) {
 
 class ControlledWorker {
   static instances = [];
+  static mergeFailure = null;
   constructor() { this.events = {}; this.requests = []; ControlledWorker.instances.push(this); }
   addEventListener(name, callback) { this.events[name] = callback; }
-  postMessage(data) { this.requests.push(data); }
+  postMessage(data) {
+    this.requests.push(data);
+    if (data.operation === 'mergeInventoryShardResults') queueMicrotask(() => {
+      try {
+        if (ControlledWorker.mergeFailure) throw ControlledWorker.mergeFailure;
+        this.reply(data, mergeInventoryRequest(data.payload));
+      } catch (error) {
+        this.events.message({data: {...data, type: 'error', error: {name: error.name, message: error.message, stack: error.stack}}});
+      }
+    });
+  }
   terminate() { this.terminated = true; }
   reply(request, result) { this.events.message({data: {id: request.id, generation: request.generation, type: "result", result}}); }
 }
@@ -33,9 +44,10 @@ class ControlledWorker {
 async function clientFor(t) {
   const original = globalThis.Worker;
   ControlledWorker.instances = [];
+  ControlledWorker.mergeFailure = null;
   globalThis.Worker = ControlledWorker;
   const client = await import(`../src/core/armor-engine-client.mjs?parallel=${Math.random()}`);
-  t.after(() => { client.cancelAllSearches(); globalThis.Worker = original; });
+  t.after(() => { client.cancelAllSearches({dispose: true}); globalThis.Worker = original; });
   return client;
 }
 
@@ -56,15 +68,15 @@ test('Balanced automatic large-vault dispatch has exactly the serial aggregate e
 test('progressive merge retains its original exception and terminates siblings', async t => {
   const client = await clientFor(t);
   const original = new Error('sentinel merge failure');
+  ControlledWorker.mergeFailure = original;
   const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2, onProgress() {}});
-  const rejected = assert.rejects(pending, error => error === original);
+  const rejected = assert.rejects(pending, error => error.message === original.message
+    && error.stack === original.stack && error.solverFailure === 'merge');
   const worker = ControlledWorker.instances[0], message = worker.requests[0];
   const partial = solveInventory(message.payload);
-  // Fault injection at the real merge iteration, after scheduling/admission.
-  partial.results[Symbol.iterator] = () => { throw original; };
+  // A worker exception crosses the real error envelope after merge admission.
   worker.events.message({data: {...message, type: 'progress', result: partial, search: {nodes: 4}}});
   await rejected;
-  assert.equal(original.solverFailure, 'merge');
   assert.ok(ControlledWorker.instances.every(w => w.terminated));
 });
 
@@ -109,12 +121,13 @@ test('repeated positives do not trigger whole-vault progressive remerges; final 
 test('final merge errors retain the exception and merge classification', async t => {
   const client = await clientFor(t);
   const original = new Error('final merge failed');
+  ControlledWorker.mergeFailure = original;
   const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2});
-  const rejected = assert.rejects(pending, error => error === original && error.solverFailure === 'merge');
+  const rejected = assert.rejects(pending, error => error.message === original.message
+    && error.stack === original.stack && error.solverFailure === 'merge');
   for (const worker of ControlledWorker.instances) {
     const message = worker.requests[0];
     const result = solveInventory(message.payload);
-    result.results[Symbol.iterator] = () => { throw original; };
     worker.reply(message, result);
   }
   await rejected;
@@ -334,7 +347,7 @@ test('partial construction failure keeps surviving pool and consumes every shard
   const visited = new Set();
   for (let turn = 0; turn < 5; turn++) {
     for (const w of ControlledWorker.instances) for (const message of w.requests) {
-      if (visited.has(message.id)) continue;
+      if (visited.has(message.id) || message.operation !== 'solveInventory') continue;
       visited.add(message.id); w.reply(message, solveInventory(message.payload));
     }
     await new Promise(resolve => setImmediate(resolve));
@@ -416,6 +429,7 @@ test('postMessage failure degrades; explicit cancellation never starts queued fa
   assert.ok((await client.solveInventoryParallelAsync(request(), {parallelism: 2})).results.length);
   globalThis.Worker = ControlledWorker;
   ControlledWorker.instances = [];
+  ControlledWorker.mergeFailure = null;
   const controller = new AbortController();
   const pending = client.solveInventoryParallelAsync(request(), {parallelism: 2, shardCount: 5, signal: controller.signal});
   const rejected = assert.rejects(pending, {name: 'AbortError'});
@@ -533,7 +547,6 @@ test("the parallel client forwards the profile's exhaustive flag unchanged", asy
   for (const [searchProfile, expected] of [["fast", false], ["balanced", false], ["deep", true]]) {
     const pending = client.solveInventoryParallelAsync({...request(), searchProfile}, {parallelism: 2});
     const instances = ControlledWorker.instances.slice(seen);
-    seen = ControlledWorker.instances.length;
     assert.equal(instances.length, 2);
     for (const worker of instances) {
       assert.equal(worker.requests[0].payload.searchLimits.exhaustive, expected,
@@ -541,6 +554,7 @@ test("the parallel client forwards the profile's exhaustive flag unchanged", asy
       worker.reply(worker.requests[0], solveInventory(worker.requests[0].payload));
     }
     await pending;
+    seen = ControlledWorker.instances.length;
   }
 });
 
@@ -551,12 +565,12 @@ test("an explicit caller exhaustive flag still overrides Fast and Balanced", asy
     const pending = client.solveInventoryParallelAsync(
       {...request(), searchProfile, searchLimits: {exhaustive: true}}, {parallelism: 2});
     const instances = ControlledWorker.instances.slice(seen);
-    seen = ControlledWorker.instances.length;
     for (const worker of instances) {
       assert.equal(worker.requests[0].payload.searchLimits.exhaustive, true);
       worker.reply(worker.requests[0], solveInventory(worker.requests[0].payload));
     }
     await pending;
+    seen = ControlledWorker.instances.length;
   }
 });
 

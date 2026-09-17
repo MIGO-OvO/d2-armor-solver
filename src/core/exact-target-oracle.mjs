@@ -1,4 +1,5 @@
 import { BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
+import { getTuningCost, compareTuningCosts } from './tuning-domain.mjs';
 
 // The exact-target path is deliberately target-directed. Materializing the
 // complete five-piece state space creates far more intermediate objects than
@@ -33,6 +34,95 @@ for (let from = 0; from < STATS.length; from++) {
     SHIFT_ACTIONS.push({ from, to, delta });
   }
 }
+// An unbalanced socket may be empty. It contributes no points, and is cheaper
+// than installing directional adjustments that cancel each other out.
+SHIFT_ACTIONS.push({ from: null, to: null, delta: STATS.map(() => 0) });
+
+function compareShiftStates(left, right) {
+  return left.directionalCount - right.directionalCount
+    || (left.changedCount || 0) - (right.changedCount || 0) || left.code - right.code;
+}
+
+function tuningAssignmentKey(assignment) {
+  if (typeof assignment === 'string') return assignment;
+  const mode = assignment?.mode === 'shift' ? '+5-5' : assignment?.mode === 'plus3' ? '+3' : assignment?.mode || 'none';
+  return mode === '+5-5' ? `${mode}:${assignment.from}:${assignment.to}` : mode;
+}
+
+function modifierAssignmentKey(assignment) {
+  return assignment?.size ? `${assignment.size}:${assignment.stat}` : 'none';
+}
+
+function leastChangedModifierSlots(state, sizes, current) {
+  const digits = decodeDigits(state.code, sizes.length, STATS.length);
+  const remaining = digits.map((stat, index) => ({size: sizes[index], stat: STATS[stat]}));
+  while (remaining.length < 5) remaining.push(null);
+  const assignments = {};
+  let changedCount = 0;
+  // Slots are mathematically equivalent. Preserve every available identical
+  // (size, stat) plug first; the remaining slots cannot match any more plugs.
+  // This is a maximum-cardinality equality matching, not a greedy energy fit.
+  for (let index = 0; index < 5; index++) {
+    const match = remaining.findIndex(mod => modifierAssignmentKey(mod) === modifierAssignmentKey(current[index]));
+    if (match >= 0) assignments[index] = remaining.splice(match, 1)[0];
+  }
+  for (let index = 0; index < 5; index++) {
+    if (Object.hasOwn(assignments, index)) continue;
+    assignments[index] = remaining.shift();
+    changedCount++;
+  }
+  return {...state, assignments, changedCount};
+}
+
+function buildLeastChangedModifierStates(numPlus5, numPlus10, current) {
+  const sizes = [...Array(numPlus10).fill(10), ...Array(numPlus5).fill(5)];
+  const byGain = new Map();
+  const values = Array(5).fill(0);
+  const visit = (depth, start, code) => {
+    if (depth === sizes.length) {
+      const candidate = leastChangedModifierSlots({values: [...values], code}, sizes, current);
+      const key = stateKey(values);
+      const previous = byGain.get(key);
+      if (!previous || candidate.changedCount < previous.changedCount
+        || candidate.changedCount === previous.changedCount && code < previous.code) byGain.set(key, candidate);
+      return;
+    }
+    for (let stat = start; stat < STATS.length; stat++) {
+      if (stat < 5) values[stat] += sizes[depth] / 5;
+      visit(depth + 1, sizes[depth + 1] === sizes[depth] ? stat : 0, code * STATS.length + stat);
+      if (stat < 5) values[stat] -= sizes[depth] / 5;
+    }
+  };
+  // At most 1,176 distinct mixed-size distributions for five slots; retain
+  // alternative 10+5+5 placements until their full per-socket cost is known.
+  visit(0, 0, 0);
+  return {sizes, states: [...byGain.values()].sort((left, right) => left.code - right.code)};
+}
+
+function socketChangeCount(witness, tuning, mods) {
+  let changes = 0;
+  for (let index = 0; index < 5; index++) {
+    if (tuning && tuningAssignmentKey(witness.tuningAssignments[index]) !== tuningAssignmentKey(tuning[index])) changes++;
+    if (mods && modifierAssignmentKey(witness.modAssignments[index]) !== modifierAssignmentKey(mods[index])) changes++;
+  }
+  return changes;
+}
+
+function normalizeShiftCapability(target) {
+  const capability = target && !Array.isArray(target) && typeof target === 'object' ? target : null;
+  const values = capability ? capability.allowedDirectionalStats || [] : target;
+  return {
+    allowNone: capability?.allowNone !== false,
+    allowedDirectionalStats: Array.isArray(values) ? [...new Set(values.filter(stat => STATS.includes(stat)))].sort()
+      : STATS.includes(values) ? [values] : [...STATS].sort(),
+    ...(capability && Object.hasOwn(capability, 'currentAssignment')
+      ? {currentAssignment: tuningAssignmentKey(capability.currentAssignment)} : {}),
+  };
+}
+
+function shiftCapabilityKey(targets) {
+  return JSON.stringify(targets.map(normalizeShiftCapability));
+}
 
 function packAdjustment(values) {
   let key = 0;
@@ -54,6 +144,8 @@ function buildShiftStates(count, checkpoint = null) {
   let states = new Map([["0,0,0,0,0", {
     values: [0, 0, 0, 0, 0],
     code: 0,
+    directionalCount: 0,
+    changedCount: 0,
   }]]);
 
   for (let pieceIndex = 0; pieceIndex < count; pieceIndex++) {
@@ -66,44 +158,50 @@ function buildShiftStates(count, checkpoint = null) {
           value + action.delta[index]);
         const key = stateKey(values);
         const code = state.code * SHIFT_ACTIONS.length + actionIndex;
+        const candidate = { values, code,
+          directionalCount: state.directionalCount + Number(action.from !== null) };
         const existing = next.get(key);
-        if (!existing || code < existing.code) next.set(key, { values, code });
+        if (!existing || compareShiftStates(candidate, existing) < 0) next.set(key, candidate);
       }
     }
     states = next;
   }
 
-  return [...states.values()].sort((left, right) => left.code - right.code);
+  return [...states.values()].sort(compareShiftStates);
 }
 
 function buildRestrictedShiftStates(targets, checkpoint = null) {
   let states = new Map([["0,0,0,0,0,0", {
     values: [0, 0, 0, 0, 0, 0],
     code: 0,
+    directionalCount: 0,
+    changedCount: 0,
   }]]);
   for (const target of targets) {
-    const allowedTargets = Array.isArray(target)
-      ? new Set(target.filter(stat => STATS.includes(stat)))
-      : STATS.includes(target)
-        ? new Set([target])
-        : null;
+    const capability = normalizeShiftCapability(target);
+    const allowedTargets = new Set(capability.allowedDirectionalStats);
     const next = new Map();
     for (const state of states.values()) {
       checkpoint?.(0);
       for (let actionIndex = 0; actionIndex < SHIFT_ACTIONS.length; actionIndex++) {
         const action = SHIFT_ACTIONS[actionIndex];
-        if (allowedTargets && !allowedTargets.has(STATS[action.to])) continue;
+        if (action.from === null ? !capability.allowNone : !allowedTargets.has(STATS[action.to])) continue;
         const values = state.values.map((value, index) =>
           value + action.delta[index]);
         const key = stateKey(values);
         const code = state.code * SHIFT_ACTIONS.length + actionIndex;
+        const candidate = {values, code,
+          directionalCount: state.directionalCount + Number(action.from !== null),
+          changedCount: state.changedCount + Number(capability.currentAssignment !== undefined
+            && capability.currentAssignment !== (action.from === null ? 'none'
+              : `+5-5:${STATS[action.from]}:${STATS[action.to]}`))};
         const existing = next.get(key);
-        if (!existing || code < existing.code) next.set(key, { values, code });
+        if (!existing || compareShiftStates(candidate, existing) < 0) next.set(key, candidate);
       }
     }
     states = next;
   }
-  return [...states.values()].sort((left, right) => left.code - right.code);
+  return [...states.values()].sort(compareShiftStates);
 }
 
 function buildModifierStates(numPlus5, numPlus10) {
@@ -221,15 +319,17 @@ function getShiftStates(count, checkpoint = null) {
   return states;
 }
 
-function getModifierStates(numPlus5, numPlus10) {
-  const cacheKey = `${numPlus5}|${numPlus10}`;
+function getModifierStates(numPlus5, numPlus10, currentModAssignments = null) {
+  const cacheKey = `${numPlus5}|${numPlus10}|${currentModAssignments
+    ? Array.from({length: 5}, (_, index) => modifierAssignmentKey(currentModAssignments[index])).join(';') : '*'}`;
   const cached = modifierStateCache.get(cacheKey);
   if (cached) {
     modifierStateCache.delete(cacheKey);
     modifierStateCache.set(cacheKey, cached);
     return cached;
   }
-  const modifier = buildModifierStates(numPlus5, numPlus10);
+  const modifier = currentModAssignments ? buildLeastChangedModifierStates(numPlus5, numPlus10, currentModAssignments)
+    : buildModifierStates(numPlus5, numPlus10);
   modifierStateCache.set(cacheKey, modifier);
   while (modifierStateCache.size > MAX_DERIVED_STATE_CACHE_ENTRIES) {
     modifierStateCache.delete(modifierStateCache.keys().next().value);
@@ -248,8 +348,8 @@ function buildAdjustmentIndex(shiftCount, numPlus5, numPlus10, checkpoint = null
   return index;
 }
 
-function buildSparseAdjustmentIndex(shiftStates, numPlus5, numPlus10, checkpoint = null) {
-  const modifier = getModifierStates(numPlus5, numPlus10);
+function buildSparseAdjustmentIndex(shiftStates, numPlus5, numPlus10, checkpoint = null, currentModAssignments = null) {
+  const modifier = getModifierStates(numPlus5, numPlus10, currentModAssignments);
   const witnesses = new Map();
   for (let shiftIndex = 0; shiftIndex < shiftStates.length; shiftIndex++) {
     checkpoint?.(0);
@@ -261,7 +361,16 @@ function buildSparseAdjustmentIndex(shiftStates, numPlus5, numPlus10, checkpoint
       const values = shift.values.map((value, index) =>
         value + mod.values[index]);
       const key = packAdjustment(values);
-      if (key < 0 || witnesses.has(key)) continue;
+      if (key < 0) continue;
+      const previous = witnesses.get(key);
+      if (previous) {
+        if (!currentModAssignments) continue;
+        const previousShift = shiftStates[Math.floor((previous - 1) / modifier.states.length)];
+        const previousMod = modifier.states[(previous - 1) % modifier.states.length];
+        const costOrder = shift.directionalCount - previousShift.directionalCount
+          || (shift.changedCount || 0) + mod.changedCount - (previousShift.changedCount || 0) - previousMod.changedCount;
+        if (costOrder >= 0) continue;
+      }
       witnesses.set(key, shiftIndex * modifier.states.length + modifierIndex + 1);
     }
   }
@@ -300,9 +409,7 @@ const MAX_RESTRICTED_ADJUSTMENT_CACHE_ENTRIES = 2;
 const restrictedShiftStateCache = new Map();
 
 function getRestrictedShiftStates(targets, checkpoint = null) {
-  const cacheKey = targets.map(target => Array.isArray(target)
-    ? `[${target.join(",")}]`
-    : target || "*").join(";");
+  const cacheKey = shiftCapabilityKey(targets);
   const cached = restrictedShiftStateCache.get(cacheKey);
   if (cached) {
     restrictedShiftStateCache.delete(cacheKey);
@@ -317,13 +424,12 @@ function getRestrictedShiftStates(targets, checkpoint = null) {
   return states;
 }
 
-function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10, checkpoint = null) {
-  if (targets.every(target => target === undefined || target === null)) {
+function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10, checkpoint = null, currentModAssignments = null) {
+  if (!currentModAssignments && targets.every(target => target === undefined || target === null)) {
     return getAdjustmentIndex(targets.length, numPlus5, numPlus10, checkpoint);
   }
-  const cacheKey = `${targets.map(target => Array.isArray(target)
-    ? `[${target.join(",")}]`
-    : target || "*").join(";")}|${numPlus5}|${numPlus10}`;
+  const cacheKey = `${shiftCapabilityKey(targets)}|${numPlus5}|${numPlus10}|${currentModAssignments
+    ? Array.from({length: 5}, (_, index) => modifierAssignmentKey(currentModAssignments[index])).join(';') : '*'}`;
   const cached = restrictedAdjustmentCache.get(cacheKey);
   if (cached) {
     diagnostics.cacheHits++;
@@ -338,6 +444,7 @@ function getRestrictedAdjustmentIndex(targets, numPlus5, numPlus10, checkpoint =
     numPlus5,
     numPlus10,
     checkpoint,
+    currentModAssignments,
   );
   diagnostics.buildMs += performance.now() - started;
   index.shiftCount = targets.length;
@@ -462,7 +569,7 @@ function materializeWitness(configs, mask, adjustmentIndex, packedWitness) {
       continue;
     }
     const action = SHIFT_ACTIONS[shiftDigits[shiftCursor++]];
-    tuningAssignments.push({
+    tuningAssignments.push(action.from === null ? { mode: 'none', from: null, to: null } : {
       mode: "+5-5",
       from: STATS[action.from],
       to: STATS[action.to],
@@ -471,7 +578,9 @@ function materializeWitness(configs, mask, adjustmentIndex, packedWitness) {
 
   const modAssignments = {};
   for (let pieceIndex = 0; pieceIndex < configs.length; pieceIndex++) {
-    modAssignments[pieceIndex] = pieceIndex < modifierDigits.length
+    modAssignments[pieceIndex] = modifierState.assignments
+      ? modifierState.assignments[pieceIndex] && {...modifierState.assignments[pieceIndex]}
+      : pieceIndex < modifierDigits.length
       ? {
         size: adjustmentIndex.modifierSizes[pieceIndex],
         stat: STATS[modifierDigits[pieceIndex]],
@@ -479,7 +588,15 @@ function materializeWitness(configs, mask, adjustmentIndex, packedWitness) {
       : null;
   }
 
-  return { tuningAssignments, modAssignments };
+  return { tuningAssignments, modAssignments, tuningCost: getTuningCost(tuningAssignments) };
+}
+
+function witnessTuningCost(mask, adjustmentIndex, packedWitness) {
+  const shiftIndex = Math.floor((packedWitness - 1) / adjustmentIndex.modifierStates.length);
+  const directionalCount = adjustmentIndex.shiftStates[shiftIndex].directionalCount;
+  let balancedCount = 0;
+  for (let bits = mask; bits; bits &= bits - 1) balancedCount++;
+  return {directionalCount, installedCount: directionalCount + balancedCount};
 }
 
 const pointShiftCache = new Map();
@@ -538,6 +655,7 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, nu
   const count = (targetTotal - base.reduce((sum, value) => sum + value, 0)
     - numPlus5 * 5 - numPlus10 * 10) / 3;
   if (!Number.isInteger(count) || count < 0 || count > 5 || numPlus3 !== null && count !== numPlus3) return null;
+  let best = null;
   for (const {mask} of getMasks(5, count)) {
     checkpoint?.(0);
     const totals = [...base];
@@ -547,11 +665,11 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, nu
       const capability = tuningCapabilities[index];
       if ((mask >> index) & 1) {
         const masterwork = getMasterworkStats(configs[index]);
-        if (!capability.allowBalanced || !masterwork) { allowed = false; break; }
+        if (capability.allowBalanced === false || !masterwork) { allowed = false; break; }
         for (const stat of masterwork) totals[STATS.indexOf(stat)]++;
       } else {
-        if (!capability.allowedDirectionalStats?.length) { allowed = false; break; }
-        destinations.push([...capability.allowedDirectionalStats].sort());
+        if (capability.allowNone === false && !capability.allowedDirectionalStats?.length) { allowed = false; break; }
+        destinations.push(normalizeShiftCapability(capability));
       }
     }
     if (!allowed) continue;
@@ -570,13 +688,15 @@ export function findFixedTargetWitness({configs, target, numPlus5, numPlus10, nu
       const needed = residual.slice(0, 5).map((value, index) => value - mod.values[index]);
       const shiftIndex = shift.byVector.get(needed.join(","));
       if (shiftIndex === undefined) continue;
-      return {totals: {...target}, ...materializeWitness(configs, mask, {
+      const candidate = {totals: {...target}, ...materializeWitness(configs, mask, {
         shiftCount: destinations.length, shiftStates: shift.states,
         modifierStates: modifier.states, modifierSizes: modifier.sizes,
       }, shiftIndex * modifier.states.length + modIndex + 1)};
+      if (!best || compareTuningCosts(candidate.tuningCost, best.tuningCost) < 0) best = candidate;
+      if (best.tuningCost.directionalCount === 0) return best;
     }
   }
-  return null;
+  return best;
 }
 
 export function findFixedRuleWitness({configs, numPlus5, numPlus10, numPlus3 = null, tuningCapabilities, minimums, maximums, checkpoint = null}) {
@@ -592,6 +712,7 @@ export function findFixedRuleWitness({configs, numPlus5, numPlus10, numPlus3 = n
     const key = constrained.map(stat => vector[stat]).join(",");
     if (!projectedMods.has(key)) projectedMods.set(key, index);
   });
+  let best = null;
   for (let mask = 0; mask < 32; mask++) {
     if (numPlus3 !== null && getMasks(5, numPlus3).every(entry => entry.mask !== mask)) continue;
     checkpoint?.(0);
@@ -600,11 +721,12 @@ export function findFixedRuleWitness({configs, numPlus5, numPlus10, numPlus3 = n
     let allowed = true;
     for (let index = 0; index < 5; index++) {
       if ((mask >> index) & 1) {
-        if (!tuningCapabilities[index].allowBalanced) { allowed = false; break; }
+        if (tuningCapabilities[index].allowBalanced === false) { allowed = false; break; }
         for (const stat of getMasterworkStats(configs[index])) base[STATS.indexOf(stat)]++;
       } else {
-        if (!tuningCapabilities[index].allowedDirectionalStats?.length) { allowed = false; break; }
-        destinations.push([...tuningCapabilities[index].allowedDirectionalStats].sort());
+        const capability = tuningCapabilities[index];
+        if (capability.allowNone === false && !capability.allowedDirectionalStats?.length) { allowed = false; break; }
+        destinations.push(normalizeShiftCapability(capability));
       }
     }
     const total = base.reduce((sum, value) => sum + value, 0) + units * 5;
@@ -630,13 +752,19 @@ export function findFixedRuleWitness({configs, numPlus5, numPlus10, numPlus3 = n
           const value = base[index] + (values[index] + mod[index]) * 5;
           return minimums[index] !== null && value < minimums[index] || maximums[index] !== null && value > maximums[index];
         })) continue;
-        return {totals: Object.fromEntries(STATS.map((stat, index) => [stat, base[index] + (values[index] + mod[index]) * 5])),
+        const candidate = {totals: Object.fromEntries(STATS.map((stat, index) => [stat, base[index] + (values[index] + mod[index]) * 5])),
           ...materializeWitness(configs, mask, {shiftCount: destinations.length, shiftStates: shift.states,
             modifierStates: modifier.states, modifierSizes: modifier.sizes}, shiftIndex * modifier.states.length + modIndex + 1)};
+        if (!best || compareTuningCosts(candidate.tuningCost, best.tuningCost) < 0) best = candidate;
+        if (best.tuningCost.installedCount === (numPlus3 ?? 0)) return best;
+        // States are ordered by installed directional count. Any further
+        // state in this same Balanced mask can only tie or increase its cost.
+        shiftIndex = shift.states.length;
+        break;
       }
     }
   }
-  return null;
+  return best;
 }
 
 export function findBestFixedConfigWitness({
@@ -650,6 +778,9 @@ export function findBestFixedConfigWitness({
   requiredNumPlus3 = null,
   rankTotals,
   compareRanks,
+  compareWitnesses = null,
+  currentTuningAssignments = null,
+  currentModAssignments = null,
   checkpoint = null,
   onWitness = null,
 }) {
@@ -664,7 +795,7 @@ export function findBestFixedConfigWitness({
       const balanced = Boolean((mask >> index) & 1);
       return balanced
         ? capability?.allowBalanced !== false
-        : Array.isArray(capability?.allowedDirectionalStats)
+        : capability?.allowNone !== false || Array.isArray(capability?.allowedDirectionalStats)
           && capability.allowedDirectionalStats.some(stat => STATS.includes(stat));
     }))
     : fixedTuningTargets
@@ -697,13 +828,15 @@ export function findBestFixedConfigWitness({
         }
       } else {
         shiftPieceIndices.push(pieceIndex);
-        shiftTargets.push(tuningCapabilities
-          ? tuningCapabilities[pieceIndex].allowedDirectionalStats
-          : fixedTuningTargets?.[pieceIndex]);
+        const capability = tuningCapabilities
+          ? normalizeShiftCapability(tuningCapabilities[pieceIndex])
+          : normalizeShiftCapability(fixedTuningTargets?.[pieceIndex]);
+        if (currentTuningAssignments) capability.currentAssignment = currentTuningAssignments[pieceIndex];
+        shiftTargets.push(capability);
       }
     }
-    const adjustmentIndex = fixedTuningTargets || tuningCapabilities
-      ? getRestrictedAdjustmentIndex(shiftTargets, numPlus5, numPlus10, checkpoint)
+    const adjustmentIndex = fixedTuningTargets || tuningCapabilities || currentTuningAssignments || currentModAssignments
+      ? getRestrictedAdjustmentIndex(shiftTargets, numPlus5, numPlus10, checkpoint, currentModAssignments)
       : getAdjustmentIndex(shiftPieceIndices.length, numPlus5, numPlus10, checkpoint);
     const modifierUnits = numPlus5 + numPlus10 * 2;
 
@@ -717,18 +850,34 @@ export function findBestFixedConfigWitness({
         baseTotals[statIndex] + units[statIndex] * 5,
       ]));
       const rank = rankTotals(totals, target);
-      if (best && compareRanks(rank, best.rank) >= 0) continue;
+      const rankOrder = best ? compareRanks(rank, best.rank) : -1;
+      if (rankOrder > 0) continue;
+      const packedWitness = getPackedWitness(adjustmentIndex, key);
+      if (rankOrder === 0 && (!compareWitnesses && !currentTuningAssignments && !currentModAssignments
+        ? compareTuningCosts(witnessTuningCost(maskEntry.mask, adjustmentIndex, packedWitness), best.tuningCost) >= 0
+        : witnessTuningCost(maskEntry.mask, adjustmentIndex, packedWitness).installedCount > best.tuningCost.installedCount)) continue;
       const materialized = materializeWitness(
         configs,
         maskEntry.mask,
         adjustmentIndex,
-        getPackedWitness(adjustmentIndex, key),
+        packedWitness,
       );
-      best = {
+      const candidate = {
         totals,
         rank,
         ...materialized,
       };
+      if (currentTuningAssignments || currentModAssignments) {
+        candidate.socketChangeCount = socketChangeCount(candidate, currentTuningAssignments, currentModAssignments);
+      }
+      if (rankOrder === 0) {
+        const costOrder = compareWitnesses ? compareWitnesses(candidate, best)
+          : candidate.tuningCost.installedCount - best.tuningCost.installedCount
+            || (candidate.socketChangeCount || 0) - (best.socketChangeCount || 0)
+            || compareTuningCosts(candidate.tuningCost, best.tuningCost);
+        if (costOrder >= 0) continue;
+      }
+      best = candidate;
       onWitness?.(best);
     }
   }
@@ -863,7 +1012,7 @@ export function findBestGlobalWitness({
         ]));
         const rank = rankTotals(totals, target);
         if (incumbentRank && compareRanks(rank, incumbentRank) > 0) continue;
-        if (best && compareRanks(rank, best.rank) >= 0) continue;
+        if (best && compareRanks(rank, best.rank) > 0) continue;
         const configs = [
           ...(fixed ? [fixed.config] : []),
           ...plus3.indices.map(index => BASE_CONFIGS[index]),
@@ -875,6 +1024,11 @@ export function findBestGlobalWitness({
         for (let index = 0; index < plus3.indices.length; index++) {
           mask |= 1 << (plus3Offset + index);
         }
+        const packedWitness = adjustmentIndex.witnesses[adjustmentIndex.reachableKeys[row]];
+        const cost = witnessTuningCost(mask, adjustmentIndex, packedWitness);
+        const previous = best || initialBest;
+        if (previous && compareRanks(rank, previous.rank) === 0
+          && compareTuningCosts(cost, previous.tuningCost || getTuningCost(previous.tuningAssignments)) >= 0) continue;
         best = {
           config: configs,
           totals,
@@ -883,7 +1037,7 @@ export function findBestGlobalWitness({
             configs,
             mask,
             adjustmentIndex,
-            adjustmentIndex.witnesses[adjustmentIndex.reachableKeys[row]],
+            packedWitness,
           ),
           exoticIndex: fixed ? 0 : null,
         };
@@ -1004,7 +1158,8 @@ export function findExactTargetWitnesses({
       ? [fixed.config, ...configIndices.map(index => BASE_CONFIGS[index])]
       : configIndices.map(index => BASE_CONFIGS[index]);
     const groupKey = getArchetypeGroupKey(configs, Boolean(fixed));
-    if (witnessesByGroup.has(groupKey)) return;
+    const previous = witnessesByGroup.get(groupKey);
+    if (previous && compareTuningCosts(witnessTuningCost(mask, adjustmentIndex, packedWitness), previous.tuningCost) >= 0) return;
     const witness = {
       config: [...configs],
       ...materializeWitness(configs, mask, adjustmentIndex, packedWitness),
@@ -1165,11 +1320,11 @@ export function findExactPartialConfigWitnesses({
           baseTotals[STATS.indexOf(stat)] += 1;
         }
       } else {
-        if (allowedDirectionalStats.length === 0) {
+        if (entry.allowNone === false && allowedDirectionalStats.length === 0) {
           allowed = false;
           break;
         }
-        shiftTargets.push(allowedDirectionalStats);
+        shiftTargets.push({allowNone: entry.allowNone !== false, allowedDirectionalStats});
       }
     }
     if (allowed) fixedModeSelections.push({

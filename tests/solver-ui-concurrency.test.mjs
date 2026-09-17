@@ -140,3 +140,31 @@ test('inventory cancellation or failure does not reject theory', async () => {
     assert.equal(h.shown[0].id, 'valid');
   }
 });
+
+test('solve completion awaits the asynchronous derived workspace but not background inventory', async () => {
+  const h = harness(), plans = deferred();
+  h.state.refreshInventoryPlansFromSolutions = () => plans.promise;
+  let settled = false;
+  const pending = h.state.solve().then(() => {settled = true;});
+  h.theory[0].resolve([{id: 'theory'}]);
+  await flush();
+  assert.equal(settled, false);
+  assert.equal(h.elements.get('cancelSearch').disabled, false);
+  plans.resolve(); await pending;
+  assert.equal(h.shown[0].id, 'theory');
+  assert.equal(settled, true);
+  h.inventory[0].resolve('late owned'); await flush();
+  assert.equal(h.elements.get('messages').innerHTML, 'late owned');
+});
+
+test('cancelling derived matching does not publish the old theory result into a new search', async () => {
+  const h = harness(), plans = deferred();
+  h.state.refreshInventoryPlansFromSolutions = () => plans.promise;
+  const old = h.state.solve();
+  h.theory[0].resolve([{id: 'stale'}]); await flush();
+  h.state.searchUiRevision++;
+  plans.reject(Object.assign(new Error('cancelled plan'), {name: 'AbortError'}));
+  await old;
+  assert.equal(h.shown.length, 0);
+  h.inventory[0].resolve(null); await flush();
+});

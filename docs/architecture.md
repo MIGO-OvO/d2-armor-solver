@@ -18,11 +18,12 @@ Pages, Cloudflare Static Assets, or any equivalent static host.
 | `ArmorSets` | set lookup and active bonuses | generated Bungie Manifest catalog and localized perk text |
 | portal | route selection and shared language preference | static copy, online/offline navigation, Release and Actions links |
 | browser workbench | global action Adapter used by existing HTML handlers | DOM state, translation, rendering, mode switching |
-| Worker client | Promise-based engine calls | request IDs, structured cloning, Worker errors, inline fallback |
+| Worker client | Promise-based engine calls | request ownership, cancellation, structured cloning, Worker errors, non-browser inline adapter |
 
-`ArmorEngine` is intentionally deep: callers learn four request-object
-Interfaces while the search Implementation stays local. The Worker and inline
-fallback are two Adapters at the execution Seam. This creates Leverage for the
+`ArmorEngine` keeps the four solver operations plus derived-plan matching and
+cross-shard verification behind request-object interfaces. Browser workers
+(including the offline embedded worker) and the non-browser inline adapter
+share the same engine. This creates leverage for the
 UI and tests, and Locality for future rule changes.
 
 ## Solver V3 correctness boundary
@@ -121,17 +122,21 @@ semantics are described in [staged-search.md](staged-search.md). UI renders
 separate from mathematical truth. Search callbacks never enter ProblemSpec.
 
 - Standard solving, priority refinement, reachability, inventory search, armor
-  inference, and owned-armor analysis execute through a module Worker.
+  inference, owned/farming matching, and cross-shard verification execute in Workers.
 - The upgrade optimizer memoizes identical piece evaluations for the lifetime
   of one analysis request; cache entries cannot leak across target/Fragment
   inputs.
 - Base configurations precompute the three masterwork stats used by hot
   evaluation loops.
 - Vite emits minified, content-hashed JavaScript/CSS and a separate Worker
-  asset. The engine is loaded on the main thread for inline fallback or to
-  reconstruct and certify parallel inventory witnesses; search stays in Workers.
-- Realtime reachability uses a revision number so stale asynchronous results
-  cannot overwrite newer input.
+  asset. file:// builds embed a self-contained Blob worker; browsers without
+  worker support report unavailable computation instead of blocking synchronously.
+- Realtime reachability uses revision guards and bounded caches. Preview and
+  foreground requests have independent ownership, and cancellation retains
+  idle workers. Derived-plan caches do not invalidate on inventory progress.
+- Optional Tuning, shared rule-quality ranking, local assignment quality and
+  the responsive computation changes are described in
+  [complete-optimization.md](complete-optimization.md).
 
 ## Persistence
 

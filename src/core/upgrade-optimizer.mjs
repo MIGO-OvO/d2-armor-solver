@@ -17,6 +17,8 @@ import {
 } from "./solver-v3-contract.mjs";
 import { findExactPartialConfigWitnesses, findFixedTargetWitness, findFixedRuleWitness, findBestFixedConfigWitness } from "./exact-target-oracle.mjs";
 import {SearchBudgetExceeded} from "./search-session.mjs";
+import {rankStatRules, visibleRankingConstraints} from './stat-ranking.mjs';
+import {getAssignmentCost, compareAssignmentCosts} from './assignment-cost.mjs';
 
 export const UPGRADE_SLOTS = [
   { id:'helmet', labels:['头盔','頭盔','Helmet'] },
@@ -35,15 +37,17 @@ function normalizeTuningStats(values) {
 }
 
 export function getUpgradeTuningCapability(piece, onlyPlus5Tuning = false) {
-  const allowedDirectionalStats = piece.exotic
+  const unknown = piece.dataConfidence?.tuning === 'unknown' || piece.tuningConfidence === 'unknown';
+  const allowedDirectionalStats = unknown ? [] : piece.exotic
     ? normalizeTuningStats(piece.allowedTuningStats)
     : STATS.includes(piece.tunedStat)
       ? [piece.tunedStat]
       : null;
   return {
+    allowNone: true,
     allowBalanced: !onlyPlus5Tuning,
     allowedDirectionalStats,
-    complete: Array.isArray(allowedDirectionalStats),
+    complete: !unknown && Array.isArray(allowedDirectionalStats),
   };
 }
 
@@ -98,7 +102,7 @@ export function normalizeUpgradePiece(piece, slotIndex) {
     ]));
   }
   normalized.exotic = Boolean(normalized.exotic);
-  if (!['shift', 'plus3'].includes(normalized.tuningMode)) normalized.tuningMode = 'shift';
+  if (!['shift', 'plus3', 'none'].includes(normalized.tuningMode)) normalized.tuningMode = 'shift';
   const suppliedAllowedTuningStats = normalizeTuningStats(piece?.allowedTuningStats);
   let legacyTunedStat = piece?.sourceId || piece?.tuningUnknown ? null : fallback.tunedStat;
   if (Object.prototype.hasOwnProperty.call(piece || {}, "tunedStat")) {
@@ -120,7 +124,12 @@ export function normalizeUpgradePiece(piece, slotIndex) {
   // An imported piece whose fixed tuning stat could not be established keeps
   // null tuning fields (no fabricated direction); the manual totals skip it
   // and the equip path rejects it with "cannot confirm tuning" (handoff 3.4).
-  if (normalized.tuningMode === 'plus3') {
+  if (normalized.tuningMode === 'none') {
+    normalized.tuningInstalled = false;
+    normalized.tuningUnknown = false;
+    normalized.tuningFrom = null;
+    normalized.tuningTo = null;
+  } else if (normalized.tuningMode === 'plus3') {
     normalized.tuningUnknown = false;
     normalized.tuningFrom = null;
     normalized.tuningTo = null;
@@ -175,7 +184,8 @@ export function createUpgradePieceFromItem(item, slotIndex) {
     ? item.tertiary
     : STATS.find(stat => stat !== archetype.primary && stat !== archetype.secondary);
   const exotic = Boolean(item.exotic);
-  const tuningMode = item.tuningMode === "plus3" ? "plus3" : "shift";
+  const tuningMode = item.tuningMode === 'none' || item.tuningInstalled === false ? 'none'
+    : item.tuningMode === "plus3" ? "plus3" : "shift";
   // The +5 destination is rolled onto the piece. For the Bungie path it comes
   // from the installed plug (item.tuningTo) or the fixed tuning stat derived
   // from the tuning socket's reusable plugs (item.tuningStat); for DIM CSV it
@@ -189,10 +199,10 @@ export function createUpgradePieceFromItem(item, slotIndex) {
   const allowedTuningStats = exotic
     ? normalizeTuningStats(item.allowedTuningStats)
     : tunedStat ? [tunedStat] : null;
-  const tuningTo = tuningMode === "plus3"
+  const tuningTo = tuningMode !== "shift"
     ? null
     : item.tuningTo || tunedStat || allowedTuningStats?.[0] || null;
-  const tuningUnknown = tuningMode !== "plus3" && !tuningTo;
+  const tuningUnknown = tuningMode === "shift" && !tuningTo;
   const tuningInstalled = item.tuningInstalled ?? (item.modifierInference?.status === "exact"
     ? tuningMode === "plus3" || Boolean(item.tuningFrom && item.tuningTo) : undefined);
   const tuningFrom = STATS.includes(item.tuningFrom) ? item.tuningFrom : null;
@@ -317,14 +327,12 @@ export function getUpgradeModifierBudget(
   };
 }
 
-// "Only +5/-5" analysis treats every +3 piece as a +5/-5 one. The +3 mod has no
-// rolled +5 side, so the piece is just read as a shift piece with whatever +5
-// direction it carried; the budget and re-picking stay consistent.
+// The directional-only switch excludes Balanced, but never invents a current
+// directional plug. Keep the immutable capability and start at legal empty.
 function coercePiecesToPlus5Only(pieces) {
   return pieces.map((piece, index) => piece.tuningMode === 'plus3'
-    ? normalizeUpgradePiece({ ...piece, tuningMode: 'shift', tuningInstalled: true,
-      // This is an explicit requested assignment change, not import inference.
-      tuningFrom: STATS.find(stat => stat !== (piece.tunedStat || piece.allowedTuningStats?.[0])),
+    ? normalizeUpgradePiece({ ...piece, tuningMode: 'none', tuningInstalled: false,
+      tuningFrom: null, tuningTo: null,
     }, index)
     : piece);
 }
@@ -342,25 +350,24 @@ function getUpgradeEvaluationConstraints(armorTarget, requiredStats, userConstra
   const minimums = { ...(userConstraints.minimums || {}) };
   const maximums = { ...(userConstraints.maximums || {}) };
   const exact = { ...(userConstraints.exact || {}) };
+  const priorityLevels = {...userConstraints.priorityLevels};
   // Must-meet floors always stay in effect and win over any fuzzy minimum set
   // for the same stat — EXCEPT for a stat carrying a user cap (至多/区间 upper
   // bound): that cap is a ceiling, not a value to reach, so the all-six-stats
   // pre-check must never pin it to its cap via a mandatory floor.
   for (const stat of requiredStats) {
+    if (!priorityLevels[stat]) priorityLevels[stat] = 1;
     if (maximums[stat] !== undefined) continue;
     minimums[stat] = Math.max(minimums[stat] || 0, armorTarget[stat]);
   }
-  const hasPriorityLevels = Object.values(userConstraints.priorityLevels || {})
-    .some(level => level > 0);
   return {
     ...userConstraints,
+    priorityLevels,
     minimums,
     maximums,
-    // Upgrade metrics still enforce the user's exact rules through
-    // userConstraints. For internal partial-plan scoring, however, leaving all
-    // default exact flags enabled would place their aggregate gap ahead of the
-    // explicit High/Medium/Low tiers and make those controls ineffective.
-    exact: hasPriorityLevels ? {} : exact,
+    // Exact membership and priority are independent. Shared structural ranking
+    // handles both without deleting exact rules to influence a proxy score.
+    exact,
   };
 }
 
@@ -391,6 +398,14 @@ export function getUpgradeMetrics(
   constraints = {}, fragments = {},
 ) {
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
+  const visibleConstraints = visibleRankingConstraints(constraints, fragments);
+  // Legacy required flags become the highest priority only when no explicit
+  // High/Medium/Low tier was selected. They no longer override rule semantics.
+  visibleConstraints.priorityLevels = {...visibleConstraints.priorityLevels};
+  for (const stat of normalizedRequiredStats) {
+    if (!visibleConstraints.priorityLevels[stat]) visibleConstraints.priorityLevels[stat] = 1;
+  }
+  const qualityRank = rankStatRules(finalTotals, targets, visibleConstraints);
   // Deficit is rule-aware: an at-most stat below its cap is not "short" at all
   // (the cap is a ceiling, not a value to reach), so the optimizer never pushes
   // it up to the cap and the surplus stays available for other stats.
@@ -435,6 +450,7 @@ export function getUpgradeMetrics(
   const constraintExactViolations = STATS.filter(stat =>
     constraints.exact?.[stat] && finalTotals[stat] !== targets[stat]).length;
   return {
+    qualityRank,
     hardRulesSatisfied: constraintBoundaryViolations === 0 && constraintExactViolations === 0
       && STATS.every(stat => (!constraints.force0?.[stat] || finalTotals[stat] === 0)
         && (!constraints.le100?.[stat] || finalTotals[stat] <= 100)),
@@ -460,6 +476,9 @@ export function getUpgradeMetrics(
 }
 
 export function compareUpgradeMetrics(left, right) {
+  if (left.qualityRank && right.qualityRank) {
+    return compareScoreRanks(left.qualityRank, right.qualityRank);
+  }
   if (left.hardRulesSatisfied !== right.hardRulesSatisfied
       && left.hardRulesSatisfied !== undefined && right.hardRulesSatisfied !== undefined) {
     return left.hardRulesSatisfied ? -1 : 1;
@@ -512,6 +531,11 @@ export function compareUpgradeMetrics(left, right) {
   return 0;
 }
 
+export function compareUpgradeEvaluations(left, right) {
+  return compareUpgradeMetrics(left.metrics, right.metrics)
+    || compareAssignmentCosts(left.assignmentCost, right.assignmentCost);
+}
+
 function assignmentBudgets(pieces, onlyPlus5Tuning, {autoStatMods = false, modifierBudget = null} = {}) {
   if (modifierBudget) return [modifierBudget];
   if (!autoStatMods) return [getUpgradeModifierBudget(pieces, {reassignModifiers: true, onlyPlus5Tuning})];
@@ -519,42 +543,10 @@ function assignmentBudgets(pieces, onlyPlus5Tuning, {autoStatMods = false, modif
     ({numPlus5, numPlus10, numPlus3: onlyPlus5Tuning ? 0 : null}))).flat();
 }
 
-// The owned-witness contract permits an empty tuning socket. Reuse the exact
-// fixed-five oracle without changing its catalog domain: encode an empty slot
-// as forced Balanced on a base reduced by that Balanced contribution. The two
-// deltas cancel exactly; restore mode:none before verifying ORIGINAL pieces.
-// This is a bijection for each empty-slot mask, not a relaxed witness.
-function findEmptyTuningWitness(configs, tuningCapabilities, budgets, armorTarget, targets, fragments, checkpoint) {
-  for (let mask = 1; mask < 32; mask++) {
-    checkpoint?.(0);
-    const empty = configs.map((_, index) => Boolean(mask & (1 << index)));
-    const count = empty.filter(Boolean).length;
-    const shifted = configs.map((config, index) => !empty[index] ? config : {...config,
-      baseStats: Object.fromEntries(STATS.map(stat => [stat, config.baseStats[stat]
-        - Number(config.masterworkStats.includes(stat))]))});
-    const capabilities = tuningCapabilities.map((capability, index) => empty[index]
-      ? {allowBalanced: true, allowedDirectionalStats: []} : capability);
-    for (const budget of budgets) {
-      if (budget.numPlus3 != null && budget.numPlus3 + count > 5) continue;
-      const input = {configs: shifted, ...budget,
-        numPlus3: budget.numPlus3 == null ? null : budget.numPlus3 + count,
-        tuningCapabilities: capabilities, checkpoint};
-      let witness = findFixedTargetWitness({...input, target: armorTarget});
-      if (!witness && STATS.some(stat => targets[stat] === 0 || targets[stat] === 200)) {
-        witness = findFixedRuleWitness({...input,
-          minimums: STATS.map(stat => targets[stat] === 0 ? null : targets[stat] - (fragments[stat] || 0)),
-          maximums: STATS.map(stat => targets[stat] === 200 ? null : targets[stat] - (fragments[stat] || 0))});
-      }
-      if (witness) return {...witness, tuningAssignments: witness.tuningAssignments.map((tuning, index) =>
-        empty[index] ? {mode: 'none', from: null, to: null} : tuning)};
-    }
-  }
-  return null;
-}
-
 export function evaluateUpgradePieces(
   pieces, targets, fragments, reassignModifiers, requiredStats = [], onlyPlus5Tuning = false, userConstraints = {}, runtime = {}
 ) {
+  const costPieces = runtime.currentPieces || pieces;
   if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
   const normalizedRequiredStats = normalizeRequiredStats(requiredStats);
   const configs = pieces.map(getUpgradeConfig);
@@ -562,14 +554,9 @@ export function evaluateUpgradePieces(
     stat,
     Math.max(0, targets[stat] - (fragments[stat] || 0))
   ]));
-  // 至多/区间 values are CEILINGS, not goals to reach: score them against
-  // their floor (0 for a pure at-most) so mods/tuning never park surplus in a
-  // capped stat — the points flow to other targets instead.
-  const scoringTarget = Object.fromEntries(STATS.map(stat => {
-    const ceiling = userConstraints.maximums?.[stat];
-    if (ceiling === undefined) return [stat, armorTarget[stat]];
-    return [stat, userConstraints.minimums?.[stat] || 0];
-  }));
+  // Range-aware ranking itself gives a legal interval zero gap; retain the
+  // real target for any explicit exact rule intersecting that interval.
+  const scoringTarget = armorTarget;
   const constraints = getUpgradeEvaluationConstraints(armorTarget, normalizedRequiredStats, userConstraints);
   const manualArmorTotals = getManualUpgradeArmorTotals(pieces);
   const manualEvaluation = {
@@ -608,9 +595,6 @@ export function evaluateUpgradePieces(
         if (exact) break;
       }
     }
-    if (!exact && runtime.exactOnly && !onlyPlus5Tuning) {
-      exact = findEmptyTuningWitness(configs, tuningCapabilities, budgets, armorTarget, targets, fragments, runtime.checkpoint);
-    }
     if (exact && !getUpgradeMetrics(finalizeUpgradeTotals(exact.totals, fragments), targets,
       0, normalizedRequiredStats, null, userConstraints, fragments).hardRulesSatisfied) exact = null;
     // ponytail: fuzzy ranking is bounded to one heuristic budget; exact/rule
@@ -647,7 +631,9 @@ export function evaluateUpgradePieces(
           && (value.numPlus3 == null || value.numPlus3 === pieces.filter(piece => piece.tuningMode === 'plus3').length)));
       // Existence keeps the oracle's assignment even on a metric tie: a stale
       // installed direction can have identical totals but fail verification.
-      if (runtime.exactOnly || !manualKnown || compareUpgradeMetrics(automaticMetrics, manualMetrics) < 0) {
+      const metricOrder = compareUpgradeMetrics(automaticMetrics, manualMetrics);
+      if (runtime.exactOnly || !manualKnown || metricOrder < 0 || metricOrder === 0
+          && compareAssignmentCosts(getAssignmentCost(costPieces, automaticEvaluation), getAssignmentCost(costPieces, manualEvaluation)) < 0) {
         evaluation = automaticEvaluation;
       }
     }
@@ -684,7 +670,8 @@ export function evaluateUpgradePieces(
         const rank = scoreStatsRank(feasible.totals, scoringTarget, constraints);
         const score = scoreStats(feasible.totals, scoringTarget, constraints);
         const feasibleMetrics = getUpgradeMetrics(final, targets, score, normalizedRequiredStats, rank, userConstraints, fragments);
-        if (compareUpgradeMetrics(feasibleMetrics, metrics) < 0) return {...feasible, configs, finalTotals: final, rank, score, metrics: feasibleMetrics};
+        if (compareUpgradeMetrics(feasibleMetrics, metrics) < 0) return {...feasible, configs, finalTotals: final, rank, score,
+          metrics: feasibleMetrics, assignmentCost: getAssignmentCost(costPieces, feasible)};
       }
     }
   }
@@ -693,35 +680,136 @@ export function evaluateUpgradePieces(
     configs,
     finalTotals,
     metrics,
+    assignmentCost: getAssignmentCost(costPieces, evaluation),
   };
+}
+
+// Bounded, directly evaluated neighborhood: no recursive solver/oracle calls.
+// A completed single pass certifies only a one-piece local optimum, never a
+// global one. Pair moves preserve stat-mod counts and can relocate Balanced.
+export function refineUpgradeNeighborhood(pieces, targets, fragments, requiredStats = [], onlyPlus5Tuning = false,
+  userConstraints = {}, initial = null, runtime = {}) {
+  const costPieces = runtime.currentPieces || pieces;
+  let best = initial || evaluateUpgradePieces(pieces, targets, fragments, false, requiredStats, false, userConstraints);
+  const configs = pieces.map(getUpgradeConfig);
+  const armorTarget = Object.fromEntries(STATS.map(stat => [stat, Math.max(0, targets[stat] - (fragments[stat] || 0))]));
+  const constraints = getUpgradeEvaluationConstraints(armorTarget, requiredStats, userConstraints);
+  const options = pieces.map(piece => {
+    const capability = getUpgradeTuningCapability(piece, onlyPlus5Tuning);
+    return [{mode: 'none', from: null, to: null},
+      ...(capability.allowBalanced ? [{mode: '+3', from: null, to: null}] : []),
+      ...(capability.allowedDirectionalStats || []).flatMap(to => STATS.filter(from => from !== to)
+        .map(from => ({mode: '+5-5', from, to})))];
+  });
+  const started = performance.now();
+  const exhausted = Symbol('neighborhood-budget');
+  let checks = 0, singleComplete = false, pairComplete = false;
+  const inspect = (tuningAssignments, modAssignments) => {
+    if (++checks > (runtime.maxChecks ?? 12000) || performance.now() - started > (runtime.maxTimeMs ?? 30)) throw exhausted;
+    runtime.checkpoint?.(0);
+    if (Number.isInteger(runtime.modifierBudget?.numPlus3)
+        && tuningAssignments.filter(t => t.mode === '+3').length !== runtime.modifierBudget.numPlus3) return false;
+    const totals = Object.fromEntries(STATS.map(stat => [stat, 0]));
+    configs.forEach((config, index) => {
+      for (const stat of STATS) totals[stat] += config.baseStats[stat];
+      const tuning = tuningAssignments[index];
+      if (tuning.mode === '+3') for (const stat of config.masterworkStats) totals[stat]++;
+      else if (tuning.mode === '+5-5') { totals[tuning.from] -= 5; totals[tuning.to] += 5; }
+      const mod = modAssignments[index];
+      if (mod) totals[mod.stat] += mod.size;
+    });
+    const finalTotals = finalizeUpgradeTotals(totals, fragments);
+    const rank = scoreStatsRank(totals, armorTarget, constraints);
+    const score = scoreStats(totals, armorTarget, constraints);
+    const metrics = getUpgradeMetrics(finalTotals, targets, score, requiredStats, rank, userConstraints, fragments);
+    const candidate = {configs, totals, finalTotals, rank, score, metrics, tuningAssignments, modAssignments};
+    candidate.assignmentCost = getAssignmentCost(costPieces, candidate);
+    const order = compareUpgradeMetrics(metrics, best.metrics);
+    if (order > 0 || order === 0 && compareAssignmentCosts(candidate.assignmentCost,
+      best.assignmentCost || getAssignmentCost(costPieces, best)) >= 0) return false;
+    best = candidate;
+    runtime.onImprovement?.({...best, assignmentOptimal: false});
+    return true;
+  };
+  try {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      singleComplete = false;
+      outer: for (let index = 0; index < 5; index++) {
+        const mod = best.modAssignments[index];
+        for (const tuning of options[index]) for (const stat of mod ? STATS : [null]) {
+          const assignments = best.tuningAssignments.map((value, i) => i === index ? tuning : value);
+          const mods = {...best.modAssignments, [index]: mod ? {...mod, stat} : null};
+          if (inspect(assignments, mods)) { changed = true; break outer; }
+        }
+      }
+      if (changed) continue;
+      singleComplete = true;
+      if (!runtime.pairMoves) break;
+      pairs: for (let a = 0; a < 5; a++) for (let b = a + 1; b < 5; b++) {
+        // Swap two tuning assignments only if both immutable destinations
+        // permit the move; this covers relocating a fixed Balanced budget.
+        const matches = (left, right) => left.mode === right.mode && left.from === right.from && left.to === right.to;
+        if (options[a].some(t => matches(t, best.tuningAssignments[b]))
+            && options[b].some(t => matches(t, best.tuningAssignments[a]))) {
+          const assignments = [...best.tuningAssignments];
+          [assignments[a], assignments[b]] = [assignments[b], assignments[a]];
+          if (inspect(assignments, {...best.modAssignments})) { changed = true; break pairs; }
+        }
+        const modA = best.modAssignments[a], modB = best.modAssignments[b];
+        for (const swap of [false, true]) {
+          const first = swap ? modB : modA, second = swap ? modA : modB;
+          for (const statA of first ? STATS : [null]) for (const statB of second ? STATS : [null]) {
+            const mods = {...best.modAssignments, [a]: first ? {...first, stat: statA} : null,
+              [b]: second ? {...second, stat: statB} : null};
+            if (inspect([...best.tuningAssignments], mods)) { changed = true; break pairs; }
+          }
+        }
+      }
+      if (!changed) pairComplete = true;
+    }
+  } catch (error) { if (error !== exhausted) throw error; }
+  return {...best, assignmentOptimal: false, assignmentOptimalScope: 'local-neighborhood',
+    neighborhood: {singleComplete, pairComplete, checks, budgetLimited: !singleComplete || Boolean(runtime.pairMoves && !pairComplete)}};
 }
 
 // Exact refinement is explicitly local to these five pieces. The comparator
 // is the production Upgrade comparator, not a proxy scalar/armor-only score.
 export function refineUpgradeAssignment(pieces, targets, fragments, requiredStats = [], onlyPlus5Tuning = false,
   userConstraints = {}, initial = null, runtime = {}) {
+  const costPieces = runtime.currentPieces || pieces;
   if (onlyPlus5Tuning) pieces = coercePiecesToPlus5Only(pieces);
-  let best = initial || evaluateUpgradePieces(pieces, targets, fragments, true, requiredStats, onlyPlus5Tuning, userConstraints, runtime);
+  let best = initial || evaluateUpgradePieces(pieces, targets, fragments, true, requiredStats, onlyPlus5Tuning, userConstraints,
+    {...runtime, currentPieces: costPieces});
+  best = {...best, assignmentCost: getAssignmentCost(costPieces, best)};
   const configs = pieces.map(getUpgradeConfig);
   const budgets = assignmentBudgets(pieces, onlyPlus5Tuning, runtime);
   const armorTarget = Object.fromEntries(STATS.map(stat => [stat, Math.max(0, targets[stat] - (fragments[stat] || 0))]));
-  const scoringTarget = Object.fromEntries(STATS.map(stat => [stat,
-    userConstraints.maximums?.[stat] === undefined ? armorTarget[stat] : userConstraints.minimums?.[stat] || 0]));
+  const scoringTarget = armorTarget;
   const constraints = getUpgradeEvaluationConstraints(armorTarget, normalizeRequiredStats(requiredStats), userConstraints);
   const metricsFor = totals => getUpgradeMetrics(finalizeUpgradeTotals(totals, fragments), targets,
     scoreStats(totals, scoringTarget, constraints), requiredStats, scoreStatsRank(totals, scoringTarget, constraints), userConstraints, fragments);
   for (const budget of budgets) findBestFixedConfigWitness({configs, ...budget,
     requiredNumPlus3: budget.numPlus3,
     tuningCapabilities: pieces.map(piece => getUpgradeTuningCapability(piece, onlyPlus5Tuning)),
+    currentTuningAssignments: costPieces.map(piece => piece.tuningInstalled === false ? {mode: 'none'}
+      : piece.tuningMode === 'plus3' ? {mode: '+3'} : {mode: '+5-5', from: piece.tuningFrom, to: piece.tuningTo}),
+    currentModAssignments: Object.fromEntries(costPieces.map((piece, index) => [index,
+      piece.armorModSize ? {size: piece.armorModSize, stat: piece.armorModStat} : null])),
     rankTotals: metricsFor, compareRanks: compareUpgradeMetrics, checkpoint: runtime.checkpoint,
+    compareWitnesses: (left, right) => compareAssignmentCosts(getAssignmentCost(costPieces, left), getAssignmentCost(costPieces, right)),
     onWitness: witness => {
-      if (compareUpgradeMetrics(witness.rank, best.metrics) >= 0) return;
+      const metricOrder = compareUpgradeMetrics(witness.rank, best.metrics);
+      const assignmentCost = getAssignmentCost(costPieces, witness);
+      if (metricOrder > 0 || metricOrder === 0 && compareAssignmentCosts(assignmentCost, best.assignmentCost) >= 0) return;
       best = {...witness, configs, finalTotals: finalizeUpgradeTotals(witness.totals, fragments),
+        assignmentCost,
         metrics: witness.rank, rank: scoreStatsRank(witness.totals, scoringTarget, constraints),
         score: scoreStats(witness.totals, scoringTarget, constraints)};
       runtime.onImprovement?.(best);
     }});
-  return {...best, assignmentOptimal: pieces.every((piece, index) =>
+  return {...best, assignmentOptimalScope: 'quality-and-mathematical-socket-cost', assignmentOptimal: pieces.every((piece, index) =>
     getUpgradeTuningCapability(piece, onlyPlus5Tuning).complete && piece.dataConfidence?.stats !== 'unknown'
     && STATS.every(stat => Number.isSafeInteger(configs[index].baseStats[stat])))};
 }
@@ -732,7 +820,8 @@ export function getUpgradeMathKey(pieces, onlyPlus5Tuning = false) {
     piece.armorModSize, piece.armorModStat]));
 }
 
-function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuning = false, userConstraints = {}, search = null) {
+function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuning = false, userConstraints = {}, search = null,
+  currentPieces = null) {
   const cache = new Map();
   const constraintsKey = JSON.stringify(userConstraints);
   return (pieces, reassignModifiers) => {
@@ -745,6 +834,8 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
       piece.armorModSize,
       piece.exotic,
       piece.tuningUnknown,
+      piece.dataConfidence?.tuning,
+      piece.tuningConfidence,
       piece.tuningInstalled,
       ...[
         piece.tuningMode,
@@ -757,7 +848,8 @@ function createUpgradeEvaluator(targets, fragments, requiredStats, onlyPlus5Tuni
     const cached = cache.get(key);
     if (cached) return cached;
     const evaluation = evaluateUpgradePieces(
-      pieces, targets, fragments, reassignModifiers, requiredStats, onlyPlus5Tuning, userConstraints, {checkpoint: search?.checkpoint}
+      pieces, targets, fragments, reassignModifiers, requiredStats, onlyPlus5Tuning, userConstraints,
+      {checkpoint: search?.checkpoint, currentPieces}
     );
     cache.set(key, evaluation);
     search?.evaluated?.(pieces, evaluation);
@@ -929,25 +1021,8 @@ export function compareUpgradePlans(left, right) {
   if (left.metrics.allReached && left.replacementCount !== right.replacementCount) {
     return left.replacementCount - right.replacementCount;
   }
-  // Only partial plans reach this block. Required stats then define their
-  // fallback priority before overall distance and farming cost.
-  const hasRequiredStats = Math.max(
-    left.metrics.requiredCount || 0, right.metrics.requiredCount || 0
-  ) > 0;
-  if (hasRequiredStats) {
-    if (left.metrics.requiredAllReached !== right.metrics.requiredAllReached) {
-      return left.metrics.requiredAllReached ? -1 : 1;
-    }
-    if (left.metrics.requiredShortfall !== right.metrics.requiredShortfall) {
-      return left.metrics.requiredShortfall - right.metrics.requiredShortfall;
-    }
-    if (left.metrics.requiredMaxShortfall !== right.metrics.requiredMaxShortfall) {
-      return left.metrics.requiredMaxShortfall - right.metrics.requiredMaxShortfall;
-    }
-    if (left.metrics.requiredReachedCount !== right.metrics.requiredReachedCount) {
-      return right.metrics.requiredReachedCount - left.metrics.requiredReachedCount;
-    }
-  }
+  // Required and explicit tiers have already been normalized by the shared
+  // rule-quality comparator. Do not insert a second incompatible ordering.
   const metricOrder = compareUpgradeMetrics(left.metrics, right.metrics);
   if (metricOrder !== 0) return metricOrder;
   if (left.replacementCount !== right.replacementCount) {
@@ -959,6 +1034,9 @@ export function compareUpgradePlans(left, right) {
   const leftNonTuningOnly = (left.replacements || []).filter(r => !r.tuningOnly).length;
   const rightNonTuningOnly = (right.replacements || []).filter(r => !r.tuningOnly).length;
   if (leftNonTuningOnly !== rightNonTuningOnly) return leftNonTuningOnly - rightNonTuningOnly;
+  const costOrder = compareAssignmentCosts(left.assignmentCost || left.evaluation?.assignmentCost,
+    right.assignmentCost || right.evaluation?.assignmentCost);
+  if (costOrder) return costOrder;
   return createCanonicalId(left).localeCompare(createCanonicalId(right));
 }
 
@@ -1105,9 +1183,9 @@ export function applyUpgradeEvaluationToPieces(pieces, evaluation) {
     }
     return normalizeUpgradePiece({
       ...piece,
-      tuningMode: tuning && tuning.mode === '+3' ? 'plus3' : 'shift',
-      tuningFrom: tuning && tuning.from ? tuning.from : piece.tuningFrom,
-      tuningTo: tuning && tuning.to ? tuning.to : piece.tuningTo,
+      tuningMode: tuning?.mode === 'none' ? 'none' : tuning?.mode === '+3' ? 'plus3' : 'shift',
+      tuningFrom: tuning ? tuning.from ?? null : piece.tuningFrom,
+      tuningTo: tuning ? tuning.to ?? null : piece.tuningTo,
       tuningInstalled: tuning?.mode === 'none' ? false : tuning ? true : piece.tuningInstalled,
       armorModSize: mod ? mod.size : 0,
       armorModStat: mod ? mod.stat : piece.armorModStat,
@@ -1174,7 +1252,7 @@ export function buildUpgradePlanSteps(
 // such a witness back into real upgrade pieces, while retaining owned
 // Legendary armor only when its frame, tertiary, and immutable tunedStat all
 // match. Installed mode/source/destination are assignment state.
-function findFromScratchUpgradeWitness(
+export function findFromScratchUpgradeWitness(
   pieces, targets, fragments, reassignModifiers, requiredStats, userConstraints,
   evaluatePieces, onlyPlus5Tuning = false, search = null,
 ) {
@@ -1259,12 +1337,12 @@ function findFromScratchUpgradeWitness(
         const config = solution.config[descriptorIndex];
         const tuning = solution.tuningAssignments[descriptorIndex];
         const mod = solution.modAssignments[descriptorIndex];
-        const tuningMode = tuning?.mode === '+3' ? 'plus3' : 'shift';
+        const tuningMode = tuning?.mode === 'none' ? 'none' : tuning?.mode === '+3' ? 'plus3' : 'shift';
         const currentConfig = getUpgradeConfig(piece);
         const capability = getUpgradeTuningCapability(piece, onlyPlus5Tuning);
         const keepsOwnedPiece = sameUpgradeConfig(currentConfig, config)
-          && (tuningMode === 'plus3'
-            ? capability.allowBalanced
+          && (tuningMode === 'none' ? capability.allowNone !== false
+            : tuningMode === 'plus3' ? capability.allowBalanced
             : capability.allowedDirectionalStats?.includes(tuning?.to));
         if (piece.locked && !keepsOwnedPiece) compatible = false;
         const configured = keepsOwnedPiece
@@ -1283,6 +1361,7 @@ function findFromScratchUpgradeWitness(
               ? configured.tunedStat
               : tuningMode === 'shift' ? tuning?.to : STATS[0]],
           tuningMode,
+          tuningInstalled: tuningMode !== 'none',
           tuningFrom: tuning?.from || configured.tuningFrom,
           tuningTo: tuning?.to || configured.tuningTo,
           armorModSize: mod?.size || 0,
@@ -1474,7 +1553,8 @@ function searchUpgradeReplacementDepths(
                 : [keepOwned
                   ? configured.tunedStat
                   : tuning.mode === "+5-5" ? tuning.to : STATS[0]],
-              tuningMode: tuning.mode === "+3" ? "plus3" : "shift",
+              tuningMode: tuning.mode === 'none' ? 'none' : tuning.mode === "+3" ? "plus3" : "shift",
+              tuningInstalled: tuning.mode !== 'none',
               tuningFrom: tuning.from,
               tuningTo: tuning.to,
               tuningUnknown: false,
@@ -1731,7 +1811,7 @@ export function analyzeUpgradeCandidates(
   let observeCandidate = null;
   const monitoredSearch = search ? {checkpoint: search.checkpoint, evaluated: (candidate, evaluation) => observeCandidate?.(candidate, evaluation)} : null;
   const evaluatePieces = createUpgradeEvaluator(
-    targets, fragments, normalizedRequiredStats, onlyPlus5Tuning, userConstraints, monitoredSearch
+    targets, fragments, normalizedRequiredStats, onlyPlus5Tuning, userConstraints, monitoredSearch, enteredPieces
   );
   const enteredBaseline = onlyPlus5Tuning
     ? evaluateUpgradePieces(enteredPieces, targets, fragments, false, normalizedRequiredStats, false, userConstraints)
@@ -1745,7 +1825,7 @@ export function analyzeUpgradeCandidates(
   search?.publish(partial(null));
   let incumbent = baseline;
   observeCandidate = (candidate, evaluation) => {
-    if (compareUpgradeMetrics(evaluation.metrics, incumbent.metrics) >= 0) return;
+    if (compareUpgradeEvaluations(evaluation, incumbent) >= 0) return;
     incumbent = evaluation;
     const replacements = getUpgradeReplacements(pieces, candidate);
     search?.publish(partial({pieces: candidate, evaluation, metrics: evaluation.metrics,
@@ -1769,22 +1849,36 @@ export function analyzeUpgradeCandidates(
   let plan = null;
   try {
   if (reassignModifiers) {
-    baseline = evaluatePieces(pieces, true);
+    // Spend a small independent slice on cheap legal moves before a cold
+    // oracle/frontier can exhaust the request budget. Each improvement is
+    // published, so cancellation preserves the improved incumbent.
+    baseline = refineUpgradeNeighborhood(pieces, targets, fragments, normalizedRequiredStats,
+      onlyPlus5Tuning, userConstraints, baseline, {maxTimeMs: 30, pairMoves: true,
+        currentPieces: enteredPieces,
+        checkpoint: search?.checkpoint,
+        onImprovement: value => { baseline = value; incumbent = value; search?.publish(partial(null)); }});
+    incumbent = baseline;
+    const automatic = evaluatePieces(pieces, true);
+    if (compareUpgradeEvaluations(automatic, baseline) < 0) baseline = automatic;
     incumbent = baseline;
     search?.publish(partial(null));
   }
-  if (reassignModifiers && !baseline.metrics.allReached) {
+  if (reassignModifiers) {
     const stopRefinement = Symbol('local-refinement-budget');
     const deadline = performance.now() + (search?.runtimeOptions?.fastMode ? 10 : 100);
     try {
       baseline = refineUpgradeAssignment(pieces, targets, fragments, normalizedRequiredStats, onlyPlus5Tuning, userConstraints, baseline, {
+        currentPieces: enteredPieces,
         checkpoint: () => {
           search?.checkpoint(0);
           if (performance.now() >= deadline) throw stopRefinement;
         },
         onImprovement: value => { baseline = value; incumbent = value; search?.publish(partial(null)); },
       });
-    } catch (error) { if (error !== stopRefinement) throw error; }
+    } catch (error) {
+      if (error !== stopRefinement) throw error;
+      baseline = {...baseline, assignmentOptimal: false, assignmentOptimalScope: 'fixed-five-budget-limited'};
+    }
   }
   if (!baseline.metrics.allReached) {
     // Establish a feasible upper bound before spending the interactive budget
@@ -1814,7 +1908,7 @@ export function analyzeUpgradeCandidates(
     // fallback search.
     const allStatsRequired = normalizedRequiredStats.length === STATS.length;
     const fullTargetCacheKey = getFullTargetSearchKey(
-      pieces, targets, fragments, reassignModifiers, onlyPlus5Tuning, userConstraints
+      enteredPieces, targets, fragments, reassignModifiers, onlyPlus5Tuning, userConstraints
     );
     let fullTargetSearch = fullTargetSearchCache.has(fullTargetCacheKey)
       ? structuredClone(fullTargetSearchCache.get(fullTargetCacheKey)) : null;
@@ -1826,7 +1920,7 @@ export function analyzeUpgradeCandidates(
     if (!fullTargetSearch) {
       const fullTargetEvaluator = allStatsRequired
         ? evaluatePieces
-        : createUpgradeEvaluator(targets, fragments, STATS, onlyPlus5Tuning, userConstraints, search);
+        : createUpgradeEvaluator(targets, fragments, STATS, onlyPlus5Tuning, userConstraints, search, enteredPieces);
       const fullTargetBaseline = allStatsRequired
         ? baseline
         : fullTargetEvaluator(pieces, reassignModifiers);

@@ -67,7 +67,8 @@ in Simplified Chinese, Traditional Chinese, and English.
 - **Unified results:** rank plans by rule satisfaction and ownership, with piece details, farming needs,
   replacement steps, and advanced diagnostics.
 - **Saved builds:** search, load, rename, and delete with undo. Stale snapshots prompt a new search instead of being deleted.
-- **Staged search:** progress, cancellation, and selectable budgets; web and desktop computation uses Web Workers.
+- **Tuning and rule quality:** optional empty Tuning sockets, satisfied-rule count before gap within each priority, and separate installation/change costs.
+- **Staged search:** progress, cancellation, and selectable budgets; web, desktop, and file:// offline solving and inventory matching use Web Workers.
 - **Three languages:** Simplified Chinese, Traditional Chinese, and English, with a standalone guide and responsive layouts.
 
 ## Reading solver results

@@ -4,12 +4,17 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 import { solveLoadout } from '../src/core/armor-engine.mjs';
+import {compareAssignmentCosts} from '../src/core/assignment-cost.mjs';
+import {rankStatRules} from '../src/core/stat-ranking.mjs';
+import {STATS} from '../src/core/armor-model.mjs';
+import {createProblemSpec} from '../src/core/solver-v3-contract.mjs';
 
 // The unified list projects two different result shapes (inventory witnesses and
 // theoretical owned/farm skeletons) into one entry. Its ordering and identity
 // are pure functions, so they are extracted and exercised directly.
 const source = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
 const context = vm.createContext({
+  compareAssignmentCosts, rankStatRules, STATS,
   // `normalizeTheoryPlan` asks the sealed witness whether the six stats satisfy
   // the rules; the physical owned/farm + set mapping is a separate question.
   certifiedFeasible: () => true,
@@ -19,6 +24,8 @@ vm.runInContext([
   'unifiedPieceIdentity',
   'unifiedEntryKey',
   'compareUnifiedEntries',
+  'unifiedQualityRank',
+  'normalizeInventoryEntry',
   'normalizeTheoryPlan',
   'planCounts',
 ].map(name => source.slice(source.indexOf(`function ${name}(`)).split('\nfunction ')[0]).join('\n'), context);
@@ -56,6 +63,35 @@ test('the unified list prefers exact matches, then fuller owned armor', () => {
     'an exact match must outrank a rule-feasible one');
   assert.ok(context.compareUnifiedEntries(entry({...base, ownedCount: 4, farmCount: 1}), base) < 0,
     'a fuller owned set must outrank a thinner one at equal feasibility');
+});
+
+test('cross-source near misses rank by shared visible quality before ownership or exact labels', () => {
+  const poor = context.normalizeInventoryEntry({pieces: Array.from({length: 5}, (_, i) => ({slot: String(i)})),
+    metrics: {qualityRank: [1, 0, 0, 0, 0, 0, 0, 2, 5]}, rank: Array(9).fill(0),
+    certificate: {status: 'SEARCH_LIMIT_REACHED'}});
+  poor.feasible = false;
+  const better = context.normalizeTheoryPlan({solution: {rank: [1, 0, 0, 0, 0, 0, 0, 1, 20],
+    certificate: {status: 'SEARCH_LIMIT_REACHED'}}, feasible: false, pieces: [], ownedCount: 2, farmCount: 3});
+  assert.deepEqual(poor.rank, [1, 0, 0, 0, 0, 0, 0, 2, 5]);
+  assert.ok(context.compareUnifiedEntries(better, poor) < 0, 'one unmet rule beats two despite fewer owned items');
+  assert.ok(context.compareUnifiedEntries(better, {...poor, exact: true}) < 0,
+    'an exact label on a non-feasible mapping cannot override quality');
+});
+
+test('equal-quality equal-ownership plans prefer fewer tuning mods then stable witness identity', () => {
+  const cost = n => ({installedTuningCount: n, changedSocketCount: n, armorModPoints: 50, armorModCount: 5});
+  const fewer = entry({feasible: true, ownedCount: 5, assignmentCost: cost(2), witness: {canonicalId: 'z'}});
+  const more = entry({...fewer, assignmentCost: cost(5), witness: {canonicalId: 'a'}});
+  assert.ok(context.compareUnifiedEntries(fewer, more) < 0);
+  assert.ok(context.compareUnifiedEntries({...fewer, witness: {canonicalId: 'a'}}, fewer) < 0);
+});
+
+test('theory quality uses the same visible clamp and fragment domain as inventory quality', () => {
+  const spec = createProblemSpec({target: {health: 200}, fragments: {health: 30}, targetDomain: 'visible',
+    constraints: {exact: {health: true}}});
+  const witness = {problemSpec: spec, armorTotals: Object.fromEntries(STATS.map(s => [s, s === 'health' ? 180 : 0])),
+    rank: [1, 0, 0, 0, 0, 0, 0, 1, 10]};
+  assert.deepEqual([...context.unifiedQualityRank(witness)], Array(9).fill(0));
 });
 
 test('the unified dedup key separates owned instances from farm gaps', () => {

@@ -83,7 +83,11 @@ for (const reassignModifiers of [false, true]) {
     );
     pieces.forEach((piece, index) => {
       const tuning = rearranged.tuningAssignments[index];
-      if (tuning.mode === '+3') return;
+      if (tuning.mode === '+3' || tuning.mode === 'none') {
+        assert.strictEqual(tuning.from, null, `${label}: stale tuning source`);
+        assert.strictEqual(tuning.to, null, `${label}: stale tuning destination`);
+        return;
+      }
       assert.strictEqual(tuning.mode, '+5-5', `${label}: slot ${index} has an invalid tuning mode`);
       assert.notStrictEqual(tuning.from, tuning.to, `${label}: slot ${index} tunes from and to the same stat`);
       if (piece.exotic) {
@@ -112,6 +116,7 @@ for (const reassignModifiers of [false, true]) {
         tuningMode: assignment.tuningMode,
         tuningFrom: assignment.tuningFrom,
         tuningTo: assignment.tuningTo,
+        tuningInstalled: assignment.tuningInstalled,
         armorModSize: piece.armorModSize,
         armorModStat: piece.armorModStat,
       }, index);

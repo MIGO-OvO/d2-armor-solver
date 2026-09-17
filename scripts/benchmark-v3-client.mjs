@@ -252,6 +252,7 @@ const rows = [];
   }
 }
 
+client.cancelAllSearches({dispose: true});
 globalThis.Worker = originalWorker;
 for (const worker of live) worker.terminate();
 for (const row of rows) console.log(JSON.stringify(row));

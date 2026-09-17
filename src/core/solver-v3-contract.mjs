@@ -1,4 +1,5 @@
 import { ARCHETYPES, BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
+import { TUNING_DOMAIN_ID, getTuningCost } from './tuning-domain.mjs';
 
 export const SOLVER_V3_SCHEMA_VERSION = 3;
 
@@ -659,7 +660,7 @@ export function createRulesetId(problemSpec) {
       return cached.id;
     }
   }
-  const id = `solver-v3-proof-v1:${stableSerialize({
+  const id = `solver-v3-proof-v2:${TUNING_DOMAIN_ID}:${stableSerialize({
     operation: problemSpec?.operation,
     ...inputs,
   })}`;
@@ -1002,7 +1003,7 @@ export function verifyWitness(problemSpec, witness) {
           armorTotals[assignment.from] -= 5;
           armorTotals[assignment.to] += 5;
         }
-      } else if (mode !== "none" || !ownedOperation) {
+      } else if (mode !== "none") {
         errors.push(`witness tuning ${index} is missing or unknown`);
       }
       if (source && inventoryContext?.reassignModifiers === false && !inventoryContext?.onlyPlus5Tuning) {
@@ -1012,7 +1013,7 @@ export function verifyWitness(problemSpec, witness) {
         const assignedMod = mods?.[index];
         if ((assignedMod?.size || 0) !== source.armorModSize || assignedMod && assignedMod.stat !== source.armorModStat) errors.push("armor mod reassignment is disabled");
       }
-      if (inventoryContext?.onlyPlus5Tuning && mode !== "+5-5" && mode !== "shift") {
+      if (inventoryContext?.onlyPlus5Tuning && (mode === "+3" || mode === "plus3")) {
         errors.push(`witness tuning ${index} violates onlyPlus5Tuning`);
       }
 
@@ -1116,6 +1117,7 @@ export function verifyWitness(problemSpec, witness) {
     armorTotals: { ...armorTotals },
     visibleTotals: { ...visibleTotals },
     fragments: { ...fragments },
+    tuningCost: getTuningCost(tuning),
   } : null;
   return {
     valid,

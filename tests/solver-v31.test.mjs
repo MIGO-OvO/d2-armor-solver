@@ -87,7 +87,7 @@ const target = rebuildReference(pieces, pieces.map(() => ({mode: '+3'})), {}).vi
 
 test('partial interval oracle agrees with an independent finite assignment/config enumeration', () => {
   const fixed = BASE_CONFIGS.slice(0, 4);
-  const fixedEntries = fixed.map(config => ({config, allowBalanced: true, allowedDirectionalStats: []}));
+  const fixedEntries = fixed.map(config => ({config, allowBalanced: true, allowNone: false, allowedDirectionalStats: []}));
   const alternatives = BASE_CONFIGS.flatMap(config => STATS.map(stat => {
     const configs = [...fixed, config];
     return rebuildReference(configs, configs.map(() => ({mode: '+3'})), {0: {size: 5, stat}}).armor;
@@ -116,9 +116,12 @@ test('fixed-five refinement matches exhaustive assignments under the production 
   const target = {health: 80, melee: 80, grenade: 80, super: 80, class: 80, weapons: 80};
   const constraints = {priorityLevels: {health: 1}};
   let expected = null;
-  const actions = [{mode: '+3'}, ...STATS.filter(stat => stat !== 'health').map(from => ({mode: '+5-5', from, to: 'health'}))];
-  for (const a of actions) for (const b of actions) for (const stat of STATS) {
-    const totals = rebuildReference(configs, [a, b, {mode: '+3'}, {mode: '+3'}, {mode: '+3'}], {0: {size: 5, stat}}).visible;
+  const empty = {mode: 'none', from: null, to: null};
+  const balanced = {mode: '+3', from: null, to: null};
+  const actions = [empty, balanced, ...STATS.filter(stat => stat !== 'health').map(from => ({mode: '+5-5', from, to: 'health'}))];
+  for (const a of actions) for (const b of actions) for (const tailMask of [0, 1, 2, 3, 4, 5, 6, 7]) for (const stat of STATS) {
+    const tail = Array.from({length: 3}, (_, index) => tailMask & (1 << index) ? balanced : empty);
+    const totals = rebuildReference(configs, [a, b, ...tail], {0: {size: 5, stat}}).visible;
     const metrics = getUpgradeMetrics(totals, target, 0, [], scoreStatsRank(totals, target, constraints), constraints, ZERO);
     if (!expected || compareUpgradeMetrics(metrics, expected) < 0) expected = metrics;
   }

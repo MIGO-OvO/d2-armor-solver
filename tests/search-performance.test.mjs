@@ -27,9 +27,11 @@ test('coupled pressure vectors preserve destination, Balanced and empty legality
   const piece = fixture('small').items[0];
   const base = STATS.map(s => getUpgradeConfig(piece).baseStats[s]);
   const vectors = pressureVectors(piece, true);
-  assert.equal(vectors.length, 5);
+  assert.equal(vectors.length, 6);
+  assert.deepEqual(vectors[0], base, 'directional-only permits an empty socket');
   for (const v of vectors) {
     const diff = v.map((x, i) => x - base[i]);
+    if (diff.every(x => x === 0)) continue;
     assert.equal(diff[STATS.indexOf(piece.tunedStat)], 5);
     assert.equal(diff.reduce((a, b) => a + b), 0);
     assert.equal(diff.filter(x => x === -5).length, 1);

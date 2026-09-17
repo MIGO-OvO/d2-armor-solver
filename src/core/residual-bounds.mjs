@@ -34,8 +34,8 @@ export function createResidualBounds(rows, rules, reassign, onlyPlus5 = false, g
       const cap = getUpgradeTuningCapability(piece, onlyPlus5);
       const base = STATS.map(stat => config.baseStats[stat]);
       vectors = [STATS.map(stat => manual[stat] - (piece.armorModStat === stat ? piece.armorModSize || 0 : 0))];
-      // Empty tuning is legal for owned armor when directional-only is off.
-      if (!onlyPlus5) vectors.push(base);
+      // The +5/-5-only switch excludes Balanced, not an empty socket.
+      vectors.push(base);
       if (cap.allowBalanced) vectors.push(base.map((value, index) => value + Number(config.masterworkStats.includes(STATS[index]))));
       for (const to of cap.allowedDirectionalStats || []) for (const from of STATS) {
         if (from !== to) vectors.push(base.map((value, index) => value + 5 * (Number(STATS[index] === to) - Number(STATS[index] === from))));

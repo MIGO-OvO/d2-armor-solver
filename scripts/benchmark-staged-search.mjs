@@ -31,4 +31,4 @@ for (const searchProfile of ["fast", "balanced", "deep"]) {
       ...result.search, events}));
   }
 }
-cancelAllSearches();
+cancelAllSearches({dispose: true});
