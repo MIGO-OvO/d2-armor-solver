@@ -217,10 +217,12 @@ This documentation update does not change the authentication implementation.
 
 ## Version and technical documentation
 
-The current source version is **v3.1.0**, including exact-target interval queries, inventory search optimizations,
-the unified plan workspace, cross-channel saved builds, and the standalone three-language guide.
+The current source version is **v3.1.1**, building on the v3.1.0 exact-target interval queries, inventory search
+optimizations, unified plan workspace, cross-channel saved builds, and the standalone three-language guide. It fixes
+cross-save selection and failed persistence, aligns search states with keyboard interaction, and further compacts
+proofs, reuses prepared inventory domains, and defers inventory catalog loading.
 
-- [v3.1.0 release notes](docs/release-notes-v3.1.0.md) · [All releases](https://github.com/MIGO-OvO/d2-armor-solver/releases)
+- [v3.1.1 release notes](docs/release-notes-v3.1.1.md) · [All releases](https://github.com/MIGO-OvO/d2-armor-solver/releases)
 - [V3.1 optimization and methodology](docs/solver-v31-optimization.md) · [Raw benchmarks](docs/benchmarks/solver-v31.json)
 - [Algorithm optimizations](docs/algorithm-optimization.md) · [Parallel inventory validation](docs/parallel-inventory-validation.md)
 
