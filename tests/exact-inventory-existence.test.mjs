@@ -21,7 +21,8 @@ test('large quotient with compatible residues exhausts exact existence despite e
   assert.equal(stats.exactExistence, 'exhausted');
   assert.equal(stats.exactPrunedResidues, 0);
   assert.ok(stats.exactGroups.reduce((a, b) => a * b, 1) >= 100000);
-  assert.ok(stats.exactStates > 1000);
+  assert.equal(stats.exactStates, 1, 'conserved total rejects before quotient expansion');
+  assert.equal(stats.exactPrunedTotals, 1);
   assert.equal(result.certificate.proof.complete, false);
   t.diagnostic(JSON.stringify({groups: stats.exactGroups, states: stats.exactStates,
     evaluations: stats.mathEvaluations}));

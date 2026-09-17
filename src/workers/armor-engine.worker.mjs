@@ -8,6 +8,7 @@ import {
   mergeInventoryRequest,
 } from "../core/armor-engine.mjs";
 import {createSearchSession, withSearchProfile, SearchBudgetExceeded} from "../core/search-session.mjs";
+import {createPreparedInventoryMerge} from '../core/prepared-inventory.mjs';
 
 const operations = Object.freeze({
   solve: solveLoadout,
@@ -16,7 +17,7 @@ const operations = Object.freeze({
   calculateReachability,
   solveInventory,
   rankInventoryPlans: rankOwnedArmorPlans,
-  mergeInventoryShardResults: mergeInventoryRequest,
+  mergeInventoryShardResults: createPreparedInventoryMerge(mergeInventoryRequest),
 });
 
 self.addEventListener("message", ({ data }) => {

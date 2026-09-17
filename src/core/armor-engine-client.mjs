@@ -197,7 +197,8 @@ function run(operation, input, {onProgress = null, signal = null, forceInline = 
 async function runWithTransportFallback(operation, payload, options = {}) {
   let failures = 0;
   for (;;) {
-    const pending = run(operation, payload, {...options, forceInline: options.forceInline || failures >= 2});
+    const pending = run(operation, failures ? options.retryPayload || payload : payload,
+      {...options, forceInline: options.forceInline || failures >= 2});
     const generation = generations.get(operation);
     try {
       const result = await pending;
@@ -272,7 +273,24 @@ export async function solveInventoryParallelAsync(payload, {parallelism, shardCo
   let finalizingMerge = false;
   let progressiveTask = Promise.resolve();
   const positiveWitnesses = new Set();
-  const merge = (parts) => mergeInventoryResultsAsync({request, parts, count}, {signal: controller.signal});
+  let preparedMergeWorker = null;
+  const merge = async parts => {
+    const worker = workers.get('mergeInventoryShardResults');
+    const reuse = worker && worker === preparedMergeWorker;
+    const send = includeRequest => mergeInventoryResultsAsync({requestId: batch,
+      ...(includeRequest ? {request} : {}), parts, count}, {signal: controller.signal,
+      retryPayload: {requestId: batch, request, parts, count}});
+    let result;
+    try { result = await send(!reuse); }
+    catch (error) {
+      // Transport recovery may replace a Worker between messages. Re-register
+      // only on an explicit cache miss; solver failures and aborts propagate.
+      if (error.name !== 'MissingPreparedInventoryError' || controller.signal.aborted) throw error;
+      result = await send(true);
+    }
+    preparedMergeWorker = workers.get('mergeInventoryShardResults') || null;
+    return result;
+  };
   const active = () => !controller.signal.aborted && inventoryBatch === controller;
   // `nodes` is the aggregate across shards; each shard owns the FULL profile
   // budget (maxNodes / maxEvaluations / maxStates / maxTimeMs). The search

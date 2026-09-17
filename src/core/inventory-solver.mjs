@@ -4,7 +4,7 @@ import {STAT_DOMAIN, createPieceCapability, createProblemSpec, createProofEviden
 import {applyManualUpgradeModifiers, compareUpgradeMetrics, createUpgradePieceFromItem,
   evaluateUpgradePieces, getUpgradeConfig, getUpgradeTuningCapability} from "./upgrade-optimizer.mjs";
 import {getUpgradeMathKey, refineUpgradeAssignment, refineUpgradeNeighborhood} from './upgrade-optimizer.mjs';
-import {createResidualBounds, createInventoryResidueBounds} from './residual-bounds.mjs';
+import {createResidualBounds, createInventoryResidueBounds, createInventoryTotalBounds} from './residual-bounds.mjs';
 import {createStatPressure} from './stat-pressure.mjs';
 import {compareAssignmentCosts, getAssignmentCost} from './assignment-cost.mjs';
 
@@ -247,6 +247,9 @@ export function solveInventoryLoadout({
     searchStats.exactGroups = quotient.map(row => row.length);
     searchStats.exactStates = 0;
     searchStats.exactPrunedResidues = 0;
+    searchStats.exactPrunedTotals = 0;
+    const totals = createInventoryTotalBounds(quotient.map(row => row.map(group => group[0])),
+      rules, onlyPlus5Tuning, modifierBudget, autoStatMods);
     const residues = createInventoryResidueBounds(quotient.map(row => row.map(group => group[0])), rules, onlyPlus5Tuning);
     const selected = Array(5);
     const expand = depth => {
@@ -262,6 +265,7 @@ export function solveInventoryLoadout({
       checkpoint(0);
       if (exactCount) return;
       searchStats.exactStates++;
+      if (totals && !totals.canReach(depth)) { searchStats.exactPrunedTotals++; return; }
       if (residues && !residues.canReach(depth)) { searchStats.exactPrunedResidues++; return; }
       if (!canReachRules(depth) || joint && !joint.canReach(depth)) return;
       if (minimumCoverage.some((value, index) => cover[index] + suffix[depth].cover[index] < value)) return;
@@ -279,6 +283,7 @@ export function solveInventoryLoadout({
         const exoticCount = exotics + Number(candidate.piece.exotic);
         if (exoticCount > 1 || classId && candidate.piece.classId && classId !== candidate.piece.classId) continue;
         selected[depth] = group;
+        totals?.add(candidate, 1);
         joint?.add(candidate, 1);
         residues?.push(candidate);
         for (let index = 0; index < 6; index++) {
@@ -286,6 +291,7 @@ export function solveInventoryLoadout({
         }
         walk(depth + 1, exoticCount, cover.map((value, index) => value + candidate.cover[index]), classId || candidate.piece.classId);
         joint?.add(candidate, -1);
+        totals?.add(candidate, -1);
         residues?.pop();
         for (let index = 0; index < 6; index++) {
           partialMin[index] -= candidate.min[index]; partialMax[index] -= candidate.max[index];

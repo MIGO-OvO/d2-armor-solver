@@ -5,6 +5,7 @@ import {solveInventory, mergeInventoryRequest} from "../src/core/armor-engine.mj
 import {Worker as NodeWorker} from "node:worker_threads";
 import {crowdedDimRequest} from './helpers/dim-exact-inventory.mjs';
 import {fixture as performanceFixture} from '../scripts/fixtures/search-performance.mjs';
+import {createPreparedInventoryMerge} from '../src/core/prepared-inventory.mjs';
 
 const slots = ["helmet", "arms", "chest", "legs", "classItem"];
 function request(count = 2) {
@@ -24,14 +25,15 @@ function request(count = 2) {
 class ControlledWorker {
   static instances = [];
   static mergeFailure = null;
-  constructor() { this.events = {}; this.requests = []; ControlledWorker.instances.push(this); }
+  constructor() { this.events = {}; this.requests = []; this.merge = createPreparedInventoryMerge(mergeInventoryRequest); ControlledWorker.instances.push(this); }
   addEventListener(name, callback) { this.events[name] = callback; }
   postMessage(data) {
+    data = structuredClone(data);
     this.requests.push(data);
     if (data.operation === 'mergeInventoryShardResults') queueMicrotask(() => {
       try {
         if (ControlledWorker.mergeFailure) throw ControlledWorker.mergeFailure;
-        this.reply(data, mergeInventoryRequest(data.payload));
+        this.reply(data, this.merge(data.payload));
       } catch (error) {
         this.events.message({data: {...data, type: 'error', error: {name: error.name, message: error.message, stack: error.stack}}});
       }
@@ -116,6 +118,11 @@ test('repeated positives do not trigger whole-vault progressive remerges; final 
   assert.ok(result.results.every(row => row.certificate.witnessVerification.valid));
   assert.equal(result.certificate.proof.complete, false);
   assert.ok(result.search.finalMergeMs > 0);
+  const merges = ControlledWorker.instances.flatMap(worker => worker.requests)
+    .filter(message => message.operation === 'mergeInventoryShardResults');
+  assert.ok(merges.length >= 2);
+  assert.ok(merges[0].payload.request);
+  assert.ok(merges.slice(1).every(message => !message.payload.request), 'registered vault crosses IPC only once');
 });
 
 test('final merge errors retain the exception and merge classification', async t => {

@@ -1,5 +1,6 @@
 import { ARCHETYPES, BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
 import { TUNING_DOMAIN_ID, getTuningCost } from './tuning-domain.mjs';
+import {proofFingerprint} from './proof-fingerprint.mjs';
 
 export const SOLVER_V3_SCHEMA_VERSION = 3;
 
@@ -629,7 +630,7 @@ export function stableSerialize(value) {
   return `{${keys.map(key => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(",")}}`;
 }
 
-// The ruleset id is a canonical serialization of the whole capability registry,
+// The ruleset id fingerprints canonical serialization of the whole registry,
 // so on a real 1300-piece inventory one call costs milliseconds. It is derived
 // far more often than the spec changes — every witness certificate and every
 // proof projection recomputes it — and the parallel client does that for every
@@ -638,20 +639,43 @@ export function stableSerialize(value) {
 // `problemSpec.inventoryContext` (as the Upgrade certifier does) invalidates it
 // automatically.
 const rulesetIdCache = new WeakMap();
+const immutableProofInputs = new WeakSet();
+function snapshotProofInput(value) {
+  if (!value || typeof value !== 'object' || immutableProofInputs.has(value)) return value;
+  const snapshot = structuredClone(value);
+  const freeze = node => {
+    if (!node || typeof node !== 'object') return true;
+    if (node instanceof Set || node instanceof Map || ArrayBuffer.isView(node)) return false;
+    const immutable = Object.values(node).map(freeze).every(Boolean);
+    Object.freeze(node);
+    if (immutable) immutableProofInputs.add(node);
+    return immutable;
+  };
+  freeze(snapshot);
+  return snapshot;
+}
 
 export function createRulesetId(problemSpec) {
-  // Canonical serialization is intentionally collision-free. Runtime limits
-  // are not rules; inventory identities, assignments and set requirements are.
+  // Bind the entire canonical domain, not a lossy subset of capability fields.
+  // Keep the digest compact in serialized certificates. It is not a bearer proof.
+  // Snapshot caller-owned data before caching; nested mutations cannot silently
+  // change the domain. Top-level replacements remain supported by Upgrade.
+  for (const key of ['constraintModel', 'budget', 'pieceCapabilities', 'solverContext', 'inventoryContext']) {
+    if (problemSpec?.[key] && !Object.isFrozen(problemSpec)) problemSpec[key] = snapshotProofInput(problemSpec[key]);
+  }
   const inputs = {
+    operation: problemSpec?.operation,
     constraintModel: problemSpec?.constraintModel,
     budget: problemSpec?.budget,
     pieceCapabilities: problemSpec?.pieceCapabilities,
     solverContext: problemSpec?.solverContext,
     inventoryContext: problemSpec?.inventoryContext,
   };
-  if (problemSpec && typeof problemSpec === "object") {
+  const cacheable = Object.values(inputs).every(value => !value || typeof value !== 'object' || immutableProofInputs.has(value));
+  if (cacheable && problemSpec && typeof problemSpec === "object") {
     const cached = rulesetIdCache.get(problemSpec);
     if (cached
+        && cached.operation === inputs.operation
         && cached.constraintModel === inputs.constraintModel
         && cached.budget === inputs.budget
         && cached.pieceCapabilities === inputs.pieceCapabilities
@@ -660,11 +684,8 @@ export function createRulesetId(problemSpec) {
       return cached.id;
     }
   }
-  const id = `solver-v3-proof-v2:${TUNING_DOMAIN_ID}:${stableSerialize({
-    operation: problemSpec?.operation,
-    ...inputs,
-  })}`;
-  if (problemSpec && typeof problemSpec === "object") {
+  const id = `solver-v3-proof-sha256-v1:${TUNING_DOMAIN_ID}:${proofFingerprint(stableSerialize(inputs))}`;
+  if (cacheable && problemSpec && typeof problemSpec === "object") {
     rulesetIdCache.set(problemSpec, {...inputs, id});
   }
   return id;

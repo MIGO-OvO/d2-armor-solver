@@ -1,6 +1,55 @@
 import {STATS} from './armor-model.mjs';
 import {applyManualUpgradeModifiers, getUpgradeConfig, getUpgradeTuningCapability} from './upgrade-optimizer.mjs';
 
+// Exact interior-point relaxation. Directional/empty tuning preserves total;
+// Balanced adds 3 and stat mods add multiples of 5. Sets and per-slot tuning
+// restrictions are relaxed, never strengthened. Unknown/oversized domains fall
+// back to no pruning. Clamp intervals deliberately stay with the interval oracle.
+export function createInventoryTotalBounds(rows, rules, onlyPlus5, modifierBudget, autoStatMods) {
+  if (rules.length !== 6 || rules.some(rule => !Number.isSafeInteger(rule.armorMinimum)
+      || rule.armorMinimum !== rule.armorMaximum)) return null;
+  const target = rules.reduce((sum, rule) => sum + rule.armorMinimum, 0);
+  const totals = new Map();
+  for (const row of rows) for (const candidate of row) {
+    const config = getUpgradeConfig(candidate.piece);
+    const values = STATS.map(stat => config.baseStats[stat]);
+    if (!candidate.mathKnown || values.some(value => !Number.isSafeInteger(value) || value < 5)) return null;
+    const installed = !modifierBudget && !autoStatMods ? candidate.piece.armorModSize || 0 : 0;
+    if (!Number.isSafeInteger(installed) || installed < 0) return null;
+    totals.set(candidate, values.reduce((a, b) => a + b, installed));
+  }
+  let mods = autoStatMods ? Array.from({length: 11}, (_, i) => 5 * i) : [0];
+  if (modifierBudget) {
+    const {numPlus5, numPlus10} = modifierBudget;
+    if (![numPlus5, numPlus10].every(n => Number.isSafeInteger(n) && n >= 0)) return null;
+    mods = [numPlus5 * 5 + numPlus10 * 10];
+  }
+  let balanced = onlyPlus5 ? [0] : [0, 3, 6, 9, 12, 15];
+  if (!onlyPlus5 && modifierBudget?.numPlus3 !== undefined) {
+    if (!Number.isSafeInteger(modifierBudget.numPlus3) || modifierBudget.numPlus3 < 0) return null;
+    balanced = [3 * modifierBudget.numPlus3];
+  }
+  const deltas = [...new Set(mods.flatMap(mod => balanced.map(n => mod + n)))];
+  const suffix = Array(rows.length + 1);
+  suffix[rows.length] = new Set([0]);
+  for (let depth = rows.length - 1; depth >= 0; depth--) {
+    if (!suffix[depth + 1]) { suffix[depth] = null; continue; }
+    const next = new Set();
+    outer: for (const sum of new Set(rows[depth].map(candidate => totals.get(candidate)))) {
+      for (const tail of suffix[depth + 1]) {
+        next.add(sum + tail);
+        if (next.size > 4096) break outer;
+      }
+    }
+    suffix[depth] = next.size > 4096 ? null : next;
+  }
+  let partial = 0;
+  return {
+    add(candidate, sign) { partial += sign * totals.get(candidate); },
+    canReach(depth) { return !suffix[depth] || deltas.some(delta => suffix[depth].has(target - partial - delta)); },
+  };
+}
+
 // Support-function relaxation of the joint tuning/mod domain. A signed pair
 // spends the mod budget once, and a directional +5/-5 is one coupled action.
 // Ignoring sets/classes between remaining slots enlarges the domain: safe for
