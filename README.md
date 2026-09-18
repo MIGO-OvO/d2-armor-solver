@@ -197,11 +197,12 @@ GitHub Secrets 只能保护构建前的值，不能让已发布的浏览器代�
 
 ## 版本与技术文档
 
-当前源码版本为 **v3.1.1**：在 v3.1.0 的精确目标区间查询、库存搜索优化、统一方案工作区、
-跨渠道保存方案与独立三语指南基础上，修复了跨存档选择与持久化失败、搜索状态与键盘交互对齐，
-并进一步压缩证明体积、复用已准备库存域、延后库存目录加载。
+当前源码版本为 **v3.1.2**：v3.1.1 已完成跨存档选择与持久化修复、搜索状态与键盘交互对齐，
+并压缩证明体积、复用已准备库存域、延后库存目录加载；本版在此基础上撤回工作台卡片在运行时
+的目标优先重排，恢复 `app/index.html` 中固定的输入顺序（碎片属性变化在目标六维属性之前），
+不再由脚本移动任何卡片。优先/规则下拉、窄屏底部命令栏等交互保持不变。
 
-- [v3.1.1 发布说明](docs/release-notes-v3.1.1.md) · [全部 Release](https://github.com/MIGO-OvO/d2-armor-solver/releases)
+- [v3.1.2 发布说明](docs/release-notes-v3.1.2.md) · [全部 Release](https://github.com/MIGO-OvO/d2-armor-solver/releases)
 - [V3.1 优化与测量方法](docs/solver-v31-optimization.md) · [原始基准数据](docs/benchmarks/solver-v31.json)
 - [算法优化说明](docs/algorithm-optimization.zh-CN.md) · [并行库存验证](docs/parallel-inventory-validation.md)
 

@@ -217,12 +217,13 @@ This documentation update does not change the authentication implementation.
 
 ## Version and technical documentation
 
-The current source version is **v3.1.1**, building on the v3.1.0 exact-target interval queries, inventory search
-optimizations, unified plan workspace, cross-channel saved builds, and the standalone three-language guide. It fixes
-cross-save selection and failed persistence, aligns search states with keyboard interaction, and further compacts
-proofs, reuses prepared inventory domains, and defers inventory catalog loading.
+The current source version is **v3.1.2**. v3.1.1 fixed cross-save selection and failed persistence, aligned search
+states with keyboard interaction, and compacted proofs, reused prepared inventory domains, and deferred inventory
+catalog loading. This release withdraws the runtime reordering that moved the target card ahead of the fragment card,
+restoring the fixed input order authored in `app/index.html` (fragments before targets); no card is repositioned by
+script. The priority/rule selects and the narrow-screen command bar are unchanged.
 
-- [v3.1.1 release notes](docs/release-notes-v3.1.1.md) · [All releases](https://github.com/MIGO-OvO/d2-armor-solver/releases)
+- [v3.1.2 release notes](docs/release-notes-v3.1.2.md) · [All releases](https://github.com/MIGO-OvO/d2-armor-solver/releases)
 - [V3.1 optimization and methodology](docs/solver-v31-optimization.md) · [Raw benchmarks](docs/benchmarks/solver-v31.json)
 - [Algorithm optimizations](docs/algorithm-optimization.md) · [Parallel inventory validation](docs/parallel-inventory-validation.md)
 
