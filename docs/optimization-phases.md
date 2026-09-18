@@ -84,11 +84,15 @@ production build and browser interaction regression passed.
 
 ### Stage 4 — experience and maintainability
 
-The scratch workflow moves the existing target controls before optional inventory
-and fragment inputs, preserving keyboard/visual order in both browser and desktop.
-Phone layouts retain the original command bar at the bottom with a scrollable
-secondary-action row; no core action is removed. Rule and priority controls are
-native direct-choice selects with the same persisted values and three languages.
+The workbench keeps a single static input order in both browser and desktop:
+fragment controls, then target controls, as authored in the markup. An earlier
+revision of this stage moved the target card ahead of the fragment card at
+runtime to prioritize the primary input on small screens; that reordering was
+withdrawn in v3.1.2 because it changed the layout the maintainer had settled on.
+No element is repositioned by script. Phone layouts retain the original command
+bar at the bottom with a scrollable secondary-action row; no core action is
+removed. Rule and priority controls are native direct-choice selects with the
+same persisted values and three languages.
 
 The inventory mapper is separated from its catalog-backed adapter. Existing
 synchronous importers/tests retain their interface; the app imports the large

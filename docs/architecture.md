@@ -143,8 +143,9 @@ separate from mathematical truth. Search callbacks never enter ProblemSpec.
   `bungie-inventory.mjs` preserves the catalog-backed synchronous interface and
   is loaded only for profile import or read-back. Offline builds inline dynamic
   imports; they never fetch a catalog at runtime.
-- `src/ui/` owns shared modal/editor focus behavior and input ordering, including
-  the desktop bridge's nested DOM. See [optimization-phases.md](optimization-phases.md)
+- `src/ui/` owns shared modal/editor focus behavior, including the desktop
+  bridge's nested DOM. Workbench input order is static markup, not script-managed.
+  See [optimization-phases.md](optimization-phases.md)
   for regression evidence and the explicitly deferred OAuth work.
 - Optional Tuning, shared rule-quality ranking, local assignment quality and
   the responsive computation changes are described in

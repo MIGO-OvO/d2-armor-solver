@@ -81,12 +81,37 @@ try {
   await page.setViewportSize({width: 390, height: 844});
   await page.evaluate(() => scrollTo(0, 0));
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  // The workbench input order is static markup. Switching modes must not move
+  // any card, in either direction, so the layout the user sees is the one
+  // authored in app/index.html.
+  const staticOrder = () => page.evaluate(() => {
+    const workspace = document.querySelector('.workspace-grid');
+    const cards = [...workspace.children].map(node => node.id);
+    const topLevel = [...document.querySelectorAll('.container > section, .container > .workspace-grid')]
+      .filter(node => !node.hidden).map(node => node.id || node.className);
+    return {cards, topLevel};
+  });
+  const orderInSolve = await staticOrder();
+  await page.locator('#modeUpgradeButton').click();
+  const orderInUpgrade = await staticOrder();
+  await page.locator('#modeSolveButton').click();
+  const orderBackInSolve = await staticOrder();
+  assert.deepEqual(orderInSolve, {
+    cards: ['fragmentCard', 'inputCard'],
+    topLevel: orderInSolve.topLevel,
+  }, 'fragments stay ahead of targets inside the workspace grid');
+  assert.equal(orderInUpgrade.cards.join(','), 'fragmentCard,inputCard',
+    'switching to upgrade mode must not reorder the workspace cards');
+  assert.equal(orderBackInSolve.cards.join(','), 'fragmentCard,inputCard',
+    'switching back to solve mode must not reorder the workspace cards');
+  assert.equal(orderInUpgrade.topLevel[0], 'inventoryImportCard',
+    'the import card stays the first workbench block in upgrade mode');
+  assert.equal(orderBackInSolve.topLevel[0], 'inventoryImportCard',
+    'the import card stays the first workbench block in solve mode');
   const geometry = await page.evaluate(() => ({
-    target: document.getElementById('inputCard').getBoundingClientRect().top,
     solve: document.getElementById('btnSolve').getBoundingClientRect().bottom,
     viewport: innerHeight,
   }));
-  assert.ok(geometry.target < geometry.viewport, 'targets belong in the first mobile viewport');
   assert.ok(geometry.solve <= geometry.viewport && geometry.solve > 0, 'primary action stays visible');
   assert.equal(requests.some(url => /\/bungie-inventory-[^/]+\.js/.test(url)), false,
     'theory solving and saved builds must not download the account catalog');

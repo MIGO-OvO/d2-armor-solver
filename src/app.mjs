@@ -1,6 +1,5 @@
 /* global __BUNGIE_OAUTH_CLIENT_ID__ */
 import {captureEditorFocus, createOverlayController} from './ui/workbench-accessibility.mjs';
-import {arrangeWorkbenchInputs} from './ui/workbench-layout.mjs';
 import {
   ARCHETYPES,
   DEFAULT_TARGETS,
@@ -4791,7 +4790,6 @@ function setCalculatorMode(mode, persist = true) {
   stopSearches();
   calculatorMode = mode === 'upgrade' ? 'upgrade' : 'solve';
   const isUpgrade = calculatorMode === 'upgrade';
-  arrangeWorkbenchInputs(document, isUpgrade);
   document.body.classList.toggle('is-upgrade-mode', isUpgrade);
   document.getElementById('modeSolveButton')?.setAttribute('aria-pressed', String(!isUpgrade));
   document.getElementById('modeUpgradeButton')?.setAttribute('aria-pressed', String(isUpgrade));
