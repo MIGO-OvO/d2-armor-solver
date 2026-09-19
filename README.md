@@ -197,12 +197,14 @@ GitHub Secrets 只能保护构建前的值，不能让已发布的浏览器代�
 
 ## 版本与技术文档
 
-当前源码版本为 **v3.1.2**：v3.1.1 已完成跨存档选择与持久化修复、搜索状态与键盘交互对齐，
-并压缩证明体积、复用已准备库存域、延后库存目录加载；本版在此基础上撤回工作台卡片在运行时
-的目标优先重排，恢复 `app/index.html` 中固定的输入顺序（碎片属性变化在目标六维属性之前），
-不再由脚本移动任何卡片。优先/规则下拉、窄屏底部命令栏等交互保持不变。
+当前源码版本为 **v3.1.3**：v3.1.2 已撤回工作台卡片的运行时重排，恢复 `app/index.html` 中固定的输入顺序。
+本版为库存规划器引入**宏观等价匹配（plan macro equivalence）**：理论见证不再只按精确槽位排列比对，
+而是把框架 archetype、第三属性、方向性 Tuning 与 Armor Mod 视为可重新配对、可重新落位的 multiset，
+在异域槽位身份、职业金 perk、source 绑定件、职业、套装要求与真实 Tuning 能力等硬约束下重建实际方案。
+匹配分三层：精确模板快路径 → 带独立预算的穷尽宏观等价匹配 → 有界残差重解；每个最终方案都重新 seal
+并重新出证，源见证永不改写，被预算截断的搜索只标记为 provisional 而不是最终待刷清单。
 
-- [v3.1.2 发布说明](docs/release-notes-v3.1.2.md) · [全部 Release](https://github.com/MIGO-OvO/d2-armor-solver/releases)
+- [v3.1.3 发布说明](docs/release-notes-v3.1.3.md) · [全部 Release](https://github.com/MIGO-OvO/d2-armor-solver/releases)
 - [V3.1 优化与测量方法](docs/solver-v31-optimization.md) · [原始基准数据](docs/benchmarks/solver-v31.json)
 - [算法优化说明](docs/algorithm-optimization.zh-CN.md) · [并行库存验证](docs/parallel-inventory-validation.md)
 

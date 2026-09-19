@@ -1,6 +1,6 @@
 [package]
 name = "d2-armor-solver-desktop"
-version = "3.1.2"
+version = "3.1.3"
 description = "Offline Destiny 2 armor loadout workbench"
 authors = ["MIGO-OvO"]
 license = "MIT"

@@ -217,13 +217,17 @@ This documentation update does not change the authentication implementation.
 
 ## Version and technical documentation
 
-The current source version is **v3.1.2**. v3.1.1 fixed cross-save selection and failed persistence, aligned search
-states with keyboard interaction, and compacted proofs, reused prepared inventory domains, and deferred inventory
-catalog loading. This release withdraws the runtime reordering that moved the target card ahead of the fragment card,
-restoring the fixed input order authored in `app/index.html` (fragments before targets); no card is repositioned by
-script. The priority/rule selects and the narrow-screen command bar are unchanged.
+The current source version is **v3.1.3**. v3.1.2 withdrew the runtime reordering that moved the target card ahead of
+the fragment card and restored the fixed input order authored in `app/index.html`. This release adds **plan macro
+equivalence** to the inventory planner: a theory witness is no longer matched only by exact slot permutation.
+Framework archetypes, tertiary stats, directional Tuning assignments and Armor Mods are treated as multisets that
+may legally re-pair and re-place, while the Exotic slot identity, Exotic Class Item perk config, source-bound pieces,
+class, set requirements and real Tuning capability remain hard constraints. Matching runs in three phases — an exact
+template fast path, an exhaustive macro-equivalence matcher with its own budgets, and a bounded residual re-solve.
+Every final plan is re-sealed and re-certified, the source witness is never modified, and a truncated search is
+reported as provisional rather than as a final farm list.
 
-- [v3.1.2 release notes](docs/release-notes-v3.1.2.md) · [All releases](https://github.com/MIGO-OvO/d2-armor-solver/releases)
+- [v3.1.3 release notes](docs/release-notes-v3.1.3.md) · [All releases](https://github.com/MIGO-OvO/d2-armor-solver/releases)
 - [V3.1 optimization and methodology](docs/solver-v31-optimization.md) · [Raw benchmarks](docs/benchmarks/solver-v31.json)
 - [Algorithm optimizations](docs/algorithm-optimization.md) · [Parallel inventory validation](docs/parallel-inventory-validation.md)
 
