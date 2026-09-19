@@ -5562,6 +5562,7 @@ function normalizeTheoryPlan(plan, search) {
     modAssignments: witness.modAssignments,
     certificate: witness.certificate,
     search: witness.search || search || null,
+    matchingProof: plan.matchingProof || null,
   };
 }
 
@@ -6092,7 +6093,10 @@ function renderPlanRow(entry, index) {
       `已有 ${entry.ownedCount}/5 · 待取得 ${entry.farmCount}`,
       `${entry.ownedCount}/5 owned · ${entry.farmCount} to farm`,
     );
-  const meta = `${metCount}/6 ${l("达标", "達標", "met")} · ${ownedLabel}${entry.exact
+  const searchFlag = isPlanSearchIncomplete(entry)
+    ? ` · ${l("搜索未完成", "搜尋未完成", "search incomplete")}`
+    : "";
+  const meta = `${metCount}/6 ${l("达标", "達標", "met")} · ${ownedLabel}${searchFlag}${entry.exact
     ? ` · ${l("精确", "精確", "exact")}` : ""}`;
   return `
     <button type="button" class="inventory-result-option ${entry.current ? "is-current" : ""}"
@@ -6493,9 +6497,30 @@ function renderAcquisitionRow(row, position) {
   </li>`;
 }
 
+// The owned/farm split is only a final answer when a complete search backs it.
+// A completed macro-equivalence proof (or a fully-owned plan, which is
+// trivially minimal) is certain; a truncated search must not present the
+// current farm list as the only possible outcome.
+function isPlanSearchIncomplete(entry) {
+  if (entry.kind !== "theory" || entry.farmCount <= 0) return false;
+  const proof = entry.matchingProof;
+  if (!proof) return false;
+  if (proof.scope === "source-macro-equivalence" && proof.complete) return false;
+  return proof.complete === false;
+}
+
+function renderPlanSearchIncompleteNote(entry, { className = "loadout-note" } = {}) {
+  if (!isPlanSearchIncomplete(entry)) return "";
+  return `<p class="${className}">${l(
+    "库存适配搜索未完成；当前显示的是已找到的刷取方案，可能存在需要更少刷取件数的合法排列。",
+    "庫存適配搜尋未完成；目前顯示的是已找到的取得方案，可能存在需要更少取得件數的合法排列。",
+    "The inventory-matching search is incomplete; this farm list is the best found so far and a legal arrangement needing fewer farmed pieces may exist.",
+  )}</p>`;
+}
+
 // Fully owned plans get no acquisition panel at all: the loadout header already
 // states "五件已有齐全", so an empty farm section would only add noise.
-function renderAcquisitionPlan(rows) {
+function renderAcquisitionPlan(rows, entry = null) {
   if (!Array.isArray(rows) || rows.length === 0) return "";
   const missing = rows.filter(row => row.isFarm);
   if (missing.length === 0) return "";
@@ -6528,6 +6553,7 @@ function renderAcquisitionPlan(rows) {
         `${missing.length} to farm · ${rows.length - missing.length}/${rows.length} owned`,
       )}</span>
     </div>
+    ${renderPlanSearchIncompleteNote(entry, { className: "acquisition-notice" })}
     <ol class="acquisition-list">
       ${missing.map((row, index) => renderAcquisitionRow(row, index + 1)).join("")}
     </ol>
@@ -6866,6 +6892,7 @@ function renderSelectedLoadout(entry, index) {
       "A verified loadout was found; the search is still looking for better candidates.",
     )}</p>`
     : "";
+  const searchIncompleteNote = renderPlanSearchIncompleteNote(entry);
   return `
     <header class="loadout-header">
       <div class="loadout-header-main">
@@ -6873,6 +6900,7 @@ function renderSelectedLoadout(entry, index) {
         <h3 class="loadout-status ${feasible ? "is-met" : "is-short"}" data-proof-label="${escapeHtml(searchProofLabel(entry.witness, entry.search))}">${escapeHtml(headline)}</h3>
         <p class="loadout-subline">${l(`目标达标 ${metCount}/6`, `目標達標 ${metCount}/6`, `${metCount} of 6 targets met`)} · ${ownership}</p>
         ${searchingNote}
+        ${searchIncompleteNote}
         ${projectionNote}
       </div>
       <div class="inventory-result-actions">
@@ -6883,7 +6911,7 @@ function renderSelectedLoadout(entry, index) {
     ${entry.kind === "inventory" ? renderInventoryBungieEquip(entry.witness, index) : ""}
     ${renderStatsSummary(entry, finalTotals)}
     ${renderArmorLoadoutTable(rows, entry)}
-    ${renderAcquisitionPlan(rows)}
+    ${renderAcquisitionPlan(rows, entry)}
     ${renderAdvancedDetails(entry, totalsModel)}`;
 }
 

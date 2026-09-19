@@ -66,8 +66,18 @@ reassignment, known Tuning capabilities and complete coverage of all smaller
 replacement depths. A range-search time slice or global budget stop cannot
 authorize a minimum claim; partial fuzzy ranking retains the existing comparator.
 
-Owned/farm matching searches legal slot permutations of each supplied theory
-witness, keeping the original immutable and resealing the mapped display.
+The theory witness stays an immutable canonical representation. Inventory
+matching rebuilds each actual plan from the source's *macro equivalence class*
+(see [plan-equivalence.md](plan-equivalence.md)): framework archetypes,
+tertiary stats, directional Tuning assignments and Armor Mods are matched as
+multisets that may legally re-pair and re-place across physical slots and
+configs, while fixed physical identities — the Exotic slot, Exotic Class Item
+perk config, source-bound pieces — class, set requirements and real Tuning
+capability stay hard constraints. Matching runs in three phases: an
+exact-template fast path over legal slot permutations, an exhaustive
+macro-equivalence matcher independent of the residual budget, and a bounded
+residual re-solve of the original constraint model. Every final actual plan is
+re-sealed and re-certified; the original source witness is never modified.
 Matching equivalence is mathematical/ownership equivalence, not an execution
 certificate. `mathDataKnown` and `executionKnown` are separate predicates.
 

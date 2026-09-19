@@ -13,6 +13,7 @@ const algorithmModules = [
   "src/core/upgrade-optimizer.mjs",
   "src/core/inventory-solver.mjs",
   "src/core/inventory-plan.mjs",
+  "src/core/plan-equivalence.mjs",
   "src/core/dim-csv.mjs",
   "src/core/armor-sets.mjs",
   "src/core/armor-sets.data.mjs",

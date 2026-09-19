@@ -1,10 +1,18 @@
-import { STATS, normalizeArchetypeId } from "./armor-model.mjs";
+import { STATS, normalizeArchetypeId, BASE_CONFIGS, getMasterworkStats } from "./armor-model.mjs";
 import { compareScoreRanks, farmabilityScore, scoreStatsRank, scoreStats } from "./solver.mjs";
 import { findExactPartialConfigWitnesses } from "./exact-target-oracle.mjs";
 import {compareAssignmentCosts, getAssignmentCost} from './assignment-cost.mjs';
 import { physicalBaseStats, sealWitness, createResultCertificate, normalizePieceNumbers, createCanonicalId,
-  satisfiesConstraintModel, STAT_DOMAIN, createPieceCapability, getArmorSolverInput,
+  satisfiesConstraintModel, STAT_DOMAIN, createPieceCapability, getArmorSolverInput, stableSerialize,
   matchesFixedExotic } from "./solver-v3-contract.mjs";
+import {
+  comparePlanMacroProfiles,
+  createPlanMacroId,
+  createPlanMacroProfile,
+  getPlanPieceRoles,
+  isLegalFrameworkTertiaryPair,
+  resolvePlanSlots,
+} from "./plan-equivalence.mjs";
 
 export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "helmet",
@@ -13,8 +21,6 @@ export const INVENTORY_PLAN_SLOTS = Object.freeze([
   "legs",
   "classItem",
 ]);
-
-const LEGENDARY_SLOTS = INVENTORY_PLAN_SLOTS.slice(0, 4);
 
 function archetypeIdForName(name) {
   return normalizeArchetypeId(name);
@@ -57,17 +63,12 @@ function getSetRequirement(requirement = { type: "none" }) {
 }
 
 function getSolutionRequirements(solution, fixedExotic = null) {
+  const slots = resolvePlanSlots(solution);
   const requirements = [];
-  let legendaryIndex = 0;
-  const hasExoticClassItem = solution.exoticIndex !== null && solution.exoticIndex !== undefined;
   for (let index = 0; index < solution.config.length; index++) {
     const config = solution.config[index];
     const tuning = solution.tuningAssignments[index];
-    const isClassItem = solution.exoticIndex === index;
-    const defaultSlot = hasExoticClassItem
-      ? (isClassItem ? "classItem" : LEGENDARY_SLOTS[legendaryIndex++])
-      : INVENTORY_PLAN_SLOTS[index];
-    const slot = config.slot || defaultSlot;
+    const slot = slots[index];
     requirements.push({
       index,
       slot,
@@ -77,7 +78,7 @@ function getSolutionRequirements(solution, fixedExotic = null) {
       baseStats: { ...config.baseStats },
       tuningMode: tuning?.mode === 'none' ? 'none' : tuning?.mode === "+3" ? "plus3" : "shift",
       tuningTo: tuning?.mode === "+3" ? null : tuning?.to,
-      exotic: isClassItem || slot === fixedExotic?.slot,
+      exotic: solution.exoticIndex === index || slot === fixedExotic?.slot,
     });
   }
   return requirements;
@@ -518,7 +519,576 @@ function certifyPlan(plan, context, candidate, chosen, slots, setRequirement) {
     farmability: farmabilityScore(witness.config, witness.exoticIndex)};
 }
 
-function reoptimizePlan(plan, context, pool, setRequirement, checkpoint) {
+// ============================================================
+// PHASE 2: MACRO-EQUIVALENT MATCHING
+// ============================================================
+// The exact-template phase replays the source witness config by config, so a
+// vault that realizes the same *macro* plan with frames, tertiary stats,
+// Tuning or Armor Mods redistributed across pieces is reported as farming.
+// This phase searches the macro-equivalence class directly (see
+// plan-equivalence.mjs): it consumes the movable framework/tertiary multisets
+// piece by piece, re-pairs the remainder legally for farming, reassigns
+// directional Tuning by immutable capability, reproduces the +3 aggregate
+// contribution and redistributes Armor Mods deterministically. With at most
+// five pieces the search is exhaustive, deterministic and independent of the
+// residual budget that bounds phases one and three.
+
+const MACRO_SEARCH_NODE_CAP_PER_SOLUTION = 60000;
+const MACRO_SEARCH_BATCH_NODE_CEILING = 600000;
+const MACRO_SEARCH_TIME_MS = 900;
+const macroSearchLimit = Symbol("macro-equivalence search limit");
+
+function createMacroSearchBudget(solutionCount) {
+  const deadline = performance.now() + MACRO_SEARCH_TIME_MS;
+  const batchNodes = Math.min(
+    MACRO_SEARCH_NODE_CAP_PER_SOLUTION * Math.max(1, solutionCount),
+    MACRO_SEARCH_BATCH_NODE_CEILING,
+  );
+  let nodes = 0;
+  return {
+    reset() { nodes = 0; },
+    tick() {
+      if (++nodes > batchNodes || performance.now() > deadline) throw macroSearchLimit;
+    },
+  };
+}
+
+function getMathBaseStats(item) {
+  return item.optimizationBaseStats || physicalBaseStats(item);
+}
+
+function getConfigArchetypeIdForMacro(config) {
+  return normalizeArchetypeId(config?.archetype || config?.archetypeId);
+}
+
+function getCanonicalFrameConfig(archetypeId, tertiary) {
+  return BASE_CONFIGS.find(entry =>
+    entry.archetype === archetypeId && entry.tertiary === tertiary) || null;
+}
+
+// Candidate identity for macro feasibility. Everything that can change the
+// outcome of the macro search is in the key: physical slot, class, the legal
+// (framework, tertiary) roll, set relevance and the immutable directional
+// capability. Installed sockets/energy and instance ids are execution state —
+// two rolls with the same key are interchangeable here.
+function getMacroCandidateKey(item, setRequirement) {
+  const setHash = Number(item.setHash);
+  const setKey = setRequirement.type === "none" ? 0 : setRequirement.type === "set"
+    ? Number(setHash === Number(setRequirement.setHash))
+    : setHash === Number(setRequirement.a) ? 1 : setHash === Number(setRequirement.b) ? 2 : 0;
+  const capability = getItemDirectionalStats(item);
+  return [
+    item.slot,
+    item.classId || "",
+    normalizeArchetypeId(item.archetypeId || item.archetype) || "",
+    item.tertiary || "",
+    setKey,
+    capability ? capability.join(",") : "none",
+  ].join("|");
+}
+
+// Kuhn's maximum matching between bag instances and slots. Used as a cheap
+// necessary condition: if the frames (or tertiaries) cannot cover k distinct
+// slots, no k-owned macro selection exists and the DFS can be skipped.
+function maxBagSlotCover(bag, candidatesBySlot, keyOf) {
+  const instances = [];
+  for (const [key, count] of bag) {
+    for (let n = 0; n < count; n++) instances.push(key);
+  }
+  const slots = [...candidatesBySlot.keys()];
+  const matchSlot = new Map();
+  const augment = (key, visited) => {
+    for (const slot of slots) {
+      if (visited.has(slot)) continue;
+      const candidates = candidatesBySlot.get(slot);
+      if (!candidates.some(candidate => keyOf(candidate) === key)) continue;
+      visited.add(slot);
+      const previous = matchSlot.get(slot);
+      if (previous === undefined || augment(previous, visited)) {
+        matchSlot.set(slot, key);
+        return true;
+      }
+    }
+    return false;
+  };
+  let size = 0;
+  for (const key of instances) {
+    if (augment(key, new Set())) size++;
+  }
+  return size;
+}
+
+function buildMacroModAssignments(modMultiset) {
+  const mods = Object.fromEntries([0, 1, 2, 3, 4].map(index => [index, null]));
+  const entries = [];
+  for (const [key, count] of modMultiset) {
+    const [size, stat] = key.split(":");
+    for (let n = 0; n < count; n++) entries.push({ size: Number(size), stat });
+  }
+  // Deterministic placement: largest mods first, stats in canonical order.
+  entries.sort((left, right) => right.size - left.size
+    || STATS.indexOf(left.stat) - STATS.indexOf(right.stat));
+  entries.forEach((mod, index) => { mods[index] = { ...mod }; });
+  return mods;
+}
+
+function matchMacroEquivalentPlan({
+  plan, solution, context, pool, classId, fixedExotic, setRequirement, budget,
+}) {
+  // Returns {plan, complete}: `plan` is a certified macro-equivalent plan or
+  // null; `complete` reports whether this phase's own search finished.
+  budget.reset();
+  try {
+    return { plan: searchMacroEquivalentPlan({
+      plan, solution, context, pool, classId, fixedExotic, setRequirement, budget,
+    }), complete: true };
+  } catch (error) {
+    if (error !== macroSearchLimit) throw error;
+    return { plan: null, complete: false };
+  }
+}
+
+const MACRO_FARM = Symbol("macro farm");
+
+function searchMacroEquivalentPlan({
+  plan, solution, context, pool, classId, fixedExotic, setRequirement, budget,
+}) {
+  if (!Array.isArray(solution.config) || solution.config.length !== 5
+      || !Array.isArray(solution.tuningAssignments) || solution.tuningAssignments.length !== 5) {
+    return null;
+  }
+  // A macro candidate reproduces the source totals exactly, so a source that
+  // already violates the bound rules can never certify here.
+  if (plan.rulesFeasible === false) return null;
+
+  const profile = createPlanMacroProfile(solution, { fixedExotic: fixedExotic || undefined });
+  const roles = getPlanPieceRoles(solution, fixedExotic);
+  const contextFixed = context.problem.inventoryContext.fixedExotic;
+
+  // --- Pinned resolution -------------------------------------------------
+  let exoticSlot = null;
+  let exoticConfig = null;
+  const pinnedItems = new Map(); // slot -> owned item (source-bound legendaries)
+  let chosenClassId = classId || null;
+  for (const role of roles) {
+    const config = solution.config[role.index];
+    if (role.exotic) {
+      if (exoticSlot !== null) return null; // at most one Exotic per witness
+      exoticSlot = role.slot;
+      exoticConfig = config;
+    } else if (role.pinned) {
+      const identity = String(config.sourceId || "");
+      const item = pool.find(candidate =>
+        String(candidate.sourceId ?? candidate.id ?? "") === identity) || null;
+      if (!item) return null; // a source-bound piece must stay that piece
+      if (pinnedItems.has(item.slot)) return null;
+      pinnedItems.set(item.slot, item);
+      if (!chosenClassId && item.classId) chosenClassId = item.classId;
+    }
+  }
+
+  let exoticCandidates = [];
+  if (exoticSlot && !fixedExotic?.reserved) {
+    exoticCandidates = pool.filter(item => item.slot === exoticSlot && Boolean(item.exotic)
+      && item.dataConfidence?.stats !== "unknown"
+      && (!classId || item.classId === classId)
+      && (fixedExotic
+        ? matchesFixedExoticIdentity(item, fixedExotic)
+        : matchesFixedExotic(item, contextFixed))
+      // Macro pin: the Exotic roll is part of the plan's identity. Only the
+      // exact source frame may own the slot; other rolls keep farming it.
+      && STATS.every(stat => getMathBaseStats(item)[stat] === exoticConfig?.baseStats?.[stat]));
+    exoticCandidates.sort((left, right) => sortCandidates(left, right, setRequirement));
+    if (exoticCandidates.length && !chosenClassId && exoticCandidates[0].classId) {
+      chosenClassId = exoticCandidates[0].classId;
+    }
+  }
+
+  const pinnedSlots = new Set(pinnedItems.keys());
+  if (exoticSlot) pinnedSlots.add(exoticSlot);
+  const freeSlots = INVENTORY_PLAN_SLOTS.filter(slot => !pinnedSlots.has(slot));
+  const movableCount = profile.frameworkMultiset.reduce((sum, [, count]) => sum + count, 0);
+  if (movableCount !== freeSlots.length) return null; // malformed witness
+
+  const frameBag = new Map(profile.frameworkMultiset);
+  const tertiaryBag = new Map(profile.tertiaryMultiset);
+
+  // Candidates whose (framework, tertiary) pair already exists in the source
+  // witness are tried first: the near-template realization is the common case,
+  // and reaching it early keeps the exhaustive search a fallback.
+  const sourcePairs = new Set();
+  for (const role of roles) {
+    if (role.pinned) continue;
+    const config = solution.config[role.index];
+    sourcePairs.add(`${getConfigArchetypeIdForMacro(config)}|${config.tertiary}`);
+  }
+  const sourcePairAffinity = candidate =>
+    sourcePairs.has(`${candidate.archetypeId}|${candidate.tertiary}`) ? 0 : 1;
+
+  // --- Free-slot candidate index -----------------------------------------
+  const candidatesBySlot = new Map();
+  for (const slot of freeSlots) {
+    const seen = new Set();
+    const candidates = [];
+    const raw = pool.filter(item => item.slot === slot && !item.exotic
+      && item.dataConfidence?.stats !== "unknown"
+      && (!classId || item.classId === classId)
+      && frameBag.has(normalizeArchetypeId(item.archetypeId || item.archetype))
+      && tertiaryBag.has(item.tertiary)
+      && isLegalFrameworkTertiaryPair(item.archetypeId || item.archetype, item.tertiary)
+      // The macro bag identity assumes canonical T5 frame bases; pieces with
+      // baked-in Tuning or exotic rolls stay with the residual re-solve.
+      && (() => {
+        const canonical = getCanonicalFrameConfig(
+          normalizeArchetypeId(item.archetypeId || item.archetype), item.tertiary);
+        return canonical && STATS.every(stat =>
+          getMathBaseStats(item)[stat] === canonical.baseStats[stat]);
+      })());
+    raw.sort((left, right) => sourcePairAffinity({
+        archetypeId: normalizeArchetypeId(left.archetypeId || left.archetype), tertiary: left.tertiary,
+      }) - sourcePairAffinity({
+        archetypeId: normalizeArchetypeId(right.archetypeId || right.archetype), tertiary: right.tertiary,
+      }) || sortCandidates(left, right, setRequirement));
+    for (const item of raw) {
+      const key = getMacroCandidateKey(item, setRequirement);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push({
+        item,
+        archetypeId: normalizeArchetypeId(item.archetypeId || item.archetype),
+        tertiary: item.tertiary,
+        capability: getItemDirectionalStats(item) || [],
+      });
+    }
+    candidatesBySlot.set(slot, candidates);
+  }
+
+  const orderedFreeSlots = [...freeSlots].sort((left, right) =>
+    candidatesBySlot.get(left).length - candidatesBySlot.get(right).length
+    || INVENTORY_PLAN_SLOTS.indexOf(left) - INVENTORY_PLAN_SLOTS.indexOf(right));
+
+  // Cheap necessary conditions for reaching k owned free slots.
+  const frameCover = maxBagSlotCover(frameBag, candidatesBySlot, candidate => candidate.archetypeId);
+  const tertiaryCover = maxBagSlotCover(tertiaryBag, candidatesBySlot, candidate => candidate.tertiary);
+  const maxK = Math.min(freeSlots.length, frameCover, tertiaryCover);
+
+  const directionalAssignments = [];
+  const directionalNeed = new Map();
+  for (const [key, count] of profile.directionalTuningMultiset) {
+    const [from, to] = key.split(">");
+    directionalNeed.set(to, (directionalNeed.get(to) || 0) + count);
+    for (let n = 0; n < count; n++) directionalAssignments.push({ from, to });
+  }
+  const modAssignments = buildMacroModAssignments(profile.armorModMultiset);
+
+  // --- Global +3 feasibility precheck --------------------------------------
+  // The +3 hosts are pieces of the final pairing (pinned pieces plus one legal
+  // pairing of the bag), so if no pairing admits a subset with the source's
+  // aggregate contribution, no macro candidate exists at any ownership level.
+  // This cheaply rejects the random-vault case where exhaustive search would
+  // otherwise burn its whole budget discovering the same negative.
+  if (profile.plus3Count > 0) {
+    const pinnedMasterworks = [...pinnedItems.values()]
+      .map(item => getMasterworkStats(item) || []);
+    // The Exotic piece (owned or farmed) always carries the pinned frame's
+    // masterwork set.
+    if (exoticSlot) pinnedMasterworks.push(getMasterworkStats(exoticConfig) || []);
+    const pairingVectors = pair => pair.map(({ archetypeId, tertiary }) =>
+      Object.fromEntries(STATS.map(stat => [stat,
+        Number(getMasterworkStats({ archetypeId, tertiary })?.includes(stat) || 0)])));
+    const subsetSumsReach = (vectors, target, count) => {
+      // Enumerate count-sized subsets of vectors; true if any sums to target.
+      const pick = (start, chosen, sum) => {
+        if (chosen === count) {
+          return STATS.every(stat => sum[stat] === target[stat]);
+        }
+        for (let index = start; index < vectors.length; index++) {
+          const next = Object.fromEntries(STATS.map(stat => [stat, sum[stat] + vectors[index][stat]]));
+          if (pick(index + 1, chosen + 1, next)) return true;
+        }
+        return false;
+      };
+      return pick(0, 0, Object.fromEntries(STATS.map(stat => [stat, 0])));
+    };
+    let plus3Reachable = false;
+    for (const pairing of enumerateFarmPairings(frameBag, tertiaryBag)) {
+      const vectors = [...pinnedMasterworks, ...pairingVectors(pairing)];
+      if (subsetSumsReach(vectors, profile.plus3Contribution, profile.plus3Count)) {
+        plus3Reachable = true;
+        break;
+      }
+    }
+    if (!plus3Reachable) return null;
+  }
+
+  // --- Leaf evaluation ----------------------------------------------------
+  // Every legal pairing of the remaining bag becomes the farmed pieces; the
+  // pairing choice feeds the +3 masterwork contributions.
+  function enumerateFarmPairings(frames, tertiaries) {
+    const instances = [];
+    for (const [key, count] of frames) {
+      for (let n = 0; n < count; n++) instances.push(key);
+    }
+    const pairings = [];
+    const pairs = [];
+    const recurse = (index, remaining) => {
+      budget.tick();
+      if (index === instances.length) {
+        pairings.push([...pairs]);
+        return;
+      }
+      const frame = instances[index];
+      for (const [tertiary, count] of remaining) {
+        if (!count || !isLegalFrameworkTertiaryPair(frame, tertiary)) continue;
+        remaining.set(tertiary, count - 1);
+        pairs.push({ archetypeId: frame, tertiary });
+        recurse(index + 1, remaining);
+        pairs.pop();
+        remaining.set(tertiary, count);
+      }
+    };
+    recurse(0, new Map(tertiaries));
+    return pairings;
+  }
+
+  // Combined placement of directional shifts and +3 marks. Pieces each hold
+  // one tuning mode; the aggregate +3 contribution must match the source.
+  function solveTuningPlacement(itemStates, pieces) {
+    const used = directionalAssignments.map(() => false);
+    let plus3Remaining = profile.plus3Count;
+    const vector = Object.fromEntries(STATS.map(stat => [stat, 0]));
+    const assignments = pieces.map(() => ({ mode: "none", from: null, to: null }));
+    let best = null;
+    const record = () => {
+      const cost = getAssignmentCost(itemStates, {
+        tuningAssignments: assignments, modAssignments,
+      });
+      if (!best || compareAssignmentCosts(cost, best.cost) < 0) {
+        best = { assignments: assignments.map(assignment => ({ ...assignment })), cost };
+      }
+    };
+    const recurse = index => {
+      budget.tick();
+      const remainingPieces = pieces.length - index;
+      const remainingDirectional = used.reduce((sum, flag) => sum + Number(!flag), 0);
+      if (remainingPieces < remainingDirectional + plus3Remaining) return;
+      if (best?.cost.changedSocketCount === 0) return;
+      if (index === pieces.length) {
+        if (remainingDirectional || plus3Remaining) return;
+        if (!STATS.every(stat => vector[stat] === profile.plus3Contribution[stat])) return;
+        record();
+        return;
+      }
+      const piece = pieces[index];
+      assignments[index] = { mode: "none", from: null, to: null };
+      recurse(index + 1);
+      if (plus3Remaining > 0) {
+        assignments[index] = { mode: "+3", from: null, to: null };
+        plus3Remaining--;
+        for (const stat of piece.masterwork) vector[stat]++;
+        recurse(index + 1);
+        for (const stat of piece.masterwork) vector[stat]--;
+        plus3Remaining++;
+      }
+      for (let d = 0; d < directionalAssignments.length; d++) {
+        if (used[d]) continue;
+        const assignment = directionalAssignments[d];
+        if (piece.allowedTo && !piece.allowedTo.includes(assignment.to)) continue;
+        used[d] = true;
+        assignments[index] = { mode: "+5-5", from: assignment.from, to: assignment.to };
+        recurse(index + 1);
+        used[d] = false;
+      }
+      assignments[index] = { mode: "none", from: null, to: null };
+    };
+    recurse(0);
+    return best;
+  }
+
+  function evaluateSelection(selection, frames, tertiaries) {
+    const ownedItems = [];
+    const farmSlots = [];
+    for (const slot of INVENTORY_PLAN_SLOTS) {
+      const pick = selection.get(slot);
+      if (pick === MACRO_FARM) farmSlots.push(slot);
+      else ownedItems.push(pick.item);
+    }
+    if (!canCompleteSetRequirement(ownedItems,
+      farmSlots.map(slot => ({ requirement: { slot, exotic: slot === exoticSlot } })), setRequirement)) {
+      return null;
+    }
+    const pairings = enumerateFarmPairings(frames, tertiaries);
+    if (farmSlots.length && !pairings.length) return null;
+    for (const pairing of pairings) {
+      // Farm slots receive the remaining bag's legal pairing in slot order,
+      // both for the masterwork contributions and the farmed configs.
+      const pieces = [];
+      const itemStates = [];
+      let pieceCursor = 0;
+      for (const slot of INVENTORY_PLAN_SLOTS) {
+        const pick = selection.get(slot);
+        if (pick === MACRO_FARM) {
+          const source = slot === exoticSlot ? context.farmExotic : pairing[pieceCursor++];
+          pieces.push({ allowedTo: null, masterwork: getMasterworkStats(source) || [] });
+          itemStates.push({ tuningInstalled: false, armorModSize: 0 });
+        } else {
+          pieces.push({
+            allowedTo: getItemDirectionalStats(pick.item) || [],
+            masterwork: getMasterworkStats(pick.item) || [],
+          });
+          itemStates.push(pick.item);
+        }
+      }
+      const tuning = solveTuningPlacement(itemStates, pieces);
+      if (!tuning) continue;
+      let configCursor = 0;
+      const config = INVENTORY_PLAN_SLOTS.map(slot => {
+        const pick = selection.get(slot);
+        if (pick !== MACRO_FARM) return context.physical(pick.item);
+        if (slot === exoticSlot) return { ...context.farmExotic };
+        const pair = pairing[configCursor++];
+        return { ...getCanonicalFrameConfig(pair.archetypeId, pair.tertiary), slot };
+      });
+      const candidate = {
+        config,
+        tuningAssignments: tuning.assignments,
+        modAssignments,
+        totals: solution.totals,
+      };
+      const certified = certifyPlan(plan, context, candidate,
+        INVENTORY_PLAN_SLOTS.map(slot => {
+          const pick = selection.get(slot);
+          return pick === MACRO_FARM ? null : pick.item;
+        }), INVENTORY_PLAN_SLOTS, setRequirement);
+      if (!certified) continue;
+      const comparison = comparePlanMacroProfiles(solution, certified.matchedSolution,
+        { fixedExotic: fixedExotic || undefined });
+      if (!comparison.equal) continue; // defensive: never certify a non-equivalent plan
+      certified.matchingProof = {
+        scope: "source-macro-equivalence",
+        complete: true,
+        slotIndependent: true,
+        equivalence: comparison.equivalence,
+        sourceMacroId: createPlanMacroId(solution, { fixedExotic: fixedExotic || undefined }),
+        candidateMacroId: stableSerialize(comparison.candidateProfile),
+      };
+      const exoticPiece = fixedExotic
+        ? certified.pieces.find(piece => piece.slot === fixedExotic.slot) : null;
+      certified.fixedExoticDistance = !fixedExotic || exoticPiece?.item
+        ? 0
+        : exoticPiece?.closestMismatch?.score ?? Number.MAX_SAFE_INTEGER;
+      return certified;
+    }
+    return null;
+  }
+
+  // --- Exact-k DFS over the free slots -----------------------------------
+  const selection = new Map();
+  const floorTotal = plan.feasible ? plan.ownedCount + 1 : 0;
+  const pinnedOwnedCount = pinnedItems.size;
+
+  function searchAttempt(exoticOwned, k) {
+    selection.clear();
+    if (exoticSlot) {
+      selection.set(exoticSlot, exoticOwned && exoticCandidates.length
+        ? { item: exoticCandidates[0] } : MACRO_FARM);
+    }
+    for (const [slot, item] of pinnedItems) selection.set(slot, { item });
+    // Directional Hall bound: every remaining destination must still fit on
+    // decided pieces, decided farm pieces (wildcards) and the undecided slots
+    // (any of which may farm). This prunes capability-blocked branches long
+    // before the leaf checks.
+    const decidedCapability = new Map();
+    let wildcardPieces = 0;
+    const countCapability = item => {
+      for (const stat of getItemDirectionalStats(item) || []) {
+        decidedCapability.set(stat, (decidedCapability.get(stat) || 0) + 1);
+      }
+    };
+    if (exoticSlot) {
+      // A farmed Exotic accepts every destination; an owned one uses its
+      // immutable capability list.
+      if (selection.get(exoticSlot) === MACRO_FARM) wildcardPieces++;
+      else countCapability(exoticCandidates[0]);
+    }
+    for (const item of pinnedItems.values()) countCapability(item);
+    const capabilityReachable = undecided => STATS.every(stat =>
+      (directionalNeed.get(stat) || 0)
+        <= (decidedCapability.get(stat) || 0) + wildcardPieces + undecided);
+    let found = null;
+    const walk = (position, ownedSoFar, frames, tertiaries) => {
+      budget.tick();
+      if (found) return;
+      const slotsLeft = orderedFreeSlots.length - position;
+      if (ownedSoFar + slotsLeft < k) return;
+      if (!capabilityReachable(slotsLeft)) return;
+      if (position === orderedFreeSlots.length) {
+        if (ownedSoFar === k) found = evaluateSelection(selection, frames, tertiaries);
+        return;
+      }
+      const candidates = candidatesBySlot.get(orderedFreeSlots[position]);
+      if (ownedSoFar < k) {
+        for (const candidate of candidates) {
+          if (chosenClassId && candidate.item.classId
+              && candidate.item.classId !== chosenClassId) continue;
+          const frameCount = frames.get(candidate.archetypeId) || 0;
+          const tertiaryCount = tertiaries.get(candidate.tertiary) || 0;
+          if (!frameCount || !tertiaryCount) continue;
+          frames.set(candidate.archetypeId, frameCount - 1);
+          tertiaries.set(candidate.tertiary, tertiaryCount - 1);
+          const previousClass = chosenClassId;
+          if (!chosenClassId && candidate.item.classId) chosenClassId = candidate.item.classId;
+          for (const stat of candidate.capability) {
+            decidedCapability.set(stat, (decidedCapability.get(stat) || 0) + 1);
+          }
+          selection.set(orderedFreeSlots[position], candidate);
+          walk(position + 1, ownedSoFar + 1, frames, tertiaries);
+          chosenClassId = previousClass;
+          selection.set(orderedFreeSlots[position], null);
+          for (const stat of candidate.capability) {
+            decidedCapability.set(stat, decidedCapability.get(stat) - 1);
+          }
+          frames.set(candidate.archetypeId, frameCount);
+          tertiaries.set(candidate.tertiary, tertiaryCount);
+          if (found) return;
+        }
+      }
+      selection.set(orderedFreeSlots[position], MACRO_FARM);
+      wildcardPieces++;
+      walk(position + 1, ownedSoFar, frames, tertiaries);
+      wildcardPieces--;
+      selection.set(orderedFreeSlots[position], null);
+    };
+    walk(0, 0, new Map(frameBag), new Map(tertiaryBag));
+    return found;
+  }
+
+  const exoticOptions = exoticCandidates.length ? [true, false] : [false];
+  const attempts = [];
+  for (const exoticOwned of exoticOptions) {
+    for (let k = maxK; k >= 0; k--) {
+      attempts.push({ exoticOwned, k, total: pinnedOwnedCount + Number(exoticOwned) + k });
+    }
+  }
+  attempts.sort((left, right) => right.total - left.total
+    || Number(right.exoticOwned) - Number(left.exoticOwned));
+  for (const attempt of attempts) {
+    if (attempt.total < floorTotal) break;
+    const found = searchAttempt(attempt.exoticOwned, attempt.k);
+    if (found) return found;
+  }
+  return null;
+}
+
+// ============================================================
+// PHASE 3: RESIDUAL CONSTRAINT RE-SOLVE (original-constraint-model)
+// ============================================================
+// The residual phase re-solves the *original* ProblemSpec/constraintModel
+// against the owned inventory. It may produce a plan whose macro composition
+// (frameworks, tertiaries, Tuning) differs from the source witness; that is a
+// different plan in the same problem, never a macro-equivalent realization of
+// the source. Its results are bounded and always reported as incomplete.
+function reoptimizeConstraintPlan(plan, context, pool, setRequirement, checkpoint) {
   const rows = INVENTORY_PLAN_SLOTS.map(slot => {
     const seen = new Set();
     const candidates = pool.filter(item => item.slot === slot && context.eligible(item))
@@ -606,6 +1176,9 @@ export function rankInventoryPlans({
   const checkpoint = () => {
     if (++nodes > (residualSearchLimits.maxNodes ?? 200000) || performance.now() > deadline) throw exhausted;
   };
+  // The macro-equivalence phase owns its budget: whether a macro-equivalent
+  // realization exists must never depend on the residual search limits above.
+  const macroBudget = createMacroSearchBudget(solutions.length);
 
   for (const solution of solutions) {
     let requirements = getSolutionRequirements(solution, fixedExotic);
@@ -721,13 +1294,43 @@ export function rankInventoryPlans({
         requirements.map(r => r.slot), normalizedSetRequirement);
       if (certified) plan = certified;
       else plan.feasible = false;
+
+      // Phase 2 — macro-equivalent matching. The macro search covers a strict
+      // superset of the exact-template phase, so a completed run settles the
+      // owned/farm question for this solution even when the template
+      // permutation search above was truncated.
+      if (!(plan.feasible && plan.ownedCount === 5)) {
+        const macro = matchMacroEquivalentPlan({
+          plan, solution, context, pool, classId, fixedExotic,
+          setRequirement: normalizedSetRequirement, budget: macroBudget,
+        });
+        if (macro.plan
+            && (macro.plan.ownedCount > plan.ownedCount
+              || (macro.plan.ownedCount === plan.ownedCount && macro.plan.feasible && !plan.feasible)
+              || (macro.plan.ownedCount === plan.ownedCount && macro.plan.feasible === plan.feasible
+                && macro.plan.setCoverage > plan.setCoverage))) {
+          plan = macro.plan;
+        } else if (macro.complete) {
+          plan.matchingProof = {...plan.matchingProof, complete: true, macroEquivalenceSearched: true};
+        } else {
+          plan.matchingProof = {...plan.matchingProof, complete: false, macroSearchLimited: true};
+        }
+      }
+
+      // Phase 3 — residual re-solve of the original constraint model. A
+      // bounded miss never demotes a proven macro/template result: it only
+      // means alternative (different-macro) plans were not exhausted.
       try {
-        const optimized = reoptimizePlan(plan, context, pool, normalizedSetRequirement, checkpoint);
+        const optimized = reoptimizeConstraintPlan(plan, context, pool, normalizedSetRequirement, checkpoint);
         if (optimized) plan = {...optimized, matchingProof: {scope: 'original-constraint-model',
-          complete: false, slotPermutations: true, residualResolve: true}};
+          complete: false, macroEquivalent: false, slotPermutations: true, residualResolve: true}};
       } catch (error) {
         if (error !== exhausted) throw error;
-        plan.matchingProof = {...plan.matchingProof, complete: false, residualSearchLimited: true};
+        plan.matchingProof = {...plan.matchingProof,
+          ...(plan.matchingProof.scope === 'source-macro-equivalence'
+            || plan.matchingProof.macroEquivalenceSearched
+            ? {residualSearchLimited: true}
+            : {complete: false, residualSearchLimited: true})};
       }
     }
     plans.push(plan);

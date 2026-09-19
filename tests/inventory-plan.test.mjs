@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ARCHETYPES, BASE_CONFIGS, STATS as STAT_IDS, createExoticConfig } from "../src/core/armor-model.mjs";
+import { ARCHETYPES, BASE_CONFIGS, STATS as STAT_IDS, createExoticConfig, getMasterworkStats } from "../src/core/armor-model.mjs";
 import { rankInventoryPlans, assignmentCanReachExact, sourceSatisfiesRules } from "../src/core/inventory-plan.mjs";
 import { runSolver } from "../src/core/solver.mjs";
-import { createProblemSpec, verifyWitness, satisfiesConstraintModel } from "../src/core/solver-v3-contract.mjs";
+import { createProblemSpec, verifyWitness, satisfiesConstraintModel, sealWitness } from "../src/core/solver-v3-contract.mjs";
+import { verifyMacroEquivalent } from "../src/core/plan-equivalence.mjs";
 import { normalizeDimItem, parseCsv } from "../src/core/dim-csv.mjs";
 
 const SLOT_ORDER = ["helmet", "arms", "chest", "legs", "classItem"];
@@ -485,4 +486,570 @@ test("an Exotic's +5 roll is freely selectable and never filtered", () => {
     assignmentCanReachExact(solution, [classItem, ...matchingLegendary]),
     true,
   );
+});
+
+// ============================================================
+// MACRO-EQUIVALENT INVENTORY MATCHING
+// ============================================================
+// A theory witness binds framework/tertiary/Tuning/mod data to concrete config
+// indexes. Mathematically only the *macro* invariants matter: the framework
+// multiset, the tertiary multiset (re-paired legally), the directional Tuning
+// multiset, the +3 aggregate contribution and the armor-mod multiset. These
+// fixtures build sealed witnesses whose equivalent realizations are permuted
+// across slots, pieces and assignments.
+
+const MACRO_SLOTS = ["helmet", "arms", "chest", "legs", "classItem"];
+const MACRO_TINY_RESIDUAL = { maxTimeMs: 1, maxNodes: 1 };
+
+function macroConfig(archetypeId, tertiary, slot) {
+  const config = BASE_CONFIGS.find(entry =>
+    entry.archetype === archetypeId && entry.tertiary === tertiary);
+  assert.ok(config, `fixture requires a legal pair ${archetypeId}/${tertiary}`);
+  return { ...config, slot };
+}
+
+function macroTotals(config, tuning, mods) {
+  return Object.fromEntries(STATS.map(stat => [stat, config.reduce((sum, piece, index) => {
+    const assignment = tuning[index];
+    const mod = mods[index];
+    return sum + piece.baseStats[stat]
+      + (assignment.mode === "+3" ? Number(getMasterworkStats(piece).includes(stat)) : 0)
+      + (assignment.mode === "+5-5"
+        ? Number(assignment.to === stat) * 5 - Number(assignment.from === stat) * 5 : 0)
+      + (mod ? Number(mod.stat === stat) * mod.size : 0);
+  }, 0)]));
+}
+
+// Build a verified theory witness from (frame, tertiary) pairs, per-index
+// tuning plans and mod assignments. The witness is sealed against an
+// exact-target problem so it is a genuine Solver V3 proof.
+function buildMacroSolution({ pairs, tuning, mods = {} } = {}) {
+  const config = pairs.map(([archetypeId, tertiary], index) =>
+    macroConfig(archetypeId, tertiary, MACRO_SLOTS[index]));
+  const tuningAssignments = tuning.map(entry => entry.mode === "+3"
+    ? { mode: "+3", from: null, to: null }
+    : entry.mode === "none"
+      ? { mode: "none", from: null, to: null }
+      : { mode: "+5-5", from: entry.from, to: entry.to });
+  const modAssignments = Object.fromEntries(config.map((_, index) => [index, mods[index] || null]));
+  const totals = macroTotals(config, tuningAssignments, modAssignments);
+  const problem = createProblemSpec({
+    target: totals,
+    numPlus3: tuning.filter(entry => entry.mode === "+3").length,
+    numPlus5: Object.values(mods).filter(mod => mod?.size === 5).length,
+    numPlus10: Object.values(mods).filter(mod => mod?.size === 10).length,
+    constraints: { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+  });
+  const sealed = sealWitness(problem, {
+    config, tuningAssignments, modAssignments, totals, exoticIndex: null,
+  });
+  assert.equal(sealed.valid, true, sealed.errors.join("; "));
+  return sealed.witness;
+}
+
+// A physical vault piece. `tunedStat` is the immutable Legendary +5 roll.
+function buildVaultPiece({ slot, archetypeId, tertiary, tunedStat = null, setHash = null, id }) {
+  const config = macroConfig(archetypeId, tertiary, slot);
+  return {
+    id: id || `vault-${slot}-${archetypeId}-${tertiary}`,
+    hash: 5000 + MACRO_SLOTS.indexOf(slot),
+    name: `Vault ${archetypeId} ${tertiary}`,
+    slot,
+    classId: "hunter",
+    tier: "5",
+    exotic: false,
+    archetypeId,
+    tertiary,
+    tunedStat,
+    tuningTo: tunedStat,
+    baseStats: { ...config.baseStats },
+    effectiveBaseStats: { ...config.baseStats },
+    optimizationBaseStats: { ...config.baseStats },
+    setHash,
+    dataConfidence: { stats: "known", tuning: "known" },
+  };
+}
+
+function assertMacroOwnedPlan(plan, solution, { expectedFarm = 0 } = {}) {
+  assert.equal(plan.farmCount, expectedFarm);
+  assert.equal(plan.ownedCount, 5 - expectedFarm);
+  assert.equal(plan.feasible, true);
+  assert.equal(plan.matchingProof.scope, "source-macro-equivalence");
+  assert.equal(plan.matchingProof.complete, true);
+  assert.equal(plan.matchingProof.slotIndependent, true);
+  for (const flag of ["frameworkMultiset", "tertiaryMultiset", "armorModMultiset",
+    "directionalTuningMultiset", "plus3Contribution"]) {
+    assert.equal(plan.matchingProof.equivalence[flag], true, flag);
+  }
+  assert.equal(plan.matchingProof.sourceMacroId, plan.matchingProof.candidateMacroId);
+  const witness = plan.matchedSolution;
+  assert.equal(verifyWitness(witness.problemSpec, witness).valid, true);
+  assert.equal(satisfiesConstraintModel(witness, solution.problemSpec.constraintModel), true);
+  assert.deepEqual(witness.totals, solution.totals);
+  assert.equal(verifyMacroEquivalent(solution, witness), true);
+  return witness;
+}
+
+test("framework pieces placed at different physical slots stay fully owned", () => {
+  // Bulwark ×3 + Specialist ×2, exactly like the source witness, but every
+  // piece physically sits at a different slot. No piece may be re-farmed just
+  // because the source witness sorted its configs differently.
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Bulwark", "super"],
+      ["Specialist", "health"], ["Specialist", "melee"]],
+    tuning: [{ mode: "none" }, { mode: "none" }, { mode: "none" }, { mode: "none" }, { mode: "none" }],
+  });
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Specialist", tertiary: "health" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "melee" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "melee" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Bulwark", tertiary: "grenade" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Bulwark", tertiary: "super" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  assertMacroOwnedPlan(plan, solution);
+});
+
+test("an illegal framework/tertiary roll is never consumed by multiset counts alone", () => {
+  // The vault offers Bulwark/melee-class pieces: one legal pairing and one
+  // malformed roll whose tertiary is the archetype's own primary stat. The
+  // counts alone would balance; the pairing legality must reject it.
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Specialist", "super"],
+      ["Specialist", "health"], ["Brawler", "weapons"]],
+    tuning: Array.from({ length: 5 }, () => ({ mode: "none" })),
+  });
+  const illegalPiece = {
+    ...buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "melee" }),
+    id: "vault-illegal-pairing",
+    tertiary: "health", // health is Bulwark's primary stat — not a legal tertiary
+  };
+  const items = [
+    illegalPiece,
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "melee" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "super" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Brawler", tertiary: "weapons" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  // The malformed helmet can never be owned; its (Bulwark, grenade) remainder
+  // is farmed as a legal pairing instead.
+  assert.equal(plan.farmCount, 1);
+  assert.equal(plan.ownedCount, 4);
+  assert.equal(plan.feasible, true);
+  const helmet = plan.pieces.find(piece => piece.slot === "helmet");
+  assert.equal(helmet.item, null);
+  assert.equal(verifyMacroEquivalent(solution, plan.matchedSolution), true);
+});
+
+test("directional +5/-5 assignments may move to different physical pieces", () => {
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Specialist", "super"],
+      ["Specialist", "health"], ["Brawler", "weapons"]],
+    tuning: [
+      { mode: "+5-5", from: "health", to: "melee" },
+      { mode: "+5-5", from: "health", to: "grenade" },
+      { mode: "+5-5", from: "weapons", to: "super" },
+      { mode: "+5-5", from: "melee", to: "health" },
+      { mode: "+5-5", from: "grenade", to: "weapons" },
+    ],
+  });
+  // Identical pairs at identical slots, but every immutable +5 roll points
+  // somewhere else. Only a global re-placement of the (from, to) multiset can
+  // own all five pieces.
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "melee", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "grenade", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "super", tunedStat: "weapons" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health", tunedStat: "super" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Brawler", tertiary: "weapons", tunedStat: "health" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  assertMacroOwnedPlan(plan, solution);
+});
+
+test("insufficient directional capability cannot fake a fully owned plan", () => {
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Specialist", "super"],
+      ["Specialist", "health"], ["Brawler", "weapons"]],
+    tuning: [
+      { mode: "+5-5", from: "health", to: "melee" },
+      { mode: "+5-5", from: "health", to: "grenade" },
+      { mode: "+5-5", from: "weapons", to: "super" },
+      { mode: "+5-5", from: "melee", to: "health" },
+      { mode: "+5-5", from: "grenade", to: "weapons" },
+    ],
+  });
+  // The same vault as the positive case, but no piece rolled an immutable +5
+  // towards `super`. The assignment to super must be farmed, never forged onto
+  // a piece whose capability does not allow it.
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "melee", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "grenade", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "super", tunedStat: "health" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health", tunedStat: "weapons" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Brawler", tertiary: "weapons", tunedStat: "health" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  assert.equal(plan.farmCount, 1);
+  assert.equal(plan.ownedCount, 4);
+  assert.equal(plan.feasible, true);
+  assert.equal(verifyMacroEquivalent(solution, plan.matchedSolution), true);
+});
+
+test("+3 assignments move to pieces with identical aggregate contribution", () => {
+  // (Bulwark, melee) and (Brawler, class) share the masterwork set
+  // {grenade, super, weapons}: their +3 contributions are identical, so the +3
+  // may move between them. The immutable +5 roll forces the move here.
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Brawler", "class"], ["Specialist", "super"],
+      ["Specialist", "health"], ["Bulwark", "weapons"]],
+    tuning: [
+      { mode: "+3" },
+      { mode: "+5-5", from: "health", to: "grenade" },
+      { mode: "none" },
+      { mode: "none" },
+      { mode: "none" },
+    ],
+  });
+  const items = [
+    // (Brawler, class) can only +5 melee, so it cannot host the shift to
+    // grenade; it hosts the +3 instead (same aggregate contribution).
+    buildVaultPiece({ slot: "helmet", archetypeId: "Brawler", tertiary: "class", tunedStat: "melee" }),
+    // The only grenade-capable piece is (Bulwark, melee): the shift lands here.
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "melee", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "super", tunedStat: "super" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health", tunedStat: "super" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Bulwark", tertiary: "weapons", tunedStat: "super" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  const witness = assertMacroOwnedPlan(plan, solution);
+  // The +3 must have moved: the arms piece hosts the directional shift, so the
+  // Balanced assignment sits on the helmet (Brawler, class) piece.
+  const plus3Slot = witness.config
+    .map((piece, index) => ({ piece, assignment: witness.tuningAssignments[index] }))
+    .find(entry => entry.assignment.mode === "+3");
+  assert.equal(plus3Slot.piece.slot, "helmet");
+  const shiftSlot = witness.config
+    .map((piece, index) => ({ piece, assignment: witness.tuningAssignments[index] }))
+    .find(entry => entry.assignment.mode === "+5-5");
+  assert.equal(shiftSlot.piece.slot, "arms");
+});
+
+test("tertiary stats re-paired onto different frameworks remain one macro plan", () => {
+  // Same framework and tertiary multisets, every legal pairing rotated against
+  // the source configs, and the directional Tuning capabilities only cover the
+  // multiset when reassigned across pieces.
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Bulwark", "super"],
+      ["Specialist", "health"], ["Specialist", "melee"]],
+    tuning: [
+      { mode: "+5-5", from: "health", to: "melee" },
+      { mode: "+5-5", from: "health", to: "grenade" },
+      { mode: "+5-5", from: "health", to: "super" },
+      { mode: "+5-5", from: "health", to: "grenade" },
+      { mode: "+5-5", from: "health", to: "melee" },
+    ],
+  });
+  assert.deepEqual(
+    solution.tuningAssignments.map(assignment => assignment.to).sort(),
+    ["grenade", "grenade", "melee", "melee", "super"],
+  );
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "grenade", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "super", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Bulwark", tertiary: "melee", tunedStat: "super" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "melee", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Specialist", tertiary: "health", tunedStat: "melee" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  assertMacroOwnedPlan(plan, solution);
+});
+
+test("an equal +3 count with a different contribution vector is not macro-equivalent", () => {
+  // The vault re-pairs the bag so that no owned piece (nor any single farmed
+  // remainder) reproduces the source +3 contribution {grenade, super, weapons}.
+  // A matcher that only counts numPlus3 would fake full ownership.
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Specialist", "super"],
+      ["Specialist", "health"], ["Siegebreaker", "weapons"]],
+    tuning: [
+      { mode: "+3" },
+      { mode: "none" },
+      { mode: "none" },
+      { mode: "none" },
+      { mode: "none" },
+    ],
+  });
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "grenade", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "super", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "melee", tunedStat: "super" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Siegebreaker", tertiary: "weapons", tunedStat: "super" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  // No five-owned macro arrangement exists: the +3 contribution cannot be
+  // reproduced on owned pieces and a single farmed remainder does not help.
+  assert.ok(plan.farmCount >= 2, `expected farming, got ${plan.farmCount}`);
+  assert.equal(plan.feasible, true);
+  if (plan.matchedSolution) {
+    assert.equal(verifyMacroEquivalent(solution, plan.matchedSolution), true,
+      "any certified plan that realizes this witness must remain macro-equivalent");
+  }
+});
+
+test("a full permutation of frameworks, tertiaries, mods, tuning and +3 stays owned", () => {
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Brawler", "class"],
+      ["Specialist", "health"], ["Specialist", "super"]],
+    tuning: [
+      { mode: "+3" },
+      { mode: "+5-5", from: "health", to: "super" },
+      { mode: "+5-5", from: "health", to: "melee" },
+      { mode: "none" },
+      { mode: "none" },
+    ],
+    mods: { 3: { size: 5, stat: "super" }, 4: { size: 10, stat: "grenade" } },
+  });
+  // Framework multiset and tertiary multiset are unchanged, two pairings are
+  // re-paired, every piece sits at another slot, the directional assignments
+  // move to different pieces, and the +3 moves from the helmet (Bulwark, melee)
+  // roll to the class-item (Bulwark, melee) roll with the same masterwork set.
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Brawler", tertiary: "class", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Specialist", tertiary: "grenade", tunedStat: "super" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Bulwark", tertiary: "super", tunedStat: "health" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Bulwark", tertiary: "melee", tunedStat: "weapons" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  const witness = assertMacroOwnedPlan(plan, solution);
+  const modEntries = Object.values(witness.modAssignments).filter(Boolean)
+    .map(mod => `${mod.size}:${mod.stat}`).sort();
+  assert.deepEqual(modEntries, ["10:grenade", "5:super"]);
+});
+
+test("a fixed Exotic keeps its identity, slot and roll through macro matching", () => {
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Specialist", "health"], ["Specialist", "super"],
+      ["Brawler", "class"], ["Bulwark", "weapons"]],
+    tuning: [
+      { mode: "none" },
+      { mode: "+5-5", from: "health", to: "grenade" },
+      { mode: "none" },
+      { mode: "none" },
+      { mode: "+5-5", from: "health", to: "melee" },
+    ],
+  });
+  const fixedExotic = { slot: "helmet", classId: "hunter", hash: 9001, name: "Pinned Exotic" };
+  const exoticRoll = buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "melee" });
+  const ownedExotic = {
+    ...exoticRoll, id: "owned-pinned-exotic", hash: 9001, name: "Pinned Exotic",
+    exotic: true, tunedStat: null, tuningTo: null, allowedTuningStats: [...STAT_IDS],
+  };
+  const legendaries = [
+    buildVaultPiece({ slot: "arms", archetypeId: "Specialist", tertiary: "super", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "health", tunedStat: "super" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Brawler", tertiary: "class", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Bulwark", tertiary: "weapons", tunedStat: "health" }),
+  ];
+  const [owned] = rankInventoryPlans({
+    solutions: [solution], items: [ownedExotic, ...legendaries], classId: "hunter",
+    fixedExotic, residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  const witness = assertMacroOwnedPlan(owned, solution);
+  const exoticPiece = witness.config.find(piece => piece.exotic);
+  assert.equal(exoticPiece.slot, "helmet");
+  assert.equal(exoticPiece.sourceId, "owned-pinned-exotic");
+  assert.equal(owned.pieces.find(piece => piece.slot === "helmet").item.id, "owned-pinned-exotic");
+
+  // A different Exotic identity never substitutes for the pinned one.
+  const wrongIdentity = rankInventoryPlans({
+    solutions: [solution],
+    items: [{ ...ownedExotic, id: "other-exotic", hash: 9002, name: "Different Exotic" }, ...legendaries],
+    classId: "hunter", fixedExotic, residualSearchLimits: MACRO_TINY_RESIDUAL,
+  })[0];
+  assert.equal(wrongIdentity.farmCount, 1);
+  assert.equal(wrongIdentity.ownedCount, 4);
+  assert.equal(wrongIdentity.pieces.find(piece => piece.slot === "helmet").item, null);
+
+  // The pinned Exotic's roll is fixed: a right-identity Exotic with another
+  // frame cannot own the exotic slot either.
+  const wrongRollConfig = macroConfig("Brawler", "class", "helmet");
+  const wrongRoll = rankInventoryPlans({
+    solutions: [solution],
+    items: [{
+      ...ownedExotic, id: "wrong-roll-exotic", archetypeId: "Brawler", tertiary: "class",
+      baseStats: { ...wrongRollConfig.baseStats },
+      effectiveBaseStats: { ...wrongRollConfig.baseStats },
+      optimizationBaseStats: { ...wrongRollConfig.baseStats },
+    }, ...legendaries],
+    classId: "hunter", fixedExotic, residualSearchLimits: MACRO_TINY_RESIDUAL,
+  })[0];
+  assert.equal(wrongRoll.farmCount, 1);
+  assert.equal(wrongRoll.ownedCount, 4);
+  assert.equal(wrongRoll.pieces.find(piece => piece.slot === "helmet").item, null);
+});
+
+test("an Exotic Class Item keeps its perk-derived config while legendaries re-pair", () => {
+  const exoticConfig = createExoticConfig(EXOTIC_PRIMARY, EXOTIC_SECONDARY);
+  const legendaryPairs = [["Bulwark", "melee"], ["Bulwark", "super"], ["Specialist", "health"], ["Specialist", "grenade"]];
+  const config = [
+    ...legendaryPairs.map(([archetypeId, tertiary], index) => macroConfig(archetypeId, tertiary, MACRO_SLOTS[index])),
+    { ...exoticConfig, slot: "classItem" },
+  ];
+  const tuningAssignments = [
+    { mode: "none", from: null, to: null },
+    { mode: "+5-5", from: "health", to: "melee" },
+    { mode: "none", from: null, to: null },
+    { mode: "none", from: null, to: null },
+    { mode: "none", from: null, to: null },
+  ];
+  const modAssignments = Object.fromEntries(config.map((_, index) => [index, null]));
+  const totals = macroTotals(config, tuningAssignments, modAssignments);
+  const problem = createProblemSpec({
+    target: totals,
+    constraints: { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+    exoticSettings: {
+      config: config[4], classId: "hunter", itemHash: 9003,
+      primaryPerkId: "left", secondaryPerkId: "right",
+    },
+  });
+  const sealed = sealWitness(problem, {
+    config, tuningAssignments, modAssignments, totals, exoticIndex: 4,
+  });
+  assert.equal(sealed.valid, true, sealed.errors.join("; "));
+  const solution = sealed.witness;
+  const classItem = {
+    ...buildVaultPiece({ slot: "classItem", archetypeId: "Brawler", tertiary: "grenade" }),
+    id: "owned-class-item", hash: 9003, name: "Relativism", exotic: true,
+    primaryPerkId: "left", secondaryPerkId: "right",
+    tunedStat: null, tuningTo: null, allowedTuningStats: [...STAT_IDS],
+  };
+  const legendaries = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "grenade", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "melee", tunedStat: "super" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "super", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health", tunedStat: "melee" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items: [classItem, ...legendaries], classId: "hunter",
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  const witness = assertMacroOwnedPlan(plan, solution);
+  assert.equal(witness.config[witness.exoticIndex].slot, "classItem");
+  assert.equal(witness.config[witness.exoticIndex].sourceId, "owned-class-item");
+
+  // A different perk-derived frame is not the pinned Exotic Class Item.
+  const wrongPerks = rankInventoryPlans({
+    solutions: [solution],
+    items: [{ ...classItem, id: "wrong-perks", primaryPerkId: "different" }, ...legendaries],
+    classId: "hunter", residualSearchLimits: MACRO_TINY_RESIDUAL,
+  })[0];
+  assert.equal(wrongPerks.farmCount, 1);
+  assert.equal(wrongPerks.ownedCount, 4);
+  assert.equal(wrongPerks.pieces.find(piece => piece.slot === "classItem").item, null);
+});
+
+test("set requirements stay strict across macro permutations", () => {
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Specialist", "super"],
+      ["Specialist", "health"], ["Brawler", "weapons"]],
+    tuning: Array.from({ length: 5 }, () => ({ mode: "none" })),
+  });
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Bulwark", tertiary: "grenade", setHash: 111 }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Bulwark", tertiary: "melee", setHash: 111 }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Specialist", tertiary: "super", setHash: 111 }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Specialist", tertiary: "health", setHash: 111 }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Brawler", tertiary: "weapons", setHash: 222 }),
+  ];
+  const [fourPiece] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    setRequirement: { type: "set", setHash: 111, count: 4 },
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  const fourPieceWitness = assertMacroOwnedPlan(fourPiece, solution);
+  assert.equal(fourPieceWitness.config.filter(piece => piece.setHash === 111).length, 4);
+
+  const [split] = rankInventoryPlans({
+    solutions: [solution],
+    items: items.map((item, index) => ({ ...item, setHash: index < 2 ? 111 : index < 4 ? 222 : null })),
+    classId: "hunter",
+    setRequirement: { type: "split", a: 111, b: 222 },
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  const splitWitness = assertMacroOwnedPlan(split, solution);
+  assert.equal(splitWitness.config.filter(piece => piece.setHash === 111).length, 2);
+  assert.equal(splitWitness.config.filter(piece => piece.setHash === 222).length, 2);
+
+  // Only one 222-set piece exists: the second 222 coverage must be farmed with
+  // an explicit set target, not silently owned from a 111 piece.
+  const [splitGap] = rankInventoryPlans({
+    solutions: [solution],
+    items: items.map((item, index) => ({ ...item, setHash: index < 3 ? 111 : index < 4 ? 222 : null })),
+    classId: "hunter",
+    setRequirement: { type: "split", a: 111, b: 222 },
+    residualSearchLimits: MACRO_TINY_RESIDUAL,
+  });
+  assert.equal(splitGap.farmCount, 1);
+  assert.equal(splitGap.ownedCount, 4);
+  assert.equal(splitGap.feasible, true);
+  const farmed = splitGap.pieces.find(piece => !piece.item);
+  assert.equal(farmed.farmSetHash, 222);
+});
+
+test("a macro-equivalent vault is recognized even with a one-node residual budget", () => {
+  // The residual solver receives a budget of exactly one node, which truncates
+  // both the template permutation search and any re-solve. The macro matcher
+  // must still answer the ownership question completely on its own.
+  const solution = buildMacroSolution({
+    pairs: [["Bulwark", "melee"], ["Specialist", "health"], ["Brawler", "class"],
+      ["Specialist", "super"], ["Bulwark", "grenade"]],
+    tuning: [
+      { mode: "none" },
+      { mode: "+5-5", from: "health", to: "grenade" },
+      { mode: "none" },
+      { mode: "none" },
+      { mode: "+5-5", from: "health", to: "melee" },
+    ],
+    mods: { 2: { size: 10, stat: "class" } },
+  });
+  const items = [
+    buildVaultPiece({ slot: "helmet", archetypeId: "Specialist", tertiary: "super", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "arms", archetypeId: "Brawler", tertiary: "class", tunedStat: "melee" }),
+    buildVaultPiece({ slot: "chest", archetypeId: "Bulwark", tertiary: "grenade", tunedStat: "super" }),
+    buildVaultPiece({ slot: "legs", archetypeId: "Bulwark", tertiary: "melee", tunedStat: "grenade" }),
+    buildVaultPiece({ slot: "classItem", archetypeId: "Specialist", tertiary: "health", tunedStat: "melee" }),
+  ];
+  const [plan] = rankInventoryPlans({
+    solutions: [solution], items, classId: "hunter",
+    residualSearchLimits: { maxTimeMs: 1, maxNodes: 1 },
+  });
+  assertMacroOwnedPlan(plan, solution);
 });

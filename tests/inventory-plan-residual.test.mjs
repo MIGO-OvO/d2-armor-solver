@@ -134,10 +134,43 @@ test('a freshly sealed planning witness rejects tampered physical constraints an
 test('a bounded residual miss is not an infeasibility or completeness proof', () => {
   const {solution, items} = fixture();
   items[0].tunedStat = 'grenade';
+  // The macro-equivalence phase answers ownership without the residual
+  // budget: four owned pieces plus the farmed melee roll are complete proof.
   const [plan] = rankInventoryPlans({solutions: [solution], items, residualSearchLimits: {maxNodes: 0}});
-  assert.equal(plan.matchingProof.complete, false);
+  assert.equal(plan.matchingProof.scope, 'source-macro-equivalence');
+  assert.equal(plan.matchingProof.complete, true);
+  assert.equal(plan.ownedCount, 4);
+  assert.notEqual(plan.matchedSolution?.certificate.status, 'INFEASIBLE_PROVEN');
+  assert.equal(plan.matchingProof.residualSearchLimited, true,
+    'the truncated alternative-plan search is still reported');
+});
+
+test('a non-canonical roll keeps an incomplete search honestly incomplete', () => {
+  // Baked-in Tuning shifts the physical base away from the canonical frame,
+  // so the macro-equivalence phase cannot consume the piece. It still proves
+  // the negative — no macro-equivalent owned arrangement exists — while the
+  // truncated residual re-solve (which could qualify the piece under a
+  // different macro composition) is reported as limited, not as proof.
+  const {solution, items} = fixture();
+  const item = {...items[0], tunedStat: 'grenade',
+    baseStats: {...items[0].baseStats, melee: items[0].baseStats.melee + 5, grenade: items[0].baseStats.grenade - 5}};
+  item.effectiveBaseStats = item.optimizationBaseStats = item.baseStats;
+  const [plan] = rankInventoryPlans({solutions: [solution], items: [item], classId: 'hunter',
+    residualSearchLimits: {maxNodes: 0}});
+  assert.equal(plan.ownedCount, 0);
+  assert.equal(plan.matchingProof.complete, true, 'macro search proved the negative');
+  assert.equal(plan.matchingProof.macroEquivalenceSearched, true);
   assert.equal(plan.matchingProof.residualSearchLimited, true);
   assert.notEqual(plan.matchedSolution?.certificate.status, 'INFEASIBLE_PROVEN');
+
+  // Without a bound ProblemSpec there is no macro layer at all: a truncated
+  // template search must stay explicitly incomplete instead of guessing.
+  const raw = structuredClone(solution);
+  delete raw.problemSpec;
+  const [rawPlan] = rankInventoryPlans({solutions: [raw], items: [item], classId: 'hunter',
+    residualSearchLimits: {maxNodes: 0}});
+  assert.equal(rawPlan.matchingProof.complete, false);
+  assert.equal(rawPlan.matchingProof.matchingSearchLimited, true);
 });
 
 test('fixed regular Exotic identity/slot and reserved Exotic farming survive re-solving', () => {
