@@ -172,6 +172,7 @@ test('inventory progress is frame-coalesced and unchanged candidates do not rebu
     PLAN_PAGE_SIZE: 10, planRenderLimit: 10, planFilter: 'all', planSort: 'recommended',
     buildUnifiedLoadouts: () => [entry], projectPlanView: values => values,
     resolveSelectedRowIndex: () => 0, unifiedEntryKey: value => value.witness.canonicalId,
+    unifiedSelectionKey: value => value.witness.canonicalId,
     getPageLanguage: () => 'en', renderResultWorkspace: () => 'content', restoreDetailDisclosure() {},
     syncCommandBarActions() {}, syncCommandBarLabels() {},
   });

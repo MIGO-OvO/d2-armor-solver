@@ -896,16 +896,25 @@ async function checkUpgradeTargetSync(browser) {
     await page.evaluate(() => window.analyzeArmorUpgrades());
     await page.locator("#upgradeResults:not([hidden])").waitFor();
     await checkWitnessDomRoundTrip(page);
+    await page.evaluate(() => window.selectInventorySolution(0));
+    const selected = await page.evaluate(() => window.getSelectedUnifiedEntry());
+    assert.equal(selected.tuningAssignments.some(tuning => tuning.mode === '+3'), false,
+      '+5/-5-only owned loadouts must not use balanced +3 tuning');
     await page.evaluate(() => window.exportInventorySolution(0));
-    const exportedMods = await page.locator(".dim-export-actions a").evaluate(element => {
-      const encoded = new URL(element.href).searchParams.get("loadout");
-      return JSON.parse(decodeURIComponent(encoded)).parameters.mods;
-    });
-    assert.equal(
-      exportedMods.includes(3122197216),
-      false,
-      "+5/-5-only owned loadouts must not export the balanced +3 tuning mod",
-    );
+    if (selected.feasible && selected.farmCount === 0) {
+      const exportedMods = await page.locator(".dim-export-actions a").evaluate(element => {
+        const encoded = new URL(element.href).searchParams.get("loadout");
+        return JSON.parse(decodeURIComponent(encoded)).parameters.mods;
+      });
+      assert.equal(exportedMods.includes(3122197216), false,
+        '+5/-5-only owned loadouts must not export the balanced +3 tuning mod');
+    } else {
+      assert.equal(await page.locator('.dim-export-actions a').count(), 0,
+        'an infeasible owned witness must not generate a DIM link');
+      assert.match(await page.locator('#messages').innerText(), /尚未验证可行|还需刷取/);
+      assert.equal(await page.locator('.inventory-export-button').isDisabled(), true);
+      assert.equal(await page.locator('#cmdExportDim').isDisabled(), true);
+    }
 
     await page.locator("#target_health").evaluate(element => {
       element.value = "135";
@@ -2054,7 +2063,7 @@ async function checkResultWorkspace(browser) {
     assert.equal(exportState.command, exportState.detail,
       "the command bar and the loadout header must agree about exportability");
     if (exportState.command) {
-      assert.match(exportState.commandTitle, /还需刷取|still needs/,
+      assert.match(exportState.commandTitle, /还需刷取|still needs|尚未验证可行|not verified feasible/,
         "a disabled export action must explain what is missing");
     }
     const selectedOption = page.locator('.inventory-result-option[aria-selected="true"]');
@@ -2064,7 +2073,10 @@ async function checkResultWorkspace(browser) {
     );
     await page.evaluate(index => window.exportInventorySolution(index), selectedIndex);
     const exportMessage = await page.locator("#messages").innerText();
-    if (selectedFarmCount > 0) {
+    const selectedFeasible = await page.evaluate(() => window.getSelectedUnifiedEntry().feasible);
+    if (!selectedFeasible) {
+      assert.match(exportMessage, /尚未验证可行|not verified feasible/);
+    } else if (selectedFarmCount > 0) {
       assert.match(
         exportMessage,
         new RegExp("还需刷取 " + selectedFarmCount + " 件"),

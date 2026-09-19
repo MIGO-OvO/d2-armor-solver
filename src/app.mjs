@@ -5514,6 +5514,13 @@ function unifiedEntryKey(entry) {
   return entry.pieces.map(unifiedPieceIdentity).sort().join('|');
 }
 
+// Selection follows the source theory across retries; content identity still
+// follows the physical realization for deduplication and rendering.
+function unifiedSelectionKey(entry) {
+  const sourceId = entry.kind === 'theory' ? entry.plan?.solution?.canonicalId : null;
+  return sourceId ? `theory:${sourceId}` : unifiedEntryKey(entry);
+}
+
 // Rule quality always precedes ownership. Exactness only refines proven
 // feasible candidates; a label on an unmappable skeleton is not a trump card.
 function compareUnifiedEntries(left, right) {
@@ -5630,12 +5637,17 @@ function buildUnifiedLoadouts() {
   // same five pieces, but may carry different Tuning/mod assignments. Keep the
   // stronger witness first; a near miss must never erase an exact assignment.
   // Stable ties retain the inventory entry and its execution preflight.
-  const seen = new Set();
+  const seen = new Map();
   const merged = [];
   for (const entry of entries.sort(compareUnifiedEntries)) {
     const key = unifiedEntryKey(entry);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const selectionKey = unifiedSelectionKey(entry);
+    if (seen.has(key)) {
+      seen.get(key).selectionKeys.push(selectionKey);
+      continue;
+    }
+    entry.selectionKeys = [selectionKey];
+    seen.set(key, entry);
     merged.push(entry);
   }
   unifiedCache = { key: cacheKey, solutions: allSolutions, entries: merged };
@@ -5801,14 +5813,15 @@ function renderResultWorkspace(allEntries, view, index) {
     </div>`;
 }
 
-// Which row stays selected after the list is rebuilt. Content identity wins, so
+// Which row stays selected after the list is rebuilt. Selection identity wins, so
 // a progressive refresh that reorders the Top-K keeps the reader on the same
 // loadout; a plan that was eliminated falls back to the same ordinal (clamped
 // into range) rather than to nothing, and an empty view has no selection.
 function resolveSelectedRowIndex(view, entryKey, previousIndex) {
   if (!Array.isArray(view) || view.length === 0) return -1;
   if (entryKey) {
-    const found = view.findIndex(entry => unifiedEntryKey(entry) === entryKey);
+    const found = view.findIndex(entry => unifiedSelectionKey(entry) === entryKey
+      || entry.selectionKeys?.includes(entryKey));
     if (found >= 0) return found;
   }
   return Math.min(Math.max(0, Number(previousIndex) || 0), view.length - 1);
@@ -5851,11 +5864,14 @@ function renderUnifiedResults() {
       return;
     }
     // Preserve the plan the reader is on across progressive updates, filter
-    // changes and language switches by content key, not by array position.
+    // changes and language switches by selection key, not by array position.
     let index = resolveSelectedRowIndex(view, selectedEntryKey, selectedUnifiedIndex);
     if (index < 0) index = 0;
     selectedUnifiedIndex = index;
-    selectedEntryKey = unifiedEntryKey(view[index]);
+    if (unifiedSelectionKey(view[index]) !== selectedEntryKey
+        && !view[index].selectionKeys?.includes(selectedEntryKey)) {
+      selectedEntryKey = unifiedSelectionKey(view[index]);
+    }
     planRenderLimit = Math.min(Math.max(PLAN_PAGE_SIZE, planRenderLimit), view.length);
     // Node/time-only progress must not destroy the plan list/detail DOM. The
     // current model still receives fresh search metadata; terminal transitions,
@@ -5898,9 +5914,11 @@ function syncCommandBarActions() {
   const entry = getSelectedUnifiedEntry();
   const exportButton = document.getElementById("cmdExportDim");
   if (exportButton) {
-    exportButton.disabled = !entry || entry.farmCount !== 0;
+    exportButton.disabled = !entry || entry.farmCount !== 0 || entry.feasible !== true;
     exportButton.title = !entry
       ? ""
+      : entry.feasible !== true
+        ? l('当前护甲分配尚未验证可行，不能导出 DIM 配装', '目前防具分配尚未驗證可行，不能匯出 DIM 配裝', 'This armor assignment is not verified feasible and cannot be exported to DIM')
       : entry.farmCount > 0
         ? l("该方案还需刷取护甲，补齐后才能导出 DIM 链接", "該方案還需取得防具，補齊後才能匯出 DIM 連結", "This plan still needs farmed armor before a DIM link is usable")
         : "";
@@ -6922,7 +6940,7 @@ function renderSelectedLoadout(entry, index) {
       ? l("精确解 · 已验证", "精確解 · 已驗證", "Exact solution · verified")
       : l("满足规则 · 已验证", "滿足規則 · 已驗證", "Rules satisfied · verified"))
     : state.label || searchProofLabel(entry.witness, entry.search);
-  const canExport = entry.farmCount === 0;
+  const canExport = entry.farmCount === 0 && entry.feasible === true;
   const searchingNote = entry.search?.running === true
     ? `<p class="loadout-note">${l(
       "已找到验证方案，仍在继续搜索更优候选。",
@@ -6957,7 +6975,7 @@ function selectInventorySolution(index) {
   const entry = lastUnifiedLoadouts[index];
   if (!entry) return;
   selectedUnifiedIndex = index;
-  selectedEntryKey = unifiedEntryKey(entry);
+  selectedEntryKey = unifiedSelectionKey(entry);
   if (entry.kind === "theory") {
     // `currentSolutionIdx` is the theory solver's own cursor (the legacy
     // solution nav still reads it). It is never the user's current choice —
@@ -7101,12 +7119,20 @@ async function exportInventorySolution(index) {
   if (!unified) return;
   const witness = unified.witness;
   const messages = document.getElementById('messages');
+  if (unified.feasible !== true) {
+    messages.innerHTML += `<div class="msg warn">${icon('warn')}${l(
+      '当前护甲分配尚未验证可行，不能导出 DIM 配装。',
+      '目前防具分配尚未驗證可行，不能匯出 DIM 配裝。',
+      'This armor assignment is not verified feasible and cannot be exported to DIM.'
+    )}</div>`;
+    return;
+  }
   // A plan that still needs farmed armor has no complete instance set, so a DIM
   // link would be misleading. Say what is missing instead of exporting it.
   const exportPieces = unified.pieces.map(piece => unified.kind === "inventory"
     ? piece
     : (piece.item ? {...piece.item, slot: piece.slot} : null));
-  if (exportPieces.some(piece => !piece?.sourceId || !piece?.hash)) {
+  if (unified.farmCount !== 0 || exportPieces.some(piece => !piece?.sourceId || !piece?.hash)) {
     messages.innerHTML += `<div class="msg warn">${icon('warn')}${l(
       `该方案还需刷取 ${unified.farmCount} 件护甲，补齐后才能导出可用的 DIM 配装链接。`,
       `該方案還需取得 ${unified.farmCount} 件防具，補齊後才能匯出可用的 DIM 配裝連結。`,

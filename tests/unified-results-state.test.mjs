@@ -33,6 +33,7 @@ const api = vm.runInContext(`(() => {
     "compareRankTuples",
     "unifiedPieceIdentity",
     "unifiedEntryKey",
+    "unifiedSelectionKey",
     "compareUnifiedEntries",
     "unifiedQualityRank",
     "normalizeInventoryEntry",
@@ -45,6 +46,7 @@ const api = vm.runInContext(`(() => {
     normalizeInventoryEntry,
     resolveSelectedRowIndex,
     unifiedEntryKey,
+    unifiedSelectionKey,
     acceptInventory(result) {
       lastInventoryResult = result;
       inventoryResultRevision++;
@@ -157,6 +159,33 @@ test("progressive and final results describe the same search on the same entry",
 // --- Selection preservation -------------------------------------------------
 
 const rows = ids => ids.map(id => ({pieces: [{slot: "helmet", sourceId: id}]}));
+
+test('foreground retry preserves source theory A when it moves from sixth to first', () => {
+  const before = rows(['b', 'c', 'd', 'e', 'f', 'old-a']);
+  before[5] = {...before[5], kind: 'theory', plan: {solution: {canonicalId: 'theory-a'}},
+    ownedCount: 2, farmCount: 3};
+  const key = api.unifiedSelectionKey(before[5]);
+  const after = [{...before[5], pieces: rows(['new-a'])[0].pieces, ownedCount: 5, farmCount: 0}, ...before.slice(0, 5)];
+  assert.notEqual(api.unifiedEntryKey(after[0]), api.unifiedEntryKey(before[5]));
+  assert.equal(api.resolveSelectedRowIndex(after, key, 5), 0);
+});
+
+test('theory selection survives retry deduplication into an inventory row', t => {
+  const originalPlan = context.getOwnedArmorPlan;
+  t.after(() => { context.getOwnedArmorPlan = originalPlan; api.setTheory([]); api.acceptInventory(null); });
+  const theory = {canonicalId: 'source-a'};
+  const pieces = ['helmet', 'arms', 'chest', 'legs', 'classItem'].map(slot => ({slot, sourceId: slot}));
+  const exact = witness('unused', {pieces});
+  context.getOwnedArmorPlan = () => ({solution: theory, matchedSolution: exact,
+    pieces, feasible: true, ownedCount: 5, farmCount: 0});
+  api.setTheory([theory]);
+  api.acceptInventory({results: [exact]});
+  const view = api.buildUnifiedLoadouts();
+  assert.equal(view.length, 1);
+  assert.equal(view[0].kind, 'inventory');
+  assert.ok(view[0].selectionKeys.includes('theory:source-a'));
+  assert.equal(api.resolveSelectedRowIndex(view, 'theory:source-a', 5), 0);
+});
 
 test("the selected plan survives a progressive refresh", () => {
   const before = rows(["a", "b", "c"]);

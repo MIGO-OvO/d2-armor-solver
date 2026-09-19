@@ -442,6 +442,19 @@ function comparePlans(left, right) {
     || createCanonicalId(left.solution).localeCompare(createCanonicalId(right.solution));
 }
 
+// Same source: physical feasibility precedes apparent inventory savings.
+function compareSameSourcePlans(left, right) {
+  if (left.feasible !== right.feasible) return left.feasible ? -1 : 1;
+  if (left.ownedCount !== right.ownedCount) return right.ownedCount - left.ownedCount;
+  if (left.setCoverage !== right.setCoverage) return right.setCoverage - left.setCoverage;
+  const cost = compareAssignmentCosts(left.assignmentCost, right.assignmentCost);
+  if (cost) return cost;
+  const identity = plan => stableSerialize(plan.pieces.map(piece =>
+    [piece.slot, piece.item ? getItemKey(piece.item) : null, piece.farmSetHash,
+      piece.archetypeId, piece.tertiary]));
+  return identity(left).localeCompare(identity(right));
+}
+
 // Bind a fresh planning problem to the same target/rules and budget. Physical
 // pieces keep their slots and immutable capabilities; only catalog farm pieces
 // are free variables. This is mathematical feasibility, not execution preflight.
@@ -550,7 +563,8 @@ function getCanonicalFrameConfig(archetypeId, tertiary) {
 // outcome of the macro search is in the key: physical slot, class, the legal
 // (framework, tertiary) roll, set relevance and the immutable directional
 // capability. Installed sockets/energy and instance ids are execution state —
-// two rolls with the same key are interchangeable here.
+// two rolls with the same key are interchangeable for feasibility. The local
+// candidate index additionally retains distinct installed-socket representatives.
 function getMacroCandidateKey(item, setRequirement) {
   const setHash = Number(item.setHash);
   const setKey = setRequirement.type === "none" ? 0 : setRequirement.type === "set"
@@ -631,34 +645,26 @@ function maxBagSlotCover(bag, candidatesBySlot, keyOf) {
 // never the mathematical result.
 function buildMacroModAssignments(modMultiset, chosenItems = []) {
   const mods = Object.fromEntries([0, 1, 2, 3, 4].map(index => [index, null]));
-  const remaining = new Map();
   const entries = [];
   for (const [key, count] of modMultiset) {
     const [size, stat] = key.split(":");
-    remaining.set(key, (remaining.get(key) || 0) + count);
     for (let n = 0; n < count; n++) entries.push({ size: Number(size), stat });
   }
   entries.sort((left, right) => right.size - left.size
     || STATS.indexOf(left.stat) - STATS.indexOf(right.stat));
-  const pending = [];
-  const used = new Set();
-  for (const entry of entries) pending.push(entry);
+  const pending = [...entries];
   for (let index = 0; index < 5 && index < chosenItems.length; index++) {
     const item = chosenItems[index];
     const size = Number(item?.armorModSize) || 0;
     const stat = item?.armorModStat;
     if (!size || !STATS.includes(stat)) continue;
-    const key = `${size}:${stat}`;
-    if (!(remaining.get(key) > 0)) continue;
-    remaining.set(key, remaining.get(key) - 1);
     const position = pending.findIndex(entry => entry.size === size && entry.stat === stat);
     if (position < 0) continue;
-    used.add(pending[position]);
-    mods[index] = { ...pending[position] };
+    const [matched] = pending.splice(position, 1);
+    mods[index] = { ...matched };
   }
   let cursor = 0;
   for (const entry of pending) {
-    if (used.has(entry)) continue;
     while (cursor < 5 && mods[cursor] !== null) cursor++;
     if (cursor >= 5) break;
     mods[cursor] = { ...entry };
@@ -703,6 +709,8 @@ function createMacroSearchBudget({
   // residual re-solve of other solutions must not starve later macro sessions.
   let batchTimeMs = 0;
   const batchTimeLimit = maxTimeMsPerBatch == null ? Infinity : maxTimeMsPerBatch;
+  const solutionNodeLimit = maxNodesPerSolution == null ? Infinity : maxNodesPerSolution;
+  const batchNodeLimit = maxNodesPerBatch == null ? Infinity : maxNodesPerBatch;
   const diagnostics = {
     solutionsAttempted: 0, solutionsCompleted: 0, solutionsLimited: 0,
     nodes: 0, maxSolutionNodes: 0, timeMs: 0, certifications: 0, limitReasons: [],
@@ -726,8 +734,8 @@ function createMacroSearchBudget({
         tick() {
           solutionNodes++;
           batchNodes++;
-          if (solutionNodes > maxNodesPerSolution) throw createMacroSearchLimit('solution-nodes');
-          if (batchNodes > maxNodesPerBatch) throw createMacroSearchLimit('batch-nodes');
+          if (solutionNodes > solutionNodeLimit) throw createMacroSearchLimit('solution-nodes');
+          if (batchNodes > batchNodeLimit) throw createMacroSearchLimit('batch-nodes');
           // Clock reads are throttled; the first tick still observes a budget
           // that is already exhausted before the search starts.
           if (solutionNodes === 1 || (solutionNodes & 63) === 0) {
@@ -762,23 +770,33 @@ function matchMacroEquivalentPlan({
   // macro-equivalent plan or null; `complete` reports whether this solution's
   // own search finished; `limitReason` names the budget that truncated it.
   const session = budget.beginSolution();
+  let bestCertifiedIncumbent = null;
+  const onCertified = candidate => {
+    if (!bestCertifiedIncumbent || compareSameSourcePlans(candidate, bestCertifiedIncumbent) < 0) {
+      bestCertifiedIncumbent = candidate;
+    }
+  };
   try {
     const matched = searchMacroEquivalentPlan({
-      plan, solution, context, pool, classId, fixedExotic, setRequirement, session,
+      plan, solution, context, pool, classId, fixedExotic, setRequirement, session, onCertified,
     });
     session.complete();
     return {plan: matched, complete: true, limitReason: null};
   } catch (error) {
     if (error?.kind !== 'macro-search-limit') throw error;
     session.limited(error.reason);
-    return {plan: null, complete: false, limitReason: error.reason};
+    if (bestCertifiedIncumbent) {
+      bestCertifiedIncumbent.matchingProof = {...bestCertifiedIncumbent.matchingProof,
+        complete: false, macroSearchLimited: true, macroSearchLimitReason: error.reason};
+    }
+    return {plan: bestCertifiedIncumbent, complete: false, limitReason: error.reason};
   }
 }
 
 const MACRO_FARM = Symbol("macro farm");
 
 function searchMacroEquivalentPlan({
-  plan, solution, context, pool, classId, fixedExotic, setRequirement, session,
+  plan, solution, context, pool, classId, fixedExotic, setRequirement, session, onCertified,
 }) {
   if (!Array.isArray(solution.config) || solution.config.length !== 5
       || !Array.isArray(solution.tuningAssignments) || solution.tuningAssignments.length !== 5) {
@@ -855,7 +873,7 @@ function searchMacroEquivalentPlan({
   // --- Free-slot candidate index -----------------------------------------
   const candidatesBySlot = new Map();
   for (const slot of freeSlots) {
-    const seen = new Set();
+    const seen = new Map();
     const candidates = [];
     const raw = pool.filter(item => item.slot === slot && !item.exotic
       && item.dataConfidence?.stats !== "unknown"
@@ -878,8 +896,17 @@ function searchMacroEquivalentPlan({
       }) || sortCandidates(left, right, setRequirement));
     for (const item of raw) {
       const key = getMacroCandidateKey(item, setRequirement);
-      if (seen.has(key)) continue;
-      seen.add(key);
+      // Do not change mathematical identity to encode installed mods. Keep one
+      // representative of each assignment-cost state inside the math bucket.
+      const executionKey = JSON.stringify([
+        item.tuningInstalled === false ? 'none' : item.tuningMode === 'plus3' ? '+3'
+          : [item.tuningFrom, item.tuningTo],
+        Number(item.armorModSize) || 0, item.armorModSize ? item.armorModStat : null,
+      ]);
+      const representatives = seen.get(key) || new Set();
+      if (representatives.has(executionKey)) continue;
+      representatives.add(executionKey);
+      seen.set(key, representatives);
       candidates.push({
         item,
         archetypeId: normalizeArchetypeId(item.archetypeId || item.archetype),
@@ -1058,6 +1085,7 @@ function searchMacroEquivalentPlan({
     certified.fixedExoticDistance = !fixedExotic || exoticPiece?.item
       ? 0
       : exoticPiece?.closestMismatch?.score ?? Number.MAX_SAFE_INTEGER;
+    onCertified(certified);
     return {plan: certified, feasible: certified.feasible !== false,
       setCoverage: Number(certified.setCoverage) || 0,
       assignmentCost: certified.assignmentCost, identity: entry.identity};
@@ -1224,13 +1252,23 @@ function searchMacroEquivalentPlan({
       wildcardPieces--;
       selection.set(orderedFreeSlots[position], null);
     };
-    walk(0, 0, new Map(frameBag), new Map(tertiaryBag));
+    let limit = null;
+    try {
+      walk(0, 0, new Map(frameBag), new Map(tertiaryBag));
+    } catch (error) {
+      if (error?.kind !== 'macro-search-limit') throw error;
+      limit = error;
+    }
     // Certify the shortlist in quality order: the first realization that passes
     // the full V3 boundary becomes this level's answer.
     for (const entry of topEntries) {
       const certified = certifyMacroEntry(entry);
-      if (certified) return certified;
+      if (certified) {
+        if (limit) throw limit;
+        return certified;
+      }
     }
+    if (limit) throw limit;
     return null;
   }
 
@@ -1493,16 +1531,10 @@ export function rankInventoryPlans({
           plan, solution, context, pool, classId, fixedExotic,
           setRequirement: normalizedSetRequirement, budget: macroBudget,
         });
-        if (macro.plan
-            && (macro.plan.ownedCount > plan.ownedCount
-              || (macro.plan.ownedCount === plan.ownedCount && macro.plan.feasible && !plan.feasible)
-              || (macro.plan.ownedCount === plan.ownedCount && macro.plan.feasible === plan.feasible
-                && macro.plan.setCoverage > plan.setCoverage))) {
-          // The macro phase already preferred the best realization of the
-          // settled ownership level, so a same-level upgrade only wins on
-          // coverage here.
+        if (macro.plan && compareSameSourcePlans(macro.plan, plan) < 0) {
           plan = macro.plan;
-        } else if (macro.complete
+        }
+        if (macro.complete && plan.feasible
             && plan.matchingProof.scope === 'provided-theoretical-witness') {
           plan.matchingProof = {...plan.matchingProof, complete: true, macroEquivalenceSearched: true};
         } else if (!macro.complete) {
@@ -1528,6 +1560,9 @@ export function rankInventoryPlans({
             : {complete: false, residualSearchLimited: true})};
       }
     }
+    // Completeness describes the displayed realization, never an uncertified
+    // skeleton left behind by either matching phase (including legacy input).
+    if (!plan.feasible) plan.matchingProof = {...plan.matchingProof, complete: false};
     plans.push(plan);
   }
 
