@@ -99,19 +99,55 @@ user selects.
    framework/tertiary bags piece by piece (canonical T5 bases only), resolves
    pinned identities, re-pairs the bag remainder legally for farmed slots,
    re-places directional Tuning by real capability, reproduces the +3
-   contribution vector and redistributes Armor Mods deterministically. The
-   search is exhaustive for at most five pieces and uses its own budget: the
-   answer never depends on `residualSearchLimits`.
+   contribution vector and redistributes Armor Mods. The search is exhaustive
+   for at most five pieces and uses its own budget: the answer never depends on
+   `residualSearchLimits`.
 3. **Residual constraint re-solve** (`reoptimizeConstraintPlan` via
    `findExactPartialConfigWitnesses`) — bounded re-solve of the *original*
    `problemSpec`/`constraintModel`. It may produce a different macro
    composition (a different plan in the same problem), never a macro-equivalent
    realization of the source, and its results are always reported incomplete.
 
+Within a settled ownership level the matcher keeps the best realization:
+rule feasibility first, then set coverage, then the cheaper Tuning/Armor-Mod
+assignment, and finally a stable identity order (`compareMacroCandidates`).
+Armor Mods are placed per candidate so the multiset stays exact while pieces
+whose installed mod is still in the multiset keep it, which lowers
+`changedSocketCount` without touching the mathematics.
+
+Certifying a candidate is expensive — a witness seal, a certificate and the
+macro comparison — so the leaf search ranks candidates by cheap metrics only
+and each ownership level certifies a small ranked shortlist
+(`MACRO_CERTIFY_ATTEMPTS`). `diagnostics.certifications` tracks that count;
+ranking every leaf through the full V3 boundary instead would spend the whole
+budget on certification alone.
+
 A candidate becomes the displayed plan only after the full V3 correctness
 boundary passes: `verifyMacroEquivalent(source, candidate)`, `sealWitness`,
 `satisfiesConstraintModel` and a fresh `createResultCertificate`. The source
 witness is never mutated.
+
+## Search budget and scheduling
+
+Every source solution gets its own macro search session:
+
+* a per-solution node counter and time slice, both started when the solution
+  *enters phase 2* — phase 1 template search and certification time can never
+  consume them;
+* a batch-wide node counter and a batch ceiling on accumulated macro work
+  (not on the wall clock of the surrounding call), so a 50-solution batch
+  cannot stall and one hopeless solution cannot eat the whole budget.
+
+Defaults are tuned for both ends: near-template vaults finish in well under a
+thousand nodes with a couple of certifications, while a pathological batch
+stays bounded near a second of macro work per call. `macroSearchLimits`
+injects the limits for tests and benchmarks. A truncated search records which
+budget stopped it (`solution-nodes`, `solution-time`, `batch-nodes`,
+`batch-time`), and `rankInventoryPlans` exposes per-batch diagnostics
+(`solutionsAttempted/Completed/Limited`, `nodes`, `maxSolutionNodes`,
+`timeMs`, `certifications`, `limitReasons`) for audits. The diagnostics ride on
+the returned array, so the worker transport drops them instead of paying for
+them.
 
 ## Proof semantics (`matchingProof`)
 
@@ -133,14 +169,38 @@ witness is never mutated.
   scope: "original-constraint-model",
   complete: false, macroEquivalent: false, residualResolve: true,
 }
+
+// Truncated ownership search:
+{
+  scope: "provided-theoretical-witness",   // or source-macro-equivalence
+  complete: false,
+  macroSearchLimited: true,
+  macroSearchLimitReason: "solution-nodes" | "solution-time" | "batch-nodes" | "batch-time",
+  // plus matchingSearchLimited / residualSearchLimited when those phases were cut
+}
 ```
 
 A completed macro search settles the owned/farm question for that solution
 even when phases 1 and 3 were truncated (`macroEquivalenceSearched`). A
-truncated macro search marks the plan `complete: false` with
-`macroSearchLimited`, and the UI presents the farm list as provisional rather
-than certain. A bounded residual miss never demotes an already-proven
-macro/template result — it only means alternative plans were not exhausted.
+bounded residual miss never demotes an already-proven macro/template result —
+it only means alternative plans were not exhausted, and only adds
+`residualSearchLimited`.
+
+## Provisional vs settled plans
+
+`isOwnedPlanSettled(plan)` is the single authority: a plan is settled when
+`matchingProof.complete !== false`. A completed macro proof stays settled even
+when the alternative-plan residual search was truncated, and a fully-owned
+plan needs no caveat.
+
+The owned-plan cache stores both kinds. Provisional entries keep serving the
+list, but they are never final: when the reader opens that solution, the app
+issues one dedicated foreground retry for that solution alone (a fresh macro
+session instead of the shared batch slice) and replaces the entry with the
+settled result. At most one automatic retry per input revision prevents
+render/retry loops; an inventory, filter or constraint change re-arms it. The
+UI shows a "search incomplete" notice only while the owned/farm conclusion is
+genuinely provisional.
 
 ## Relationship to Solver V3 identity
 

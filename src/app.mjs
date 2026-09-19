@@ -41,7 +41,7 @@ import {
   createTargetConstraints,
   visibleConstraintsToArmor,
 } from "./core/target-constraints.mjs";
-import { createOwnedPlanCache } from "./core/owned-plan-cache.mjs";
+import { createOwnedPlanCache, isOwnedPlanSettled } from "./core/owned-plan-cache.mjs";
 import { compareAssignmentCosts } from "./core/assignment-cost.mjs";
 import { rankStatRules } from "./core/stat-ranking.mjs";
 import { createCanonicalId, createRulesetId, createSolutionDisplayModel, assertSolutionConsistency, EXECUTION_STATUS, SOLVER_V3_SCHEMA_VERSION } from "./core/solver-v3-contract.mjs";
@@ -2001,6 +2001,7 @@ function invalidateOwnedPlanCache() {
   ownedPlanResultRevision++;
   ownedPlanCache.invalidate();
   failedOwnedPlanKeys.clear();
+  ownedPlanRetryKeys.clear();
   pendingOwnedPlanRequests.clear();
   ownedPlanError = null;
 }
@@ -2057,8 +2058,47 @@ function getOwnedArmorPlan(solution, { allowEmpty = true, schedule = true } = {}
   if (schedule && !ownedPlanCache.has(key)) {
     const candidates = allSolutions.includes(solution) ? allSolutions : [solution];
     void ensureOwnedArmorPlans(candidates, {allowEmpty}).catch(() => {});
+  } else if (schedule) {
+    // The plan is cached but its ownership search was truncated: give this
+    // solution its own foreground retry (at most once per input revision).
+    const retry = retryOwnedArmorPlan(solution, {allowEmpty});
+    if (retry) void retry.catch(() => {});
   }
   return ownedPlanCache.peek(key, solution);
+}
+
+// A truncated ownership search stays visible immediately, but it must never
+// become permanent. When the reader opens that solution it is retried alone —
+// with a dedicated macro budget instead of the shared batch slice — while the
+// completed result replaces the provisional cache entry. At most one automatic
+// attempt per input revision prevents render/retry loops; an inventory or
+// constraint change bumps the revision and re-enables the retry.
+const ownedPlanRetryKeys = new Set();
+
+function retryOwnedArmorPlan(solution, { allowEmpty = true } = {}) {
+  const key = ownedPlanCacheKey(solution, allowEmpty);
+  if (!key || ownedPlanCache.isSettled(key)) return null;
+  if (ownedPlanRetryKeys.has(key) || failedOwnedPlanKeys.has(key)) return null;
+  ownedPlanRetryKeys.add(key);
+  const request = createOwnedArmorPlanRequest([solution], 1, {allowEmpty});
+  if (!request) return null;
+  const revision = ownedPlanRevision;
+  return ownedPlanCache.revalidate(request, [key]).catch(error => {
+    if (error.name === 'AbortError') throw error;
+    if (revision === ownedPlanRevision) {
+      failedOwnedPlanKeys.add(key);
+      ownedPlanError = error;
+      scheduleOwnedPlanRender();
+      console.error('Owned armor plan retry failed', error);
+    }
+    return [];
+  });
+}
+
+function ensureOwnedArmorPlanSettled(solution, options = {}) {
+  const key = ownedPlanCacheKey(solution, options.allowEmpty !== false);
+  if (!key || ownedPlanCache.isSettled(key)) return null;
+  return retryOwnedArmorPlan(solution, options);
 }
 
 async function refreshInventoryPlansFromSolutions({ rerender = true, rejectCancelled = false } = {}) {
@@ -6497,16 +6537,14 @@ function renderAcquisitionRow(row, position) {
   </li>`;
 }
 
-// The owned/farm split is only a final answer when a complete search backs it.
-// A completed macro-equivalence proof (or a fully-owned plan, which is
-// trivially minimal) is certain; a truncated search must not present the
-// current farm list as the only possible outcome.
+// The owned/farm split is only a final answer when the ownership search
+// completed. `matchingProof.complete` is the single authority: a completed
+// macro proof stays certain even when the *alternative-plan* residual search
+// was truncated, and a fully-owned plan needs no caveat at all. Only a
+// truncated ownership search is provisional.
 function isPlanSearchIncomplete(entry) {
   if (entry.kind !== "theory" || entry.farmCount <= 0) return false;
-  const proof = entry.matchingProof;
-  if (!proof) return false;
-  if (proof.scope === "source-macro-equivalence" && proof.complete) return false;
-  return proof.complete === false;
+  return !isOwnedPlanSettled(entry.plan);
 }
 
 function renderPlanSearchIncompleteNote(entry, { className = "loadout-note" } = {}) {
@@ -6926,6 +6964,10 @@ function selectInventorySolution(index) {
     // Save/DIM/Equip resolve the selection from the unified list instead.
     const solutionIndex = allSolutions.indexOf(entry.plan?.solution);
     if (solutionIndex >= 0) currentSolutionIdx = solutionIndex;
+    // Opening a plan whose ownership search was truncated retries it alone
+    // with a dedicated macro budget; a settled plan is never recalculated.
+    const retry = ensureOwnedArmorPlanSettled(entry.plan?.solution);
+    if (retry) void retry.catch(() => {});
   }
   // Keep the reader's viewport and every open accordion: only the selection and
   // the detail column change here.

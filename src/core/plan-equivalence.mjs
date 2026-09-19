@@ -283,49 +283,86 @@ function pinnedPiecesEqual(source, candidate) {
 // The comparison therefore aligns the source's pinned descriptors against
 // candidate pieces first; every remaining candidate piece — owned or farmed —
 // realizes the movable multisets.
-function matchesPinnedDescriptor(config, descriptor) {
+//
+// `matchesPinnedDescriptor` verifies the candidate's own immutable descriptor:
+// a source-bound piece must agree on slot, instance id, framework, tertiary
+// and exact base roll, so tampering is rejected here and never depends on
+// `sealWitness` to be caught.
+function matchesPinnedDescriptor(config, descriptor, slot) {
   if (!config) return false;
+  if (slot !== descriptor.slot) return false;
+  const archetypeId = getConfigArchetypeId(config);
+  const baseStats = normalizedBaseStats(config);
   if (descriptor.kind === "exotic") {
     if (!config.exotic) return false;
-    if (getConfigArchetypeId(config) !== descriptor.archetypeId
-        || config.tertiary !== descriptor.tertiary) return false;
-    if (STATS.some(stat => Number(config.baseStats?.[stat] || 0) !== descriptor.baseStats[stat])) return false;
+    if (archetypeId !== descriptor.archetypeId || config.tertiary !== descriptor.tertiary) return false;
+    if (STATS.some(stat => baseStats[stat] !== descriptor.baseStats[stat])) return false;
     if (descriptor.hash !== null && Number(config.hash ?? 0) !== descriptor.hash) return false;
     return true;
   }
-  return String(config.sourceId || "") === descriptor.sourceId;
+  if (String(config.sourceId || "") !== descriptor.sourceId) return false;
+  if (archetypeId !== descriptor.archetypeId || config.tertiary !== descriptor.tertiary) return false;
+  return STATS.every(stat => baseStats[stat] === descriptor.baseStats[stat]);
+}
+
+// The candidate's own pinned descriptor, rebuilt from the matched candidate
+// config. Comparing these (never the source's descriptors) is what makes
+// `verifyMacroEquivalent` an independent checker.
+function descriptorFromCandidateConfig(config, descriptor, slot) {
+  const archetypeId = getConfigArchetypeId(config);
+  const tertiary = STATS.includes(config?.tertiary) ? config.tertiary : null;
+  const baseStats = normalizedBaseStats(config);
+  if (descriptor.kind === "exotic") {
+    // A theory config without a hash pins only the frame, so the candidate's
+    // own hash must not leak into the macro identity. When the source does pin
+    // a hash, `matchesPinnedDescriptor` has already proved the candidate
+    // agrees with it.
+    const hash = descriptor.hash !== null ? Number(config?.hash) || descriptor.hash : null;
+    return {kind: "exotic", slot, sourceId: null, hash, archetypeId, tertiary, baseStats};
+  }
+  return {kind: "source", slot, sourceId: String(config?.sourceId || ""), hash: null,
+    archetypeId, tertiary, baseStats};
 }
 
 function alignCandidatePieces(sourceProfile, candidate) {
   const slots = resolvePlanSlots(candidate);
   const configs = candidate?.config || [];
   const taken = configs.map(() => false);
+  const pinnedPieces = [];
   for (const descriptor of sourceProfile.pinnedPieces) {
     let matched = -1;
     for (let index = 0; index < configs.length; index++) {
-      if (taken[index] || slots[index] !== descriptor.slot) continue;
-      if (matchesPinnedDescriptor(configs[index], descriptor)) { matched = index; break; }
+      if (taken[index]) continue;
+      if (matchesPinnedDescriptor(configs[index], descriptor, slots[index])) {
+        matched = index;
+        break;
+      }
     }
     if (matched < 0) return null;
     taken[matched] = true;
+    pinnedPieces.push(descriptorFromCandidateConfig(configs[matched], descriptor, slots[matched]));
   }
-  return configs.map((config, index) => ({ config, movable: !taken[index] }));
+  return {
+    pinnedPieces,
+    movable: configs.map((config, index) => ({ config, movable: !taken[index] })),
+  };
 }
 
 // Detailed comparison: which invariants match, which do not. `equivalence`
 // carries the five task-level invariants; `differences` also names pinned
 // identity and totals regressions. The returned `candidateProfile` is the
 // candidate *as a realization of the source's macro class*: pinned entries are
-// the aligned descriptors, the bags come from the remaining pieces.
+// the candidate's own rebuilt descriptors, the bags come from the remaining
+// pieces.
 export function comparePlanMacroProfiles(source, candidate, options = {}) {
   const sourceProfile = createPlanMacroProfile(source, options);
   const alignment = alignCandidatePieces(sourceProfile, candidate);
   const movableConfigs = alignment
-    ? alignment.filter(entry => entry.movable).map(entry => entry.config)
+    ? alignment.movable.filter(entry => entry.movable).map(entry => entry.config)
     : (candidate?.config || []);
   const candidateProfile = {
     schemaVersion: PLAN_EQUIVALENCE_SCHEMA_VERSION,
-    pinnedPieces: alignment ? sourceProfile.pinnedPieces : null,
+    pinnedPieces: alignment ? alignment.pinnedPieces : null,
     frameworkMultiset: toCountEntries(movableConfigs.map(getConfigArchetypeId).filter(Boolean)),
     tertiaryMultiset: toCountEntries(movableConfigs
       .map(config => config?.tertiary).filter(stat => STATS.includes(stat))),
@@ -349,7 +386,8 @@ export function comparePlanMacroProfiles(source, candidate, options = {}) {
   };
   const differences = Object.entries(equivalence)
     .filter(([, ok]) => !ok).map(([name]) => name);
-  if (!alignment || !pinnedPiecesEqual(sourceProfile.pinnedPieces, candidateProfile.pinnedPieces)) {
+  if (!alignment
+      || !pinnedPiecesEqual(sourceProfile.pinnedPieces, candidateProfile.pinnedPieces)) {
     differences.push("pinnedPieces");
   }
   if (STATS.some(stat => sourceProfile.totals[stat] !== candidateProfile.totals[stat])) {

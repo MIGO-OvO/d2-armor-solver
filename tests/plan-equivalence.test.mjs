@@ -242,6 +242,85 @@ test("pinned pieces compare by exotic frame or source identity, not by ownership
       baseStats: boundProfile.pinnedPieces[0].baseStats }]);
 });
 
+// A source-bound piece keeps its instance identity. The verifier must reject
+// tampering on its own — these cases never call sealWitness, so nothing but
+// plan-equivalence.mjs can catch them.
+test("a source-bound pinned piece is verified from the candidate's own descriptor", () => {
+  const source = buildWitness({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Specialist", "health"],
+      ["Specialist", "super"], ["Brawler", "class"]],
+    tuning: Array.from({ length: 5 }, () => ({ mode: "none" })),
+  });
+  const bound = structuredClone(source);
+  bound.config = bound.config.map((piece, index) =>
+    index === 1 ? { ...piece, sourceId: "vault-piece-17" } : piece);
+  // Control: an untouched realization (same piece, other slots permuted) is
+  // still equivalent, so the checker is not simply rejecting everything.
+  const honest = structuredClone(bound);
+  honest.config = [bound.config[2], bound.config[0], bound.config[1],
+    bound.config[4], bound.config[3]];
+  assert.equal(verifyMacroEquivalent(bound, honest), true);
+
+  const tamperedSlot = structuredClone(bound);
+  tamperedSlot.config[1] = { ...tamperedSlot.config[1], slot: "legs" };
+  tamperedSlot.config[3] = { ...tamperedSlot.config[3], slot: "arms" };
+  const slotComparison = comparePlanMacroProfiles(bound, tamperedSlot);
+  assert.equal(slotComparison.equal, false, "same sourceId at another slot is not equivalent");
+  assert.ok(slotComparison.differences.includes("pinnedPieces"));
+
+  const tamperedArchetype = structuredClone(bound);
+  tamperedArchetype.config[1] = { ...tamperedArchetype.config[1], archetype: "Brawler" };
+  const archetypeComparison = comparePlanMacroProfiles(bound, tamperedArchetype);
+  assert.equal(archetypeComparison.equal, false);
+  assert.ok(archetypeComparison.differences.includes("pinnedPieces"));
+
+  const tamperedTertiary = structuredClone(bound);
+  tamperedTertiary.config[1] = { ...tamperedTertiary.config[1], tertiary: "super" };
+  const tertiaryComparison = comparePlanMacroProfiles(bound, tamperedTertiary);
+  assert.equal(tertiaryComparison.equal, false);
+  assert.ok(tertiaryComparison.differences.includes("pinnedPieces"));
+
+  const tamperedBase = structuredClone(bound);
+  tamperedBase.config[1] = {
+    ...tamperedBase.config[1],
+    baseStats: { ...tamperedBase.config[1].baseStats, health: tamperedBase.config[1].baseStats.health + 5 },
+  };
+  const baseComparison = comparePlanMacroProfiles(bound, tamperedBase);
+  assert.equal(baseComparison.equal, false);
+  assert.ok(baseComparison.differences.includes("pinnedPieces"));
+
+  // The candidate's own descriptor (not a copy of the source's) is what the
+  // comparison exposes.
+  assert.deepEqual(comparePlanMacroProfiles(bound, honest).candidateProfile.pinnedPieces,
+    [{ kind: "source", slot: "arms", sourceId: "vault-piece-17", hash: null,
+      archetypeId: "Bulwark", tertiary: "grenade",
+      baseStats: comparePlanMacroProfiles(bound, honest).sourceProfile.pinnedPieces[0].baseStats }]);
+});
+
+test("an Exotic pinned by hash rejects a different rollout of the same frame", () => {
+  const source = buildWitness({
+    pairs: [["Bulwark", "melee"], ["Bulwark", "grenade"], ["Specialist", "health"],
+      ["Specialist", "super"], ["Brawler", "class"]],
+    tuning: Array.from({ length: 5 }, () => ({ mode: "none" })),
+  });
+  const hashPinned = structuredClone(source);
+  hashPinned.config[0] = { ...hashPinned.config[0], exotic: true, hash: 9001 };
+  const otherExotic = structuredClone(source);
+  otherExotic.config[0] = { ...otherExotic.config[0], exotic: true, hash: 9002 };
+  const comparison = comparePlanMacroProfiles(hashPinned, otherExotic,
+    { fixedExotic: { slot: "helmet", hash: 9001 } });
+  assert.equal(comparison.equal, false);
+  assert.ok(comparison.differences.includes("pinnedPieces"));
+
+  const sameExotic = structuredClone(hashPinned);
+  assert.equal(verifyMacroEquivalent(hashPinned, sameExotic,
+    { fixedExotic: { slot: "helmet", hash: 9001 } }), true);
+  // A theory pin without a hash pins only the frame, so the candidate's own
+  // hash is not part of the macro identity.
+  const theoryPin = structuredClone(source);
+  theoryPin.config[0] = { ...theoryPin.config[0], exotic: true };
+  assert.equal(verifyMacroEquivalent(theoryPin, otherExotic), true);
+});
 // ============================================================
 // DETERMINISTIC PROPERTY-STYLE DIFFERENTIAL
 // ============================================================

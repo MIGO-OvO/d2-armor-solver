@@ -75,11 +75,13 @@ configs, while fixed physical identities — the Exotic slot, Exotic Class Item
 perk config, source-bound pieces — class, set requirements and real Tuning
 capability stay hard constraints. Matching runs in three phases: an
 exact-template fast path over legal slot permutations, an exhaustive
-macro-equivalence matcher independent of the residual budget, and a bounded
-residual re-solve of the original constraint model. Every final actual plan is
-re-sealed and re-certified; the original source witness is never modified.
-Matching equivalence is mathematical/ownership equivalence, not an execution
-certificate. `mathDataKnown` and `executionKnown` are separate predicates.
+macro-equivalence matcher with its own per-solution and per-batch budgets, and
+a bounded residual re-solve of the original constraint model. Every final
+actual plan is re-sealed and re-certified; the original source witness is
+never modified, and a truncated ownership search is reported as provisional
+rather than as a final farm list. Matching equivalence is
+mathematical/ownership equivalence, not an execution certificate.
+`mathDataKnown` and `executionKnown` are separate predicates.
 
 Rule satisfaction is the single ranking axis shared by every plan kind. A bound
 `ProblemSpec.constraintModel` decides it: `satisfiesConstraintModel` partitions
