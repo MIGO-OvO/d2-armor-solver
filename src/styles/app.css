@@ -272,6 +272,41 @@ body {
   text-wrap: balance;
 }
 .header h1 span { color: var(--accent); }
+/* Title row: the heading and the friend-site link share a line while both fit,
+   then the link wraps under the heading instead of squeezing it. */
+.page-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+}
+.page-title-friend {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-quiet);
+  color: var(--text-dim);
+  font-size: .8125rem;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.page-title-friend .icon {
+  width: .875rem;
+  height: .875rem;
+  color: var(--accent);
+}
+.page-title-friend:hover {
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface-quiet));
+  color: var(--text);
+}
+.page-title-friend:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .header .subtitle {
   max-width: 62ch;
   margin-top: 10px;
