@@ -70,7 +70,10 @@ function readJson(storage, key, fallback) {
 
 function writeJson(storage, key, value) {
   try {
-    return writeText(storage, key, JSON.stringify(value));
+    // JSON would otherwise erase Bungie socket Sets as {}, breaking the first
+    // solve after a reload. Keep the portable array form used by capabilities.
+    return writeText(storage, key, JSON.stringify(value, (field, entry) =>
+      field === 'candidatePlugHashes' && entry instanceof Set ? [...entry] : entry));
   } catch {
     // Serialization must fail before touching the last good record.
     return false;

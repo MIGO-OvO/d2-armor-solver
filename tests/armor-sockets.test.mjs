@@ -14,6 +14,7 @@ import {
   deriveTuningStats,
   findEmptyPlugHash,
   findSocketByRole,
+  normalizeSocketCandidates,
 } from "../src/core/armor-sockets.mjs";
 
 const tuningHash = (to, from) => Number(TUNING_MOD_HASH_BY_TUNING[`${to}:${from}`]);
@@ -22,6 +23,18 @@ const ALL_TUNING = [
   BALANCED_TUNING_MOD_HASH,
   ...Object.values(TUNING_MOD_HASH_BY_TUNING).map(Number),
 ];
+
+test('portable and legacy socket candidates preserve the known/unknown distinction without mutation', () => {
+  const portable = {candidatePlugHashes: [tuningHash('health', 'weapons')], candidateState: 'known'};
+  assert.equal(deriveTuningStats(portable).fixedTuningStat, 'health');
+  assert.ok(Array.isArray(portable.candidatePlugHashes));
+  const legacy = {candidatePlugHashes: {}, candidateState: 'known'};
+  assert.equal(normalizeSocketCandidates(legacy).candidateState, 'unknown');
+  assert.equal(deriveTuningStats(legacy).confidence, 'unknown');
+  assert.deepEqual(legacy.candidatePlugHashes, {});
+  assert.equal(legacy.candidateState, 'known');
+  assert.equal(normalizeSocketCandidates({candidatePlugHashes: [], candidateState: 'known'}).candidateState, 'known');
+});
 
 test("socket role is identified from candidate plugs without a manifest socket table", () => {
   assert.equal(classifySocketRole({ currentPlugHash: statHash("health", 10), candidatePlugHashes: null }), SOCKET_ROLE.STAT);

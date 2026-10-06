@@ -242,7 +242,7 @@ import {
   reconcileCustomLoadout,
 } from "./core/bungie-loadout.mjs";
 import { ARMOR_BUCKETS, VAULT_BUCKET, extractStorage } from './core/bungie-storage.mjs';
-import { renderCharacterCards, renderBungieTask } from './core/bungie-task-view.mjs';
+import { bungieImage, renderCharacterCards, renderBungieTask } from './core/bungie-task-view.mjs';
 import {
   getActiveSetBonuses,
   getArmorSetByHash,
@@ -2253,7 +2253,6 @@ function buildOwnedGearSection(_finalTotals, _targets) {
   const manualList = manualOwnedItems.length > 0
     ? `<ul class="manual-owned-list">${manualOwnedItems.map(renderManualOwnedItem).join('')}</ul>`
     : '';
-  const bungieTargetControl = renderOwnedGearBungieTargetControl();
   const actionStatus = ownedArmorActionStatus
     ? `<div class="owned-armor-action-status"><div class="msg ${ownedArmorActionStatus.tone}">${icon(ownedArmorActionStatus.tone === 'error' ? 'block' : ownedArmorActionStatus.tone === 'warn' ? 'warn' : 'check')}<span>${escapeHtml(ownedArmorActionStatus.text)}</span></div></div>`
     : '';
@@ -2270,7 +2269,6 @@ function buildOwnedGearSection(_finalTotals, _targets) {
     <span class="inventory-strip-title">${l('库存', '庫存', 'Inventory')}</span>
     <span class="inventory-strip-item">${escapeHtml(sourceLabel)}</span>
     <span class="inventory-strip-item">${l(`手动 · ${manualOwnedItems.length} 件`, `手動 · ${manualOwnedItems.length} 件`, `Manual · ${manualOwnedItems.length}`)}</span>
-    ${bungieTargetControl}
     <div class="inventory-strip-actions">
       <button type="button" class="btn" id="manualOwnedManageButton" onclick="toggleManualOwnedEditor()" aria-expanded="${manualOwnedEditorOpen}" aria-controls="manualOwnedEditor">${icon('gear')}${l('管理', '管理', 'Manage')}</button>
     </div>
@@ -2857,6 +2855,7 @@ function bungieAccountHtml() {
     <button type="button" class="btn bungie-sync-button" onclick="importInventoryFromBungie()" ${isBungieImporting ? "disabled" : ""}>${icon("refresh")}<span>${syncLabel}</span></button>
     <span class="bungie-sync-meta" title="${escapeHtml(autoRefreshLabel)}"><span class="bungie-sync-pulse" aria-hidden="true"></span>${formatBungieLastSync()} · ${l("自动 10 秒", "自動 10 秒", "Auto 10s")}</span>
   </div>
+  ${renderBungieCharacterMenu()}
   <details class="bungie-account-menu">
     <summary aria-label="${escapeHtml(l(`Bungie 账户：${displayName}`, `Bungie 帳戶：${displayName}`, `Bungie account: ${displayName}`))}">
       <span class="bungie-account-status" aria-hidden="true"></span>
@@ -2880,7 +2879,9 @@ function renderBungieAuthState() {
 
 function renderHeaderBungieAuthState() {
   const area = document.getElementById("headerBungieAuth");
-  if (area) area.innerHTML = bungieAccountHtml();
+  // Passive sync must not replace a radio being used with keyboard or pointer.
+  const choosing = area?.querySelector('#bungieCharacterMenu[open]')?.contains(document.activeElement);
+  if (area && !(choosing && hasToken() && bungieProfileState)) area.innerHTML = bungieAccountHtml();
   syncBungieAutoRefresh();
 }
 
@@ -2981,16 +2982,36 @@ function setBungieTargetCharacter(characterId) {
   if (!valid) return;
   bungieTargetCharacterId = String(characterId);
   ownedArmorActionStatus = null;
+  const menu = document.getElementById('bungieCharacterMenu');
+  if (menu) menu.open = false;
+  renderHeaderBungieAuthState();
   renderUpgradeImportPanel();
   if (lastInventoryResult?.results?.length) renderInventoryResults(lastInventoryResult);
   if (calculatorMode === "solve" && allSolutions.length > 0) buildOwnedGearSection();
+  document.querySelector('#bungieCharacterMenu > summary')?.focus();
 }
 
-function renderOwnedGearBungieTargetControl() {
-  if (!__BUNGIE_OAUTH_CLIENT_ID__ || !hasToken() || importSource !== "bungie" || !bungieProfileState) {
-    return "";
-  }
-  return renderBungieCharacterPicker();
+function renderBungieTargetSummary() {
+  syncBungieTargetCharacter();
+  const character = bungieProfileState?.characters?.[bungieTargetCharacterId];
+  if (!character) return '';
+  return `<span class="bungie-target-summary">${l('目标角色：', '目標角色：', 'Target: ')}<strong>${escapeHtml(formatBungieCharacterLabel(character))}</strong></span>`;
+}
+
+function renderBungieCharacterMenu() {
+  if (!bungieProfileState || !Object.keys(bungieProfileState.characters || {}).length) return '';
+  syncBungieTargetCharacter();
+  const character = bungieProfileState.characters[bungieTargetCharacterId];
+  const emblem = bungieImage(character?.emblemPath);
+  return `<details id="bungieCharacterMenu" class="bungie-character-menu" onkeydown="if(event.key==='Escape'){this.open=false;this.querySelector('summary').focus();}">
+    <summary aria-label="${escapeHtml(l('切换目标角色', '切換目標角色', 'Switch target character'))}">
+      ${emblem ? `<img src="${emblem}" alt="" width="32" height="32" onerror="this.hidden=true">` : ''}
+      <span>${escapeHtml(character ? formatBungieCharacterLabel(character) : l('选择目标角色', '選擇目標角色', 'Choose target character'))}</span>${icon('down')}
+    </summary>
+    <div class="bungie-character-popover">${renderBungieCharacterPicker()}
+      <p>${l('全页共用此角色。其他职业请先修改护甲职业筛选。', '全頁共用此角色。其他職業請先修改防具職業篩選。', 'Shared across this page. Change the armor class filter to use another class.')}</p>
+    </div>
+  </details>`;
 }
 
 function renderBungieCharacterPicker() {
@@ -3100,10 +3121,12 @@ function renderOwnedArmorBungieAction(item) {
   const title = state.reason ? ` title="${escapeHtml(state.reason)}"` : "";
   const actionIcon = state.action === "transfer" ? "refresh" : "check";
   return `<span class="owned-armor-match-actions">
-    ${state.location ? `<small>${escapeHtml(state.location)}</small>` : ""}
+    ${state.location ? `<small class="owned-armor-location">${escapeHtml(state.location)}</small>` : ""}
+    <span class="owned-armor-buttons">
     <button type="button" class="btn owned-armor-action" data-item-id="${escapeHtml(rawItemId)}" onclick="applyOwnedArmorItemAction(${itemId})" ${state.available ? "" : "disabled"}${title}>${icon(actionIcon)}${state.label}</button>
     ${state.action === 'transfer' ? `<button type="button" class="btn owned-armor-action" onclick="applyOwnedArmorItemAction(${itemId},'equip')" ${state.available ? '' : 'disabled'}>${l('移动并装备', '移動並裝備', 'Move and equip')}</button>` : ''}
-    ${state.reason ? `<small class="owned-armor-action-reason">${escapeHtml(state.reason)}</small>` : ''}
+    </span>
+    ${state.reason && state.action !== 'equipped' ? `<small class="owned-armor-action-reason">${escapeHtml(state.reason)}</small>` : ''}
   </span>`;
 }
 
@@ -3262,7 +3285,7 @@ function getSavedBungieLoadoutsHtml() {
       `In-game saved loadouts (${loadouts.length})`,
     )}</summary>
     <div class="bungie-saved-toolbar">
-      ${renderBungieCharacterPicker()}
+      ${renderBungieTargetSummary()}
       <p>${l(
         "直接应用调用游戏官方配装；载入编辑会把其中的护甲、模组和碎片属性带回优化器。",
         "直接套用會呼叫遊戲官方配裝；載入編輯會把其中的防具、模組與碎片數值帶回最佳化工具。",
@@ -5367,6 +5390,24 @@ function sameSetRequirement(left, right) {
 // Search the imported inventory for loadouts built only from owned pieces and
 // render them as the "no farming" option. Returns the message HTML so the
 // caller can compose it with the farming-plan message.
+function inventoryFailureMessage(error, phase = 'search') {
+  const displayFailure = phase === 'display' || error.inventoryFailurePhase === 'display';
+  const unavailable = error.name === 'WorkerUnavailableError' || error.solverFailure === 'transport';
+  const message = displayFailure
+    ? l('库存结果显示失败；这不代表计算无解。请重新求解；若仍失败，请反馈下方错误详情。',
+      '庫存結果顯示失敗；這不代表計算無解。請重新求解；若仍失敗，請回報下方錯誤詳情。',
+      'Inventory results could not be displayed; this does not prove infeasibility. Solve again, or report the error details below.')
+    : unavailable
+      ? l('库存后台计算不可用。请刷新页面，并检查浏览器是否允许 Worker。下方已验证的方案可继续查看。',
+        '庫存背景計算無法使用。請重新整理頁面，並檢查瀏覽器是否允許 Worker。下方已驗證的方案仍可查看。',
+        'Background inventory computation is unavailable. Reload and check Web Worker support. Verified plans below remain available.')
+      : l('库存搜索异常中断，尚未完成全部库存检查。下方方案可继续查看，但不能据此判定已有护甲无解。请重新求解，或反馈错误详情。',
+        '庫存搜尋異常中斷，尚未完成全部庫存檢查。下方方案仍可查看，但不能據此判定已有防具無解。請重新求解，或回報錯誤詳情。',
+        'Inventory search stopped unexpectedly before completing its checks. Plans below remain available; this does not prove there is no owned loadout. Solve again or report the error details.');
+  const detail = `${error.name || 'Error'}: ${error.message || 'Unknown error'}`.slice(0, 500);
+  return `<div class="msg error inventory-search-error"><span>${icon('block')}${message}</span><details><summary>${l('错误详情', '錯誤詳情', 'Error details')}</summary><code>${escapeHtml(detail)}</code></details></div>`;
+}
+
 async function solveInventoryRequirement({
   targets = getUpgradeTargets(),
   fragments = getUpgradeFragments(),
@@ -5417,6 +5458,7 @@ async function solveInventoryRequirement({
   }
   if (!fromScratch) saveUpgradeDraft();
 
+  let phase = 'search';
   try {
     const inventoryRequest = {
       searchProfile,
@@ -5436,7 +5478,8 @@ async function solveInventoryRequirement({
       if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision) return;
       if (partial?.results?.length) {
         lastInventoryTargets = targets; lastInventoryRequiredStats = requiredStats;
-        renderInventoryResults(partial);
+        try { renderInventoryResults(partial); }
+        catch (error) { error.inventoryFailurePhase = 'display'; throw error; }
       }
     }});
     if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision ||
@@ -5445,6 +5488,7 @@ async function solveInventoryRequirement({
     }
     lastInventoryTargets = targets;
     lastInventoryRequiredStats = requiredStats;
+    phase = 'display';
     renderInventoryResults(result);
     const qualifyingCount = result?.results?.filter(certifiedFeasible).length || 0;
     if (qualifyingCount) {
@@ -5470,11 +5514,7 @@ async function solveInventoryRequirement({
   } catch (error) {
     if (revision !== searchUiRevision || solveRevision !== inventorySolveRevision || error.name === 'AbortError') return null;
     console.error("Inventory solve failed", error);
-    return `<div class="msg error">${icon("block")}${l(
-      "库存搭配计算失败，请重试。",
-      "庫存搭配計算失敗，請重試。",
-      "The inventory solve failed. Please try again."
-    )}</div>`;
+    return inventoryFailureMessage(error, phase);
   } finally {
     if (background && revision === searchUiRevision && solveRevision === inventorySolveRevision) {
       backgroundInventoryRevision = null;
@@ -6227,7 +6267,7 @@ function renderInventoryBungieEquip(entry, index) {
   return `<section class="bungie-equip-panel" aria-labelledby="bungieEquipTitle">
     <div class="bungie-equip-copy"><strong id="bungieEquipTitle">${l('应用到游戏', '套用到遊戲', 'Apply in game')}</strong>
       <small>${l('数值方案与实际执行分别检查', '數值方案與實際執行分別檢查', 'Plan validation and game readiness are checked separately')}</small></div>
-    ${renderBungieCharacterPicker()}
+    ${renderBungieTargetSummary()}
     <div class="bungie-equip-controls">
       <button id="bungieEquipButton" type="button" class="btn-solve" onclick="equipInventorySolution(${index})" ${canInspect && unified?.kind === 'inventory' ? '' : 'disabled'}>${icon('check')}${l('检查并完整应用', '檢查並完整套用', 'Review full application')}</button>
       <button type="button" class="btn" onclick="equipInventorySolution(${index},'equip')" ${canInspect ? '' : 'disabled'}>${l(`仅穿戴已有 ${ownedCount} 件`, `僅穿著已有 ${ownedCount} 件`, `Equip ${ownedCount} owned pieces only`)}</button>
@@ -6412,10 +6452,10 @@ function renderArmorRow(row, entry) {
     data-ownership="${row.isOwned ? "owned" : "farm"}">
     <span role="rowheader" class="inventory-result-piece-slot">${getUpgradeSlotLabel(row.slotIndex)}</span>
     <span role="cell" class="inventory-result-piece-name">${escapeHtml(name)}${setBadge}</span>
-    <span role="cell" class="armor-cell armor-archetype">${row.archetypeKey ? escapeHtml(getArchetypeLabel(row.archetypeKey)) : "—"}</span>
-    <span role="cell" class="armor-cell armor-tertiary"${row.tertiary ? ` style="color:${STAT_COLORS[row.tertiary]}"` : ""}>${row.tertiary ? escapeHtml(STAT_LABELS[row.tertiary]) : "—"}</span>
-    <span role="cell" class="armor-cell armor-tuning">${escapeHtml(tuningCell)}${requirementNote}</span>
-    <span role="cell" class="armor-cell armor-mod">${escapeHtml(modCell)}${plannedFlag}</span>
+    <span role="cell" class="armor-cell armor-archetype" data-label="${escapeHtml(t('armorArchetype'))}">${row.archetypeKey ? escapeHtml(getArchetypeLabel(row.archetypeKey)) : "—"}</span>
+    <span role="cell" class="armor-cell armor-tertiary" data-label="${escapeHtml(t('tertiaryStat'))}"${row.tertiary ? ` style="color:${STAT_COLORS[row.tertiary]}"` : ""}>${row.tertiary ? escapeHtml(STAT_LABELS[row.tertiary]) : "—"}</span>
+    <span role="cell" class="armor-cell armor-tuning" data-label="${escapeHtml(t('tuningMod'))}">${escapeHtml(tuningCell)}${requirementNote}</span>
+    <span role="cell" class="armor-cell armor-mod" data-label="${escapeHtml(t('armorMod'))}">${escapeHtml(modCell)}${plannedFlag}</span>
     <span role="cell" class="armor-cell armor-state-cell">${stateCell}${sourceTag}${badge}${row.isOwned ? renderOwnedPieceBungieAction(row.ownedItem) : ""}</span>
   </div>`;
 }
@@ -6991,8 +7031,10 @@ function renderSelectedLoadout(entry, index) {
   return `
     <header class="loadout-header">
       <div class="loadout-header-main">
-        <span class="inventory-result-detail-label">${l(`方案 #${String(index + 1).padStart(2, "0")}`, `方案 #${String(index + 1).padStart(2, "0")}`, `Loadout #${String(index + 1).padStart(2, "0")}`)}</span>
-        <h3 class="loadout-status ${feasible ? "is-met" : "is-short"}" data-proof-label="${escapeHtml(searchProofLabel(entry.witness, entry.search))}">${escapeHtml(headline)}</h3>
+        <div class="loadout-title-row">
+          <h3 class="loadout-status ${feasible ? "is-met" : "is-short"}" data-proof-label="${escapeHtml(searchProofLabel(entry.witness, entry.search))}">${escapeHtml(headline)}</h3>
+          <span class="inventory-result-detail-label">${l(`方案 #${String(index + 1).padStart(2, "0")}`, `方案 #${String(index + 1).padStart(2, "0")}`, `Loadout #${String(index + 1).padStart(2, "0")}`)}</span>
+        </div>
         <p class="loadout-subline">${l(`目标达标 ${metCount}/6`, `目標達標 ${metCount}/6`, `${metCount} of 6 targets met`)} · ${ownership}</p>
         ${searchingNote}
         ${searchIncompleteNote}
@@ -7003,9 +7045,9 @@ function renderSelectedLoadout(entry, index) {
         <button type="button" class="btn" onclick="saveBuild()">${icon("save")}${l("保存", "儲存", "Save")}</button>
       </div>
     </header>
-    ${renderInventoryBungieEquip(entry.witness, index)}
     ${renderStatsSummary(entry, finalTotals)}
     ${renderArmorLoadoutTable(rows, entry)}
+    ${renderInventoryBungieEquip(entry.witness, index)}
     ${renderAcquisitionPlan(rows, entry)}
     ${renderAdvancedDetails(entry, totalsModel)}`;
 }

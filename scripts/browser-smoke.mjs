@@ -139,6 +139,61 @@ async function readLoadoutRows(page) {
   })));
 }
 
+// Bounds are checked inside each row: page-level overflow checks alone miss
+// clipped buttons when an ancestor already hides horizontal overflow.
+async function checkResultRefinement(page) {
+  const originalLanguage = await page.locator('#pageLanguage').inputValue();
+  for (const language of ['zh-chs', 'zh-cht', 'en']) {
+    await page.locator('#pageLanguage').selectOption(language);
+    for (const width of [1440, 1200, 1024, 768, 390, 320]) {
+      await page.setViewportSize({width, height: 1000});
+      const rows = page.locator('#loadoutDetail .inventory-result-piece');
+      assert.equal(await rows.count(), 5);
+      for (const row of await rows.all()) {
+        await row.scrollIntoViewIfNeeded();
+        const defects = await row.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          return [...element.querySelectorAll('[role="cell"], .owned-armor-location, button')]
+            .filter(child => {
+              const rect = child.getBoundingClientRect();
+              return rect.width && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1
+                || child.scrollWidth > child.clientWidth + 1);
+            }).map(child => `${child.className}: ${child.textContent.trim()}`);
+        });
+        assert.deepEqual(defects, [], `${language} ${width}px: armor data and actions must fit their row`);
+      }
+      const order = await page.locator('#loadoutDetail').evaluate(detail => {
+        const children = [...detail.children];
+        return ['.loadout-header', '.inventory-result-stats', '.armor-table', '.bungie-equip-panel']
+          .map(selector => children.indexOf(detail.querySelector(selector)));
+      });
+      assert.deepEqual(order, [...order].sort((a, b) => a - b), 'inspect the result before applying it');
+      assert.ok(await page.locator('.bungie-equip-panel').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
+    }
+  }
+  await page.locator('#pageLanguage').selectOption(originalLanguage);
+  await page.setViewportSize({width: 1440, height: 1000});
+  // The plan filter and sort remain real controls after the layout change.
+  await page.locator('.plan-chip').first().focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('.plan-chip').first().getAttribute('aria-pressed'), 'true');
+  console.log('browser smoke: result row/action bounds, semantic cells and reading order OK (3 languages × 6 widths)');
+}
+
+async function captureRefinedResult(page, name) {
+  await page.setViewportSize({width: 1440, height: 1100});
+  await page.locator('#inventoryResults').evaluate(el => {
+    const offset = document.getElementById('searchCommandBar').getBoundingClientRect().height + 24;
+    scrollTo({top: scrollY + el.getBoundingClientRect().top - offset, behavior: 'instant'});
+  });
+  await page.screenshot({path: path.join(projectRoot, '.audit', `${name}-desktop.png`)});
+  await page.setViewportSize({width: 390, height: 1100});
+  await page.locator('#loadoutDetail').evaluate(el => el.scrollIntoView({block: 'start', behavior: 'instant'}));
+  await page.screenshot({path: path.join(projectRoot, '.audit', `${name}-mobile.png`)});
+  await page.setViewportSize({width: 1440, height: 1000});
+}
+
 // The set requirement, the fixed-Exotic picker and the 2pc/4pc bonus prose all
 // live behind 高级约束 now, so a test that touches those controls has to open
 // the disclosure first — exactly like a reader. Both helpers are idempotent and
@@ -1671,8 +1726,33 @@ async function checkBungieAuthFlow(browser) {
     await page.locator("#inventoryResults:not([hidden])").waitFor();
     const equipButton = page.locator("#bungieEquipButton");
     await equipButton.scrollIntoViewIfNeeded();
-    assert.equal(await page.locator('.bungie-equip-panel .bungie-character input:checked').count(), 1);
-    assert.match(await page.locator('.bungie-equip-panel .bungie-character-list').innerText(), /测试称号/);
+    assert.equal(await page.locator('.bungie-character-list').count(), 1, 'one shared character picker for the whole page');
+    assert.equal(await page.locator('.bungie-equip-panel .bungie-character').count(), 0);
+    assert.match(await page.locator('.bungie-equip-panel .bungie-target-summary').innerText(), /猎人/);
+    await page.locator('#bungieCharacterMenu > summary').click();
+    assert.equal(await page.locator('#bungieCharacterMenu .bungie-character input:checked').count(), 1);
+    assert.match(await page.locator('#bungieCharacterMenu .bungie-character-list').innerText(), /测试称号/);
+    const selectedCharacter = page.locator('#bungieCharacterMenu input:checked');
+    await selectedCharacter.focus();
+    const selectedNode = await selectedCharacter.elementHandle();
+    await page.evaluate(() => window.importInventoryFromBungie({silent: true}));
+    assert.equal(await selectedNode.evaluate(el => el.isConnected && document.activeElement === el), true,
+      'passive sync must preserve the active character picker');
+    await selectedCharacter.evaluate(el => window.setBungieTargetCharacter(el.value));
+    assert.equal(await page.locator('#bungieCharacterMenu > summary').evaluate(el => el === document.activeElement), true);
+    await page.locator('#bungieCharacterMenu > summary').click();
+    await page.screenshot({path: path.join(projectRoot, '.audit', 'bungie-character-entry-desktop.png')});
+    await page.setViewportSize({width: 390, height: 844});
+    await page.locator('#bungieCharacterMenu > summary').scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    assert.ok(await page.locator('.bungie-character-copy').first().evaluate(el => el.getBoundingClientRect().width) > 100,
+      'mobile character names must not collapse to a vertical column');
+    await page.screenshot({path: path.join(projectRoot, '.audit', 'bungie-character-entry-mobile.png')});
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#bungieCharacterMenu').evaluate(el => el.open), false);
+    assert.equal(await page.locator('#bungieCharacterMenu > summary').evaluate(el => el === document.activeElement), true);
+    await page.setViewportSize({width: 1440, height: 1000});
+    await equipButton.scrollIntoViewIfNeeded();
     await page.screenshot({path: path.join(projectRoot, '.audit', 'bungie-nameplates-desktop.png'), fullPage: false});
     assert.equal(
       await equipButton.isEnabled(),
@@ -1680,6 +1760,8 @@ async function checkBungieAuthFlow(browser) {
       "a five-instance Bungie solution that passes preflight should be directly equippable: " +
         await page.locator(".bungie-equip-hint").innerText(),
     );
+    await checkResultRefinement(page);
+    await captureRefinedResult(page, 'results-refined-owned');
     await equipButton.click();
     await page.locator('#bungieOperationPanel button[onclick="confirmBungieTask()"]').waitFor();
     assert.equal(writeRequests.transfer.length, 0, 'review must not write before confirmation');
@@ -1742,7 +1824,11 @@ async function checkBungieAuthFlow(browser) {
       window.solve();
     });
     await page.locator("#results.show").waitFor();
-    assert.ok(await page.locator('#ownedGearSection .bungie-character input[type="radio"]').count() > 0);
+    assert.equal(await page.locator('#ownedGearSection .bungie-character input[type="radio"]').count(), 0);
+    assert.equal(await page.locator('.bungie-character-list').count(), 1);
+    assert.equal(await page.locator('.bungie-saved-toolbar .bungie-character').count(), 0);
+    await page.locator('#inventoryResults[aria-busy="false"] .inventory-result-piece').first().waitFor();
+    await captureRefinedResult(page, 'results-refined-solve');
 
     // --- (f) error paths keep the user signed in and render classified copy ---
     for (const [mode, expectedText] of [

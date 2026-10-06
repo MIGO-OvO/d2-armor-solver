@@ -49,6 +49,17 @@ export const CANDIDATE_STATE = {
   KNOWN: "known",     // per-instance reusable plugs present (socket membership)
 };
 
+// Runtime inventory uses Sets; persisted drafts and sealed capabilities use
+// arrays. Old JSON drafts lost Set contents entirely ({}): that is UNKNOWN,
+// never a known-empty whitelist. Do not mutate the input or invent candidates.
+export function normalizeSocketCandidates(socket) {
+  const raw = socket?.candidatePlugHashes;
+  if (raw instanceof Set) return socket;
+  const portable = Array.isArray(raw);
+  return {...socket, candidatePlugHashes: new Set(portable ? raw.map(Number).filter(Number.isSafeInteger) : []),
+    candidateState: portable ? socket.candidateState : CANDIDATE_STATE.UNKNOWN};
+}
+
 // The plug the socket accepts that is neither a stat mod nor a tuning mod is
 // the socket's empty/default plug (DIM's plugFitsIntoSocket treats
 // emptyPlugItemHash as a valid candidate). Used to clear an installed mod.
@@ -147,6 +158,7 @@ export function deriveTuningStats(tuningSocket) {
   if (!tuningSocket) {
     return { fixedTuningStat: null, allowedTuningStats: null, confidence: "unknown" };
   }
+  tuningSocket = normalizeSocketCandidates(tuningSocket);
   const destinations = new Set();
   for (const hash of tuningSocket.candidatePlugHashes) {
     const destination = TUNING_DESTINATION_BY_HASH.get(hash);

@@ -1,6 +1,7 @@
 import { ARCHETYPES, BASE_CONFIGS, STATS, getMasterworkStats } from "./armor-model.mjs";
 import { TUNING_DOMAIN_ID, getTuningCost } from './tuning-domain.mjs';
 import {proofFingerprint} from './proof-fingerprint.mjs';
+import {normalizeSocketCandidates} from './armor-sockets.mjs';
 
 export const SOLVER_V3_SCHEMA_VERSION = 3;
 
@@ -282,6 +283,7 @@ function projectedPhysicalBaseStats(piece, base) {
 }
 
 function normalizeSocketCapability(socket) {
+  socket = normalizeSocketCandidates(socket);
   const hashes = socket?.candidatePlugHashes instanceof Set
     ? [...socket.candidatePlugHashes]
     : Array.isArray(socket?.candidatePlugHashes)

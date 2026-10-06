@@ -10,7 +10,7 @@ const extract = name => {
   return start < 0 ? '' : source.slice(start).split(/\n(?:async )?function /)[0];
 };
 
-function harness(result) {
+function harness(result, {renderError = null, solveError = null} = {}) {
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, {textContent: '', disabled: false,
@@ -27,16 +27,17 @@ function harness(result) {
     setRequirement: {type: 'none'}, EXOTIC_CLASSES: {},
     snapshotSetRequirement: () => ({type: 'none'}), sameSetRequirement: () => true,
     getOwnedArmorInputs: () => ({items: [{}]}), getExoticSettings: () => null,
-    renderUnifiedResults() {}, scheduleUnifiedResults() {}, escapeHtml: value => value, icon: () => '', t: value => value,
-    console,
+    renderUnifiedResults() { if (renderError) throw renderError; }, scheduleUnifiedResults() { if (renderError) throw renderError; }, escapeHtml: value => String(value).replaceAll('<', '&lt;'), icon: () => '', t: value => value,
+    console: {error() {}},
     solveInventoryParallelAsync: async (_request, {onProgress}) => {
+      if (solveError) throw solveError;
       onProgress(result, {...result.search, running: true});
       progressStatuses.push(element('searchStatus').textContent);
       return result;
     },
   });
   const api = vm.runInContext(`${['searchProofLabel', 'inventoryProofLabel', 'renderSearchStatus',
-    'solveInventoryRequirement', 'renderInventoryResults'].map(extract).join('\n')}
+    'inventoryFailureMessage', 'solveInventoryRequirement', 'renderInventoryResults'].map(extract).join('\n')}
     ({renderSearchStatus, solveInventoryRequirement, inventoryProofLabel})`, context);
   return {api, element, progressStatuses, context};
 }
@@ -68,6 +69,28 @@ test('theory exact + limited inventory with zero owned loadouts keeps both proof
   api.renderSearchStatus(theory);
   assert.doesNotMatch(element('searchStatus').textContent + message, /未找到达标解/);
   assert.equal(theory.length, 60);
+});
+
+test('a result display failure is not reported as failed inventory computation', async () => {
+  const result = inventory('SEARCH_LIMIT_REACHED');
+  const {api, context} = harness(result, {renderError: new Error('display probe')});
+  const message = await api.solveInventoryRequirement({targets: {}, fragments: {}, requiredStats: []});
+  assert.equal(context.lastInventoryResult, result);
+  assert.match(message, /结果显示失败/);
+  assert.doesNotMatch(message, /库存搭配计算失败/);
+});
+
+test('inventory failures expose a scoped cause, not a claim that theory or owned armor is infeasible', async () => {
+  for (const [error, expected] of [
+    [Object.assign(new Error('Worker blocked'), {name: 'WorkerUnavailableError'}), /库存后台计算不可用/],
+    [new Error('<unsafe> merge failed'), /库存搜索异常中断/],
+  ]) {
+    const {api} = harness(null, {solveError: error});
+    const message = await api.solveInventoryRequirement({targets: {}, fragments: {}, requiredStats: []});
+    assert.match(message, expected);
+    assert.match(message, /错误详情/);
+    assert.doesNotMatch(message, /<unsafe>|库存搭配计算失败|已证明不可行/);
+  }
 });
 
 test('candidate counts use verified returned witnesses, never node counts or feasibility guesses', () => {

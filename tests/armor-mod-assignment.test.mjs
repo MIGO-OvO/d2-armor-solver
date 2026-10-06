@@ -539,11 +539,27 @@ test("socket capability confidence distinguishes absent from incomplete metadata
   assert.equal(socketCapabilityConfidence({sockets: [{}], dataConfidence: {sockets: "exact"}}),
     SOCKET_CONFIDENCE.UNKNOWN, "a socket without a settled candidate state proves nothing");
   assert.equal(socketCapabilityConfidence({
-    sockets: [{candidateState: CANDIDATE_STATE.KNOWN}], dataConfidence: {sockets: "exact"},
+    sockets: [{candidateState: CANDIDATE_STATE.KNOWN, candidatePlugHashes: new Set()}], dataConfidence: {sockets: "exact"},
   }), SOCKET_CONFIDENCE.KNOWN);
   assert.equal(socketCapabilityConfidence({
     sockets: [{candidateState: CANDIDATE_STATE.KNOWN}], dataConfidence: {sockets: "unknown"},
   }), SOCKET_CONFIDENCE.UNKNOWN);
+});
+
+test('persisted candidates preserve known exclusions; erased legacy Sets remain unverified', () => {
+  for (const [candidates, valid] of [[[], false], [[statHash('weapons', 10)], false], [{}, true]]) {
+    const items = defaultItems();
+    items[0] = {...items[0], sockets: [{...items[0].sockets[0], candidatePlugHashes: candidates}, items[0].sockets[1]]};
+    const result = assignArmorMods({pieces: makePieces(), inventory: items,
+      tuningAssignments: SLOTS.map(() => ({mode: '+5-5', to: 'health', from: 'weapons'})),
+      modAssignments: SLOTS.map(() => ({size: 10, stat: 'health'}))});
+    assert.equal(result.valid, valid);
+    if (!valid) assert.ok(result.unassignedMods.some(mod => mod.index === 0 && mod.reason === 'plugUnavailable'));
+    else {
+      assert.equal(socketCapabilityConfidence(items[0]), SOCKET_CONFIDENCE.UNKNOWN);
+      assert.ok(result.unverifiedMods.some(mod => mod.index === 0 && mod.kind === 'stat'));
+    }
+  }
 });
 
 // --- Totals consistency contract --------------------------------------------

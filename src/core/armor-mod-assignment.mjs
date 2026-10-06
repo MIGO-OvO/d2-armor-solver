@@ -38,7 +38,7 @@ import {
 } from "./armor-mods.data.mjs";
 import { ARCHETYPES, STATS } from "./armor-model.mjs";
 import { getEffectiveBaseStats } from "./dim-csv.mjs";
-import { SOCKET_ROLE, CANDIDATE_STATE } from "./armor-sockets.mjs";
+import { SOCKET_ROLE, CANDIDATE_STATE, normalizeSocketCandidates } from "./armor-sockets.mjs";
 import { EXECUTION_STATUS } from "./solver-v3-contract.mjs";
 
 export const STAT_MOD_ENERGY_COST = { 5: 1, 10: 3 };
@@ -60,7 +60,7 @@ export function socketCapabilityConfidence(item) {
   if (item?.dataConfidence?.sockets === "unknown") return SOCKET_CONFIDENCE.UNKNOWN;
   // "partial" means the socket objects exist but their reusable-plug sets do
   // not, which is exactly the state where a role classification can be wrong.
-  return sockets.every(socket => socket?.candidateState === CANDIDATE_STATE.KNOWN)
+  return sockets.every(socket => normalizeSocketCandidates(socket).candidateState === CANDIDATE_STATE.KNOWN)
     ? SOCKET_CONFIDENCE.KNOWN
     : SOCKET_CONFIDENCE.UNKNOWN;
 }
@@ -176,9 +176,10 @@ function tuningCompatibility(item, assignment) {
 }
 
 function itemSocket(item, role) {
-  return (item?.sockets || []).find(socket =>
+  const socket = (item?.sockets || []).find(socket =>
     socket?.enabled !== false && socket?.role === role,
   ) ?? null;
+  return socket ? normalizeSocketCandidates(socket) : null;
 }
 
 // Resolve one piece's desired stat + tuning plugs onto its actual sockets.
