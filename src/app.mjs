@@ -232,7 +232,6 @@ import {
 import {
   LOADOUT_WRITE_COMPONENTS,
   BungieLoadoutApplyError,
-  applyBungieArmorItemAction,
   applyCustomLoadoutPlan,
   buildBungieArmorItemActionPlan,
   buildCustomLoadoutPlan,
@@ -240,7 +239,10 @@ import {
   extractBungieLoadoutState,
   getFragmentAdjustments,
   mapSavedLoadoutArmor,
+  reconcileCustomLoadout,
 } from "./core/bungie-loadout.mjs";
+import { ARMOR_BUCKETS, VAULT_BUCKET, extractStorage } from './core/bungie-storage.mjs';
+import { renderCharacterCards, renderBungieTask } from './core/bungie-task-view.mjs';
 import {
   getActiveSetBonuses,
   getArmorSetByHash,
@@ -2746,6 +2748,10 @@ let lastBungieImportAt = 0;
 let bungieAutoRefreshTimer = 0;
 let isBungieApplying = false;
 let bungieProfileState = null;
+let bungieTask = null;
+let bungieBucketCapacities = null;
+const bungieArtwork = new Map();
+const bungieTitles = new Map();
 let bungieTargetCharacterId = "";
 // Per-character subclass fragments from the last Bungie import, keyed by
 // characterId: { characterId: { stat: delta } }. Filled by importInventoryFromBungie,
@@ -2889,12 +2895,14 @@ function bungieLogin() {
 }
 
 function bungieLogout() {
+  if (isBungieApplying) return;
   const confirmed = confirm(l(
     "退出后将移除当前导入的 Bungie 库存与未保存的求解结果；浏览器中已保存的配装不会被删除。确定退出吗？",
     "登出後將移除目前匯入的 Bungie 庫存與未儲存的求解結果；瀏覽器中已儲存的配裝不會被刪除。確定登出嗎？",
     "Signing out removes the imported Bungie inventory and unsaved solver results. Loadouts saved in this browser will remain. Sign out?",
   ));
   if (!confirmed) return;
+  closeBungieTask();
   clearToken();
   try {
     localStorage.removeItem(BUNGIE_DISPLAY_NAME_KEY);
@@ -2918,6 +2926,7 @@ function bungieLogout() {
 function shouldAutoRefresh(now = Date.now()) {
   return document.visibilityState === "visible"
     && hasToken()
+    && !isBungieApplying
     && !isBungieImporting
     && now - lastBungieImportAt >= BUNGIE_AUTO_REFRESH_MS;
 }
@@ -2964,27 +2973,8 @@ function formatBungieCharacterLabel(character) {
   return `${classLabel}${light ? ` · ${term("power")} ${light}` : ""}`;
 }
 
-function formatBungieCharacterOption(character, characters) {
-  const base = formatBungieCharacterLabel(character);
-  if (characters.length < 2) return base;
-  if (character?.characterId === characters[0]?.characterId) {
-    return `${base}${l(" · 最近使用", " · 最近使用", " · Most recent")}`;
-  }
-  const played = new Date(character?.dateLastPlayed || "");
-  if (!Number.isFinite(played.getTime())) return base;
-  const date = played.toLocaleDateString(localeCode(), { month: "short", day: "numeric" });
-  return `${base}${l(` · 上次游玩 ${date}`, ` · 上次遊玩 ${date}`, ` · Last played ${date}`)}`;
-}
-
-function getBungieTargetOptionsHtml() {
-  syncBungieTargetCharacter();
-  const characters = getBungieCharactersForClass();
-  return characters.map(character =>
-    `<option value="${escapeHtml(character.characterId)}" ${character.characterId === bungieTargetCharacterId ? "selected" : ""}>${escapeHtml(formatBungieCharacterOption(character, characters))}</option>`
-  ).join("");
-}
-
 function setBungieTargetCharacter(characterId) {
+  if (isBungieApplying) return;
   const valid = getBungieCharactersForClass().some(character =>
     character.characterId === String(characterId)
   );
@@ -3000,12 +2990,14 @@ function renderOwnedGearBungieTargetControl() {
   if (!__BUNGIE_OAUTH_CLIENT_ID__ || !hasToken() || importSource !== "bungie" || !bungieProfileState) {
     return "";
   }
-  const options = getBungieTargetOptionsHtml();
-  if (!options) return "";
-  return `<label class="owned-gear-target">
-    <span>${l("操作角色", "操作角色", "Target character")}</span>
-    <select onchange="setBungieTargetCharacter(this.value)" ${isBungieApplying ? "disabled" : ""}>${options}</select>
-  </label>`;
+  return renderBungieCharacterPicker();
+}
+
+function renderBungieCharacterPicker() {
+  syncBungieTargetCharacter();
+  return renderCharacterCards({characters: Object.values(bungieProfileState?.characters || {}),
+    selected: bungieTargetCharacterId, classId: importClassFilter, busy: isBungieApplying,
+    l, classLabel: getClassLabel});
 }
 
 function bungieArmorItemActionErrorMessage(error) {
@@ -3028,7 +3020,7 @@ function getOwnedArmorItemLocationLabel(item, targetCharacterId) {
       : l("目标角色背包", "目標角色背包", "Target inventory");
   }
   if (item?.owner === "Vault") return l("保险库", "保管庫", "Vault");
-  return l("其他角色", "其他角色", "Another character");
+  return bungieOwnerLabel(item?.owner);
 }
 
 function getOwnedArmorBungieActionState(item) {
@@ -3072,6 +3064,7 @@ function getOwnedArmorBungieActionState(item) {
     itemId: item?.id ?? item?.sourceId,
     inventory: importedInventory,
     targetCharacterInventory: bungieProfileState.characterInventories?.[bungieTargetCharacterId],
+    storage: bungieProfileState.storage,
   });
   const busy = isBungieApplying;
   const action = plan.action;
@@ -3109,93 +3102,17 @@ function renderOwnedArmorBungieAction(item) {
   return `<span class="owned-armor-match-actions">
     ${state.location ? `<small>${escapeHtml(state.location)}</small>` : ""}
     <button type="button" class="btn owned-armor-action" data-item-id="${escapeHtml(rawItemId)}" onclick="applyOwnedArmorItemAction(${itemId})" ${state.available ? "" : "disabled"}${title}>${icon(actionIcon)}${state.label}</button>
+    ${state.action === 'transfer' ? `<button type="button" class="btn owned-armor-action" onclick="applyOwnedArmorItemAction(${itemId},'equip')" ${state.available ? '' : 'disabled'}>${l('移动并装备', '移動並裝備', 'Move and equip')}</button>` : ''}
+    ${state.reason ? `<small class="owned-armor-action-reason">${escapeHtml(state.reason)}</small>` : ''}
   </span>`;
 }
 
-function showOwnedArmorActionMessage(text, tone = "info") {
-  ownedArmorActionStatus = { text, tone };
-  buildOwnedGearSection();
-}
-
-function updateLocalOwnedArmorItemState(verification) {
-  if (verification?.status !== 'verified') return;
-  const byId = new Map((verification.locations || []).map(location => [location.id, location]));
-  for (const item of importedInventory) {
-    const observed = byId.get(String(item.id));
-    if (observed && Number(item.hash) === observed.hash) {
-      item.owner = observed.owner;
-      item.equipped = observed.equipped;
-    }
-  }
-  invalidateOwnedPlanCache();
-  if (bungieProfileState) Object.assign(bungieProfileState.characterInventories, verification.characterInventories || {});
-}
-
-async function applyOwnedArmorItemAction(itemId) {
+async function applyOwnedArmorItemAction(itemId, mode = null) {
   if (isBungieApplying) return;
-  const item = importedInventory.find(candidate => String(candidate?.id ?? "") === String(itemId));
-  if (!item) {
-    showOwnedArmorActionMessage(bungieArmorItemActionErrorMessage({ code: "missingItem" }), "error");
-    return;
-  }
-  const state = getOwnedArmorBungieActionState(item);
-  if (!state.available || !state.plan) {
-    showOwnedArmorActionMessage(state.reason || l("当前无法操作这件护甲。", "目前無法操作這件防具。", "This armor cannot be actioned right now."), "error");
-    return;
-  }
-  const itemName = item.name || l("这件护甲", "這件防具", "this armor");
-  isBungieApplying = true;
-  showOwnedArmorActionMessage(
-    state.action === "equip"
-      ? l(`正在装备「${itemName}」…`, `正在裝備「${itemName}」…`, `Equipping “${itemName}”…`)
-      : l(`正在拉取「${itemName}」到目标角色…`, `正在拉取「${itemName}」到目標角色…`, `Pulling “${itemName}” to the target character…`),
-  );
-  try {
-    const result = await applyBungieArmorItemAction(state.plan, {
-      onProgress: ({ stage }) => {
-        if (stage === "unequip-source") {
-          showOwnedArmorActionMessage(
-            l(`正在为另一角色换上备用件，再拉取「${itemName}」…`, `正在為另一角色換上備用件，再拉取「${itemName}」…`, `Equipping a replacement on another character before pulling “${itemName}”…`),
-          );
-        }
-      },
-    });
-    if (result.equipFailure && result.verification?.status !== 'verified') {
-      showOwnedArmorActionMessage(
-        l("游戏未能装备此件护甲。请确认角色在轨道、社交空间或离线状态后重试。", "遊戲未能裝備此件防具。請確認角色在軌道、社交空間或離線狀態後重試。", "The game could not equip this armor. Make sure the character is in orbit, a social space, or offline, then retry."),
-        "error",
-      );
-      return;
-    }
-    if (result.verification?.status === 'verified' && result.action === 'equip') result.action = 'equipped';
-    if (result.verification?.status !== "verified") {
-      lastBungieImportAt = 0;
-      showOwnedArmorActionMessage(l('操作已发送，但服务器状态尚未确认。请刷新库存后核对，不要重复点击。',
-        '操作已送出，但伺服器狀態尚未確認。請重新整理庫存後核對，不要重複點擊。',
-        'Action sent, but server state is not confirmed. Refresh inventory before retrying.'), 'warn');
-      return;
-    }
-    updateLocalOwnedArmorItemState(result.verification);
-    lastBungieImportAt = 0;
-    const target = bungieProfileState?.characters?.[state.plan.targetCharacterId];
-    const targetLabel = target ? formatBungieCharacterLabel(target) : l("目标角色", "目標角色", "the target character");
-    showOwnedArmorActionMessage(
-      result.action === "transferred"
-        ? l(`已把「${itemName}」拉取到 ${targetLabel} 的背包；现在可点击“装备此件”。`, `已把「${itemName}」拉取到 ${targetLabel} 的背包；現在可點擊「裝備此件」。`, `Pulled “${itemName}” into ${targetLabel}'s inventory. You can now equip it.`)
-        : l(`已将「${itemName}」装备到 ${targetLabel}。`, `已將「${itemName}」裝備到 ${targetLabel}。`, `Equipped “${itemName}” on ${targetLabel}.`),
-    );
-  } catch (error) {
-    if (error.reconciliation?.status === 'verified') {
-      updateLocalOwnedArmorItemState(error.reconciliation);
-      showOwnedArmorActionMessage(l('请求响应异常，但服务器回读已确认操作完成。','請求回應異常，但伺服器回讀已確認操作完成。','The response failed, but server read-back confirmed completion.'));
-    } else {
-      lastBungieImportAt = 0;
-      showOwnedArmorActionMessage(l('操作未确认，可能已部分完成。请刷新库存核对后再操作。','操作未確認，可能已部分完成。請重新整理庫存核對後再操作。','Action unconfirmed; some steps may have completed. Refresh inventory before another action.'), 'warn');
-    }
-  } finally {
-    isBungieApplying = false;
-    buildOwnedGearSection();
-  }
+  const item = importedInventory.find(candidate => String(candidate.id) === String(itemId));
+  if (!item) return;
+  const action = mode || (String(item.owner) === bungieTargetCharacterId ? 'equip' : 'collect');
+  await prepareBungieTask({pieces: [{...item, sourceId: item.id}], mode: action});
 }
 
 function setFragmentAdjustmentsToUI(adjustments) {
@@ -3338,7 +3255,6 @@ function getSavedBungieLoadoutsHtml() {
   if (!__BUNGIE_OAUTH_CLIENT_ID__ || !hasToken() || !bungieProfileState) return "";
   syncBungieTargetCharacter();
   const loadouts = bungieProfileState.savedLoadouts?.[bungieTargetCharacterId] || [];
-  const targetOptions = getBungieTargetOptionsHtml();
   return `<details class="bungie-saved-loadouts" data-disclosure-key="saved-loadouts">
     <summary>${l(
       `游戏内已保存配装（${loadouts.length}）`,
@@ -3346,10 +3262,7 @@ function getSavedBungieLoadoutsHtml() {
       `In-game saved loadouts (${loadouts.length})`,
     )}</summary>
     <div class="bungie-saved-toolbar">
-      <label>
-        <span>${l("角色", "角色", "Character")}</span>
-        <select onchange="setBungieTargetCharacter(this.value)" ${targetOptions ? "" : "disabled"}>${targetOptions}</select>
-      </label>
+      ${renderBungieCharacterPicker()}
       <p>${l(
         "直接应用调用游戏官方配装；载入编辑会把其中的护甲、模组和碎片属性带回优化器。",
         "直接套用會呼叫遊戲官方配裝；載入編輯會把其中的防具、模組與碎片數值帶回最佳化工具。",
@@ -3447,9 +3360,13 @@ function editBungieSavedLoadout(characterId, loadoutIndex) {
 
 function bungiePlanErrorMessage(error) {
   const code = error?.code;
-  if (code === "notOwnedInstance" || code === "missingPieces") {
-    return l("方案含刷取件或缺少实例 ID，不能直接装备。", "方案含待取得防具或缺少實例 ID，不能直接裝備。", "This plan contains farmed pieces or missing instance IDs.");
-  }
+  if (code === 'duplicatePiece') return l('护甲实例或穿戴槽位重复，请重新选择方案。', '防具實例或穿著欄位重複，請重新選擇方案。', 'Duplicate armor instance or equipment slot. Select another plan.');
+  if (code === 'missingPieces') return l('完整应用需要五件护甲；可先收集已有护甲。', '完整套用需要五件防具；可先收集已有防具。', 'Full application needs five pieces; collect owned pieces first.');
+  if (code === 'notOwnedInstance') return l('无法在最新库存中找到这件护甲，请同步库存后重新选择。', '無法在最新庫存中找到這件防具，請同步庫存後重新選擇。', 'This armor is missing from the latest inventory. Sync and select it again.');
+  if (code === 'inventoryFull') return l('对应护甲槽位已满，且没有可安全移入保险库的备用件。', '對應防具欄位已滿，且沒有可安全移入保管庫的備用件。', 'This armor slot is full and has no safe move-aside item.');
+  if (code === 'vaultFull') return l('保险库没有足够中转空间，请先腾出空间。', '保管庫沒有足夠中轉空間，請先騰出空間。', 'The vault needs free space for these transfers.');
+  if (code === 'itemNotTransferable') return l('这件护甲当前不可转移，请检查游戏内物品状态。', '這件防具目前不可轉移，請檢查遊戲內物品狀態。', 'This armor cannot be transferred in its current state.');
+  if (code === 'unverifiedWitness' || code === 'witnessTotalsMismatch') return l('方案与当前库存的配置证据不一致。可仅收集或穿戴护甲，完整应用请重新求解。', '方案與目前庫存的配置證據不一致。可僅收集或穿著防具，完整套用請重新求解。', 'The plan no longer matches the inventory evidence. Collect/equip armor only, or solve again for full application.');
   if (code === "exoticPerkMismatch") {
     return l("异域职业物品的现有实例词条与方案不匹配。", "異域職業物品的現有實例詞條與方案不相符。", "The owned Exotic class item roll does not match this plan.");
   }
@@ -3485,8 +3402,8 @@ function bungiePlanErrorMessage(error) {
 }
 
 function getInventorySolutionEquipState(entry) {
-  if (!entry?.verified) return { available: false, reason: 'UNVERIFIED: loadout' };
   if (!__BUNGIE_OAUTH_CLIENT_ID__) return { available: false, hidden: true };
+  if (!entry?.verified) return { available: false, reason: bungiePlanErrorMessage({code: 'unverifiedWitness'}) };
   if (!hasToken()) return { available: false, reason: l("请先登录 Bungie。", "請先登入 Bungie。", "Sign in to Bungie first.") };
   if (importSource !== "bungie" || !bungieProfileState) {
     return { available: false, reason: l("请先从 Bungie 导入真实库存。", "請先從 Bungie 匯入真實庫存。", "Import your live Bungie inventory first.") };
@@ -3506,6 +3423,7 @@ function getInventorySolutionEquipState(entry) {
     availablePlugHashes: bungieProfileState.availablePlugHashesByCharacter?.[bungieTargetCharacterId],
     targetCharacterInventory: bungieProfileState.characterInventories?.[bungieTargetCharacterId],
     verifiedWitness: entry,
+    storage: bungieProfileState.storage,
   });
   if (!plan.valid) {
     return { available: false, reason: bungiePlanErrorMessage(plan.errors[0]), plan };
@@ -3559,91 +3477,218 @@ function handleBungieEquipError(error, surface = "result") {
   else showBungieEquipMessage(message, "error");
 }
 
-async function equipInventorySolution(index) {
-  // Only a fully owned inventory entry can be written back to the game; a
-  // theoretical skeleton with farm gaps has no live instances to equip.
-  const unified = resolveUnifiedEntry(index);
-  const entry = unified?.kind === "inventory" ? unified.witness : null;
-  if (!entry || isBungieApplying) return;
-  const equipState = getInventorySolutionEquipState(entry);
-  if (!equipState.available || !equipState.plan) {
-    showBungieEquipMessage(equipState.reason || bungiePlanErrorMessage(equipState.plan?.errors?.[0]), "error");
-    return;
+function bungieOwnerLabel(owner) {
+  if (owner === 'Vault') return l('保险库', '保管庫', 'Vault');
+  const character = bungieProfileState?.characters?.[owner];
+  return character ? formatBungieCharacterLabel(character) : l('未知位置', '未知位置', 'Unknown location');
+}
+
+function bungieTaskItemName(id) {
+  return importedInventory.find(item => String(item.id) === String(id))?.name
+    || bungieTask?.items?.find(item => String(item.id) === String(id))?.name || l('护甲', '防具', 'Armor');
+}
+
+function renderBungieTaskPanel() {
+  let panel = document.getElementById('bungieOperationPanel');
+  if (!bungieTask) { panel?.remove(); return; }
+  if (!panel) {
+    panel = document.createElement('section');
+    panel.id = 'bungieOperationPanel';
+    panel.className = 'bungie-operation-panel';
+    panel.setAttribute('role', 'region');
+    panel.setAttribute('aria-labelledby', 'bungieTaskHeading');
+    panel.tabIndex = -1;
+    const live = document.createElement('div');
+    live.className = 'sr-only'; live.id = 'bungieTaskLive'; live.setAttribute('role', 'status');
+    live.setAttribute('aria-live', 'polite');
+    const content = document.createElement('div'); content.className = 'bungie-task-content';
+    panel.append(live, content);
+    document.body.append(panel);
   }
+  const focused = panel.contains(document.activeElement) ? document.activeElement.getAttribute('onclick') : null;
+  panel.querySelector('.bungie-task-content').innerHTML = renderBungieTask(bungieTask, {l, ownerLabel: bungieOwnerLabel, itemLabel: bungieTaskItemName,
+    imageFor: item => bungieArtwork.get(Number(item.hash)) || '',
+    errorLabel: error => typeof error === 'object' ? bungiePlanErrorMessage(error)
+      : bungieWriteErrorMessage(new ApiError({ErrorCode: error}))});
+  const announcement = panel.querySelector('.bungie-task-announcement').textContent;
+  const live = panel.querySelector('#bungieTaskLive');
+  if (live.textContent !== announcement) live.textContent = announcement;
+  if (focused) [...panel.querySelectorAll('button')].find(button => button.getAttribute('onclick') === focused)?.focus({preventScroll: true});
+}
+
+async function loadBungieActionMetadata(items) {
+  if (!bungieBucketCapacities) {
+    const values = await Promise.all([...Object.values(ARMOR_BUCKETS), VAULT_BUCKET].map(async hash => {
+      try {
+        const definition = await bungieFetch(`/Destiny2/Manifest/DestinyInventoryBucketDefinition/${hash}/`, {auth: false, retries: 0});
+        return [hash, Number(definition?.itemCount) || null];
+      } catch { return [hash, null]; }
+    }));
+    if (values.every(([, capacity]) => capacity)) bungieBucketCapacities = Object.fromEntries(values);
+  }
+  await Promise.all((items || []).filter(item => !bungieArtwork.has(Number(item.hash))).map(async item => {
+    try {
+      const definition = await bungieFetch(`/Destiny2/Manifest/DestinyInventoryItemDefinition/${item.hash}/`, {auth: false, retries: 0});
+      bungieArtwork.set(Number(item.hash), definition?.displayProperties?.icon || '');
+    } catch { /* A missing picture must never block an armor operation. */ }
+  }));
+}
+
+async function loadBungieCharacterTitles() {
+  await Promise.all(Object.values(bungieProfileState?.characters || {}).map(async character => {
+    if (!character.titleRecordHash) return;
+    const key = `${getPageLanguage()}:${character.titleRecordHash}:${character.genderType}`;
+    if (!bungieTitles.has(key)) {
+      try {
+        const record = await bungieFetch(`/Destiny2/Manifest/DestinyRecordDefinition/${character.titleRecordHash}/?lc=${getPageLanguage()}`, {auth: false, retries: 0});
+        const titles = record?.titleInfo?.titlesByGender;
+        bungieTitles.set(key, titles?.[character.genderType === 1 ? 'Female' : 'Male'] || '');
+      } catch { return; }
+    }
+    character.title = bungieTitles.get(key);
+  }));
+}
+
+async function applyBungieActionSnapshot(profile) {
+  const {buildArmorInventory} = await import('./core/bungie-inventory.mjs');
+  const mapped = buildArmorInventory(profile, {language: getPageLanguage()});
+  const extracted = extractBungieLoadoutState(profile);
+  const raw = (profile?.Response ?? profile)?.data ?? (profile?.Response ?? profile);
+  if (!raw.characterLoadouts) extracted.savedLoadouts = bungieProfileState?.savedLoadouts || {};
+  const storage = extractStorage(profile);
+  storage.capacities = bungieBucketCapacities || {};
+  storage.vaultCapacity = bungieBucketCapacities?.[VAULT_BUCKET] ?? null;
+  bungieProfileState = {...bungieProfileState, ...extracted, characterInventories: mapped.characterInventories, storage};
+  await loadBungieCharacterTitles();
+  for (const [id, character] of Object.entries(mapped.characters)) {
+    if (bungieProfileState.characters[id]) bungieProfileState.characters[id].stats = character.stats;
+  }
+  importedInventory = mapped.items;
+  invalidateOwnedPlanCache();
+  lastBungieImportAt = Date.now();
+}
+
+async function refreshBungieActionSnapshot() {
+  if (!hasToken() || !bungieProfileState || importSource !== 'bungie') throw new Error(l('请登录并同步 Bungie 库存。', '請登入並同步 Bungie 庫存。', 'Sign in and sync the Bungie inventory.'));
+  const {membershipType, membershipId} = bungieProfileState;
+  const profile = await bungieFetch(`/Destiny2/${membershipType}/Profile/${membershipId}/?components=${[...ARMOR_COMPONENTS, ...LOADOUT_WRITE_COMPONENTS].join(',')}`, {retries: 0});
+  const root = profile?.Response ?? profile;
+  const data = root?.data ?? root;
+  if (!data?.characters?.data || !data?.characterInventories?.data || !data?.characterEquipment?.data) {
+    throw new Error(l('库存响应不完整，请稍后重新同步。', '庫存回應不完整，請稍後重新同步。', 'Inventory response is incomplete. Sync again later.'));
+  }
+  await applyBungieActionSnapshot(profile);
+}
+
+function buildBungieTaskPlan(task) {
+  const state = bungieProfileState;
+  const character = state?.characters?.[task.target];
+  const plan = buildCustomLoadoutPlan({membershipType: state?.membershipType, membershipId: state?.membershipId,
+    targetCharacterId: character?.characterId, classId: character?.classId, pieces: task.request.pieces,
+    tuningAssignments: task.request.tuningAssignments, modAssignments: task.request.modAssignments,
+    inventory: importedInventory, availablePlugHashes: state?.availablePlugHashesByCharacter?.[task.target],
+    targetCharacterInventory: state?.characterInventories?.[task.target], storage: state?.storage,
+    mode: task.mode, verifiedWitness: task.request.witness});
+  if (task.mode === 'full' && !task.request.witness?.verified) plan.errors.push({code: 'unverifiedWitness'});
+  plan.valid = plan.errors.length === 0;
+  return plan;
+}
+
+async function prepareBungieTask(request, existing = null) {
+  if (isBungieApplying || isBungieImporting) return;
+  syncBungieTargetCharacter();
+  const target = existing?.target || bungieTargetCharacterId;
+  bungieTask = {request, target, mode: request.mode, status: 'checking', items: existing?.items || [],
+    events: existing?.events || [], returnFocus: existing?.returnFocus || document.activeElement};
   isBungieApplying = true;
-  renderInventoryResults(lastInventoryResult);
-  showBungieEquipMessage(l("自检通过，正在转移护甲…", "自檢通過，正在轉移防具…", "Preflight passed. Transferring armor…"));
+  renderBungieTaskPanel();
+  document.getElementById('bungieOperationPanel')?.focus();
   try {
-    const result = await applyCustomLoadoutPlan(equipState.plan, {
-      onProgress: ({ stage }) => {
-        const stageText = stage === "plugs"
-          ? l("护甲已穿戴，正在写入模组…", "防具已穿著，正在寫入模組…", "Armor equipped. Inserting mods…")
-          : stage === "equip"
-            ? l("转移完成，正在穿戴五件护甲…", "轉移完成，正在穿著五件防具…", "Transfer complete. Equipping all five pieces…")
-            : l("正在整理并转移护甲…", "正在整理並轉移防具…", "Preparing and transferring armor…");
-        showBungieEquipMessage(stageText);
-      },
-    });
-    lastBungieImportAt = 0;
-    const nameByInstanceId = new Map(
-      importedInventory.map(item => [String(item.id), item.name]),
-    );
-    const equipFailures = result.equipFailures || [];
-    const plugFailures = result.plugFailures || [];
-    if (equipFailures.length > 0) {
-      const equipped = result.completed.targetEquip;
-      const failedNames = equipFailures
-        .map(failure => nameByInstanceId.get(String(failure.itemId)) || "")
-        .filter(Boolean)
-        .join("、");
-      const plugNote = plugFailures.length > 0
-        ? `；${plugFailures.length} 个模组写入失败`
-        : "";
-      showBungieEquipMessage(
-        l(
-          `已装备 ${equipped}/5 件护甲，${equipFailures.length} 件未能装备${failedNames ? `（${failedNames}）` : ""}。请确认角色在轨道或社交空间、且背包有空间后重试${plugNote}。`,
-          `已裝備 ${equipped}/5 件防具，${equipFailures.length} 件未能裝備${failedNames ? `（${failedNames}）` : ""}。請確認角色在軌道或社交空間、且背包有空間後重試${plugNote}。`,
-          `Equipped ${equipped}/5 armor pieces; ${equipFailures.length} failed to equip${failedNames ? ` (${failedNames})` : ""}. Make sure the character is in orbit or a social space and has inventory space, then retry${plugNote}.`,
-        ),
-        "warn",
-      );
-      return;
+    await loadBungieActionMetadata((request.pieces || []).map(piece => ({hash: piece.hash})));
+    await refreshBungieActionSnapshot();
+    bungieTask.plan = buildBungieTaskPlan(bungieTask);
+    bungieTask.items = bungieTask.plan.items;
+    bungieTask.status = bungieTask.plan.valid ? 'ready' : 'blocked';
+    if (!bungieBucketCapacities) bungieTask.message = l('未能读取最新容量定义；请核对额外整理操作，服务器仍会检查空间。', '未能讀取最新容量定義；請核對額外整理操作，伺服器仍會檢查空間。', 'Capacity definitions unavailable. Review extra transfers; the server will still enforce capacity.');
+  } catch (error) { bungieTask.status = 'blocked'; bungieTask.message = error.message; }
+  finally { isBungieApplying = false; renderBungieTaskPanel(); }
+}
+
+async function confirmBungieTask() {
+  if (!bungieTask || bungieTask.status !== 'ready' || isBungieApplying || isBungieImporting) return;
+  const task = bungieTask;
+  isBungieApplying = true;
+  task.status = 'checking'; task.message = ''; task.stopRequested = false;
+  renderBungieTaskPanel();
+  try {
+    const approvedExtras = new Set([...task.plan.moveAsideTransfers, ...task.plan.preparationTransfers].map(request => JSON.stringify(request)));
+    await refreshBungieActionSnapshot();
+    task.plan = buildBungieTaskPlan(task);
+    if (!task.plan.valid) { task.status = 'blocked'; return; }
+    if ([...task.plan.moveAsideTransfers, ...task.plan.preparationTransfers].some(request => !approvedExtras.has(JSON.stringify(request)))) {
+      task.status = 'ready'; task.message = l('库存已变化，额外整理操作已更新，请再次确认。', '庫存已變更，額外整理操作已更新，請再次確認。', 'Inventory changed. Review the updated extra transfers before confirming.'); return;
     }
-    const verification = result.verification;
-    const realMismatches = verification?.mismatches || [];
-    if (verification?.status !== "verified" || plugFailures.length > 0) {
-      const missingPlugs = realMismatches
-        .filter(match => match.kind === "plugMismatch").length;
-      showBungieEquipMessage(
-        l(
-          `护甲与模组已装备，但回读核对发现 ${realMismatches.length} 处不一致（含 ${missingPlugs} 个模组写入未生效）。请刷新库存确认，或稍后重试。`,
-          `防具與模組已裝備，但回讀核對發現 ${realMismatches.length} 處不一致（含 ${missingPlugs} 個模組寫入未生效）。請重新整理庫存確認，或稍後重試。`,
-          `Armor and mods were equipped, but the verification read-back found ${realMismatches.length} mismatch(es) (${missingPlugs} mod write(s) did not take effect). Refresh the inventory or retry.`,
-        ),
-        "warn",
-      );
-      return;
-    }
-    showBungieEquipMessage(
-      l(
-        `五件护甲与可安装模组已装备，并经回读核对一致。${result.skippedMods.length} 个模组因能量不足未安装。请自行升级护甲为大师、补装模组并选择方案所需碎片；当前属性可能与方案不同。`,
-        `五件防具與可安裝模組已裝備，並經回讀核對一致。${result.skippedMods.length} 個模組因能量不足未安裝。請自行升級大師之作、補裝模組並選擇方案所需碎片；目前數值可能與方案不同。`,
-        `All five armor pieces and installable mods were verified. ${result.skippedMods.length} mods were deferred for insufficient energy. Upgrade masterwork, install deferred mods and select the planned Fragments yourself; current stats may differ.`,
-      ),
-      "info",
-    );
+    task.status = 'running'; task.events = []; task.verification = null;
+    renderBungieTaskPanel();
+    const result = await applyCustomLoadoutPlan(task.plan, {shouldStop: () => task.stopRequested,
+      onProgress: event => {
+        if (event.itemId && event.state) task.events.push(event);
+        if (event.stage === 'verify') task.status = 'verifying';
+        renderBungieTaskPanel();
+      }});
+    task.verification = result.verification;
+    task.status = result.verification?.status === 'verified' ? 'done' : result.verification?.status === 'unverified' ? 'unknown' : 'partial';
   } catch (error) {
-    handleBungieEquipError(error);
+    task.verification = error.reconciliation;
+    task.status = task.verification?.status === 'verified' ? 'done' : error.stopped ? 'stopped' : task.verification?.status === 'failed' ? 'partial' : 'unknown';
+    task.message = error.stopped ? '' : bungieWriteErrorMessage(error);
   } finally {
-    isBungieApplying = false;
-    const statusHtml = document.getElementById("bungieEquipStatus")?.innerHTML || "";
-    renderInventoryResults(lastInventoryResult);
-    const status = document.getElementById("bungieEquipStatus");
-    if (status) status.innerHTML = statusHtml;
+    try {
+      if (task.verification?.profile) await applyBungieActionSnapshot(task.verification.profile);
+    } catch { task.message = l('回读数据未能同步到本地，请重新核对后再操作。', '回讀資料未能同步到本機，請重新核對後再操作。', 'The read-back could not update the local inventory. Check again before another action.'); }
+    finally {
+      isBungieApplying = false;
+      renderBungieTaskPanel();
+      if (lastInventoryResult?.results?.length) renderInventoryResults(lastInventoryResult);
+      if (calculatorMode === 'solve' && allSolutions.length) buildOwnedGearSection();
+    }
   }
 }
 
+function stopBungieTask() { if (bungieTask?.status === 'running') { bungieTask.stopRequested = true; renderBungieTaskPanel(); } }
+function closeBungieTask() {
+  if (isBungieApplying) return;
+  const origin = bungieTask?.returnFocus;
+  bungieTask = null; renderBungieTaskPanel();
+  if (origin?.isConnected) origin.focus({preventScroll: true});
+}
+async function retryBungieTask() { if (bungieTask) await prepareBungieTask(bungieTask.request, bungieTask); }
+async function recheckBungieTask() {
+  if (isBungieApplying || !bungieTask) return;
+  if (!bungieTask.plan) { await retryBungieTask(); return; }
+  const task = bungieTask;
+  isBungieApplying = true; task.status = 'verifying'; task.message = ''; renderBungieTaskPanel();
+  try {
+    task.verification = await reconcileCustomLoadout(task.plan);
+    if (task.verification?.profile) await applyBungieActionSnapshot(task.verification.profile);
+    task.status = task.verification?.status === 'verified' ? 'done' : 'unknown';
+  } catch (error) { task.status = 'unknown'; task.message = error.message;
+  } finally { isBungieApplying = false; renderBungieTaskPanel(); }
+}
+
+async function equipInventorySolution(index, mode = 'full') {
+  if (isBungieApplying) return;
+  const unified = resolveUnifiedEntry(index);
+  if (!unified) return;
+  const entry = unified.witness;
+  const pieces = unified.kind === 'inventory' ? entry.pieces : (unified.pieces || [])
+    .filter(piece => piece.item).map(piece => ({...piece.item, sourceId: piece.item.id, slot: piece.slot}));
+  await prepareBungieTask({pieces, mode, witness: unified.kind === 'inventory' ? entry : null,
+    tuningAssignments: entry.tuningAssignments, modAssignments: entry.modAssignments});
+}
+
 async function importInventoryFromBungie({ silent = false } = {}) {
+  if (isBungieApplying) return;
   if (!getToken()) {
     showImportMessage(l(
       "尚未登录 Bungie。",
@@ -3681,7 +3726,9 @@ async function importInventoryFromBungie({ silent = false } = {}) {
       membershipId,
       characterInventories,
       ...loadoutState,
+      storage: extractStorage(response),
     };
+    await loadBungieCharacterTitles();
     // Map the per-character subclass fragments to class ids so the equipped
     // loadout fill can look them up by the selected class.
     const fragmentsByCharacter = extractSubclassFragments(response);
@@ -6172,29 +6219,21 @@ function renderPlanRow(entry, index) {
 }
 
 function renderInventoryBungieEquip(entry, index) {
+  if (!__BUNGIE_OAUTH_CLIENT_ID__ || importSource !== 'bungie') return '';
   const equipState = getInventorySolutionEquipState(entry);
-  if (equipState.hidden) return "";
-  const targetOptions = getBungieTargetOptionsHtml();
-  const hint = equipState.reason || l(
-    "将转移并穿戴五件护甲、安装可用模组并回读核对。能量不足的模组暂不安装；大师升级、补装模组及碎片选择由你自行完成，当前属性可能与方案不同。请确保角色在轨道、社交空间或离线。",
-    "將轉移並穿著五件防具、安裝可用模組並回讀核對。能量不足的模組暫不安裝；大師升級、補裝模組及碎片選擇由你自行完成，目前數值可能與方案不同。請確保角色在軌道、社交空間或離線。",
-    "Transfers and equips five armor pieces, installs available mods and verifies the result. Energy-incompatible mods are deferred. Handle masterwork, deferred mods and Fragments yourself; current stats may differ. Be in orbit, a social space, or offline.",
-  );
+  const unified = resolveUnifiedEntry(index);
+  const ownedCount = unified?.ownedCount || 0;
+  const canInspect = hasToken() && importSource === 'bungie' && bungieProfileState && ownedCount > 0 && !isBungieApplying;
   return `<section class="bungie-equip-panel" aria-labelledby="bungieEquipTitle">
-    <div class="bungie-equip-copy">
-      <span class="inventory-result-detail-label" id="bungieEquipTitle">${l("Bungie 直装", "Bungie 直裝", "Direct Bungie equip")}</span>
-      <strong>${l("装备到游戏", "裝備到遊戲", "Equip in game")}</strong>
-    </div>
+    <div class="bungie-equip-copy"><strong id="bungieEquipTitle">${l('应用到游戏', '套用到遊戲', 'Apply in game')}</strong>
+      <small>${l('数值方案与实际执行分别检查', '數值方案與實際執行分別檢查', 'Plan validation and game readiness are checked separately')}</small></div>
+    ${renderBungieCharacterPicker()}
     <div class="bungie-equip-controls">
-      <label>
-        <span>${l("目标角色", "目標角色", "Target character")}</span>
-        <select class="bungie-target-select" onchange="setBungieTargetCharacter(this.value)" ${targetOptions && !isBungieApplying ? "" : "disabled"}>${targetOptions}</select>
-      </label>
-      <button id="bungieEquipButton" type="button" class="btn-solve" onclick="equipInventorySolution(${index})" ${equipState.available ? "" : "disabled"}>${icon("check")}${isBungieApplying
-        ? l("正在装备…", "正在裝備…", "Applying…")
-        : l("装备到游戏", "裝備到遊戲", "Equip in game")}</button>
+      <button id="bungieEquipButton" type="button" class="btn-solve" onclick="equipInventorySolution(${index})" ${canInspect && unified?.kind === 'inventory' ? '' : 'disabled'}>${icon('check')}${l('检查并完整应用', '檢查並完整套用', 'Review full application')}</button>
+      <button type="button" class="btn" onclick="equipInventorySolution(${index},'equip')" ${canInspect ? '' : 'disabled'}>${l(`仅穿戴已有 ${ownedCount} 件`, `僅穿著已有 ${ownedCount} 件`, `Equip ${ownedCount} owned pieces only`)}</button>
+      <button type="button" class="btn" onclick="equipInventorySolution(${index},'collect')" ${canInspect ? '' : 'disabled'}>${l(`仅收集已有 ${ownedCount} 件`, `僅收集已有 ${ownedCount} 件`, `Collect ${ownedCount} owned pieces only`)}</button>
     </div>
-    <p class="bungie-equip-hint ${equipState.available ? "" : "is-blocked"}">${escapeHtml(hint)}</p>
+    <p class="bungie-equip-hint">${escapeHtml(equipState.reason || l('执行前会同步库存并列出移动路径、备用件与额外整理。模组条件不会阻止单独收集或穿戴。', '執行前會同步庫存並列出移動路徑、備用件與額外整理。模組條件不會阻止單獨收集或穿著。', 'Review routes, spare armor and extra transfers against a fresh inventory. Mod requirements do not block collect/equip-only actions.'))}</p>
     <div id="bungieEquipStatus" class="bungie-equip-status" aria-live="polite"></div>
   </section>`;
 }
@@ -6964,7 +7003,7 @@ function renderSelectedLoadout(entry, index) {
         <button type="button" class="btn" onclick="saveBuild()">${icon("save")}${l("保存", "儲存", "Save")}</button>
       </div>
     </header>
-    ${entry.kind === "inventory" ? renderInventoryBungieEquip(entry.witness, index) : ""}
+    ${renderInventoryBungieEquip(entry.witness, index)}
     ${renderStatsSummary(entry, finalTotals)}
     ${renderArmorLoadoutTable(rows, entry)}
     ${renderAcquisitionPlan(rows, entry)}
@@ -7979,6 +8018,11 @@ Object.assign(window, {
   exportInventorySolution,
   editBungieSavedLoadout,
   equipInventorySolution,
+  confirmBungieTask,
+  stopBungieTask,
+  closeBungieTask,
+  recheckBungieTask,
+  retryBungieTask,
   clearImportedInventory,
   clearOwnedGear,
   deleteBuild,

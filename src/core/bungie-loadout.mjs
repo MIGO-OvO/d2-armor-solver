@@ -25,6 +25,8 @@ import { assignArmorMods, executionProjectionMismatch } from "./armor-mod-assign
 import { buildSocketCapabilities } from "./armor-sockets.mjs";
 import { assertSolutionConsistency, createCanonicalId, createPieceCapability } from "./solver-v3-contract.mjs";
 import { STATS } from "./armor-model.mjs";
+import { ARMOR_COMPONENTS } from './bungie-inventory-model.mjs';
+import { planSpace, checkVaultSpace, extractStorage } from './bungie-storage.mjs';
 
 export const CHARACTER_LOADOUTS_COMPONENT = "CharacterLoadouts";
 export const LOADOUT_WRITE_COMPONENTS = [
@@ -52,13 +54,6 @@ const WRITE_DELAY_MS = 100;
 const PLUG_DELAY_MS = 500;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// D2 characters hold unequipped items in the account-wide "General" inventory
-// bucket; its per-character capacity is 10. The Vault's own copy of that
-// bucket is 500 (see bungie-inventory.mjs). Used for the DIM-style
-// spaceLeftForItem check: when the target character cannot hold the incoming
-// pieces, move non-loadout items off it to the vault first.
-const CHARACTER_INVENTORY_CAPACITY = 10;
-
 const STAT_MOD_BY_HASH = new Map();
 for (const [stat, sizes] of Object.entries(STAT_MOD_HASHES)) {
   for (const [size, hash] of Object.entries(sizes)) {
@@ -79,9 +74,7 @@ for (const [key, hash] of Object.entries(TUNING_MOD_HASH_BY_TUNING)) {
 // states; class mismatch (512) is already rejected separately via classId.
 // Everything else (equipped elsewhere, in vault, in another slot, unknown)
 // is recoverable by the prepare/transfer flow and must NOT preflight-block.
-const PERMANENT_EQUIP_FAILURE_REASONS = new Set([
-  1024, // ItemIsInAnotherLevelRequirement
-]);
+const PERMANENT_EQUIP_FAILURE_MASK = 1024; // ItemIsInAnotherLevelRequirement
 
 function unwrapProfile(profileResponse) {
   const root = profileResponse?.Response ?? profileResponse;
@@ -142,6 +135,9 @@ export function extractBungieLoadoutState(profileResponse) {
       light: Number(character?.light) || 0,
       dateLastPlayed: character?.dateLastPlayed || "",
       emblemPath: character?.emblemPath || "",
+      emblemBackgroundPath: character?.emblemBackgroundPath || "",
+      titleRecordHash: character?.titleRecordHash || null,
+      genderType: character?.genderType ?? 0,
     };
   }
 
@@ -323,6 +319,7 @@ export function buildBungieArmorItemActionPlan({
   itemId,
   inventory,
   targetCharacterInventory = null,
+  storage = null,
 }) {
   const errors = [];
   const targetId = String(targetCharacterId || "");
@@ -341,7 +338,7 @@ export function buildBungieArmorItemActionPlan({
     ? (item.equipped ? "equipped" : "equip")
     : "transfer";
   if (action === "equip" && item?.canEquip === false &&
-      PERMANENT_EQUIP_FAILURE_REASONS.has(Number(item.cannotEquipReason) || 0)) {
+      (Number(item.cannotEquipReason) & PERMANENT_EQUIP_FAILURE_MASK)) {
     errors.push({ code: "itemCannotEquip", reason: Number(item.cannotEquipReason) || 0 });
   }
 
@@ -384,24 +381,10 @@ export function buildBungieArmorItemActionPlan({
     // Free one target inventory slot before bringing this item in. The
     // character inventory contains only backpack entries, so an equipped
     // target item is never accidentally chosen for a move-aside request.
-    if (Array.isArray(targetCharacterInventory)) {
-      const freeSlots = CHARACTER_INVENTORY_CAPACITY - targetCharacterInventory.length;
-      if (freeSlots < 1) {
-        const candidate = targetCharacterInventory.find(entry =>
-          String(entry?.itemInstanceId ?? "") !== sourceId,
-        );
-        if (candidate?.itemInstanceId) {
-          moveAsideTransfers.push({
-            itemReferenceHash: Number(candidate.itemHash) || 0,
-            stackSize: 1,
-            transferToVault: true,
-            itemId: String(candidate.itemInstanceId),
-            characterId: targetId,
-            membershipType: Number(membershipType),
-          });
-        }
-      }
-    }
+    const space = planSpace({incoming: [item], inventory, backpack: targetCharacterInventory,
+      characterId: targetId, membershipType, protectedIds: new Set([sourceId]), capacities: storage?.capacities});
+    moveAsideTransfers.push(...space.transfers);
+    errors.push(...space.errors);
 
     if (item.owner !== "Vault") {
       transfers.push(transferRequest(item, membershipType, item.owner, true));
@@ -409,6 +392,7 @@ export function buildBungieArmorItemActionPlan({
     transfers.push(transferRequest(item, membershipType, targetId, false));
   }
 
+  errors.push(...checkVaultSpace({moveAsideTransfers, preparationTransfers, transfers}, storage));
   return {
     valid: errors.length === 0,
     errors,
@@ -465,6 +449,8 @@ export function buildCustomLoadoutPlan({
   availablePlugHashes = null,
   targetCharacterInventory = null,
   verifiedWitness = null,
+  mode = 'full',
+  storage = null,
 }) {
   const errors = [];
   const warnings = [];
@@ -472,11 +458,14 @@ export function buildCustomLoadoutPlan({
   const targetIds = new Set((pieces || []).map(piece => String(piece?.sourceId ?? "")));
   const characterClassType = CLASS_TYPE_BY_ID[classId];
   const resolvedItems = [];
+  const seenSlots = new Set();
+  const seenIds = new Set();
 
   if (!membershipType || !targetCharacterId) {
     errors.push({ code: "missingTarget" });
   }
-  if (!Array.isArray(pieces) || pieces.length !== 5) {
+  if (!['full', 'equip', 'collect'].includes(mode)) errors.push({code: 'invalidMode'});
+  if (!Array.isArray(pieces) || !pieces.length || pieces.length > 5 || (mode === 'full' && pieces.length !== 5)) {
     errors.push({ code: "missingPieces" });
   }
 
@@ -488,14 +477,20 @@ export function buildCustomLoadoutPlan({
       errors.push({ code: "notOwnedInstance", index, slot: piece?.slot || "" });
       continue;
     }
+    if (seenIds.has(String(item.id)) || (mode !== 'collect' && seenSlots.has(item.slot))) errors.push({code: 'duplicatePiece', index, slot: item.slot});
+    seenIds.add(String(item.id)); seenSlots.add(item.slot);
+    if (Number(piece.hash) !== Number(item.hash) || (piece.slot && piece.slot !== item.slot)) errors.push({code: 'notOwnedInstance', index, slot: piece.slot});
+    // NoRoomInDestination (4) is recoverable by space planning; only the
+    // NotTransferrable bit (2) is intrinsic. Equipped (1) is handled by spares.
+    if (String(item.owner) !== String(targetCharacterId) && (Number(item.transferStatus) & 2)) errors.push({code: 'itemNotTransferable', index, slot: piece.slot});
     if (item.classId && classId && item.classId !== classId) {
       errors.push({ code: "classMismatch", index, slot: piece.slot });
     }
     // Transient cannot-equip reasons (locked, vaulted, equipped elsewhere,
     // unknown) flow into the prepare/transfer stage; only permanent ones block
     // here (handoff 3.8). Final proof is the EquipItems result + verify.
-    if (item.canEquip === false
-        && PERMANENT_EQUIP_FAILURE_REASONS.has(Number(item.cannotEquipReason) || 0)) {
+    if (mode !== 'collect' && item.canEquip === false
+        && (Number(item.cannotEquipReason) & PERMANENT_EQUIP_FAILURE_MASK)) {
       errors.push({
         code: "itemCannotEquip",
         index,
@@ -507,27 +502,27 @@ export function buildCustomLoadoutPlan({
         (piece.secondaryPerkId || null) !== (item.secondaryPerkId || null))) {
       errors.push({ code: "exoticPerkMismatch", index, slot: piece.slot });
     }
-    if (piece.exotic) exoticCount++;
+    if (item.exotic) exoticCount++;
     if (!item.owner) {
       errors.push({ code: "missingOwner", index, slot: piece.slot });
     }
     resolvedItems.push({ ...item, planIndex: index, sockets: ensureSocketCapabilities(item) });
   }
-  if (exoticCount > 1) {
+  if (exoticCount > 1 && mode !== 'collect') {
     errors.push({ code: "multipleExotics" });
   }
 
   // Global assignment over the five real instances: exact socket resolution,
   // tri-state availability, energy feasibility, fixed-tuning compatibility.
   // Energy upgrades are user-managed; defer only energy-incompatible mods.
-  const assignment = assignArmorMods({
+  const assignment = mode === 'full' ? assignArmorMods({
     pieces,
     inventory: resolvedItems,
     tuningAssignments,
     modAssignments,
     availablePlugHashes,
-  });
-  if (verifiedWitness) {
+  }) : {unassignedMods: [], expectedSocketPlugs: [], plugOperations: []};
+  if (verifiedWitness && mode === 'full') {
     try {
       const checked = assertSolutionConsistency(verifiedWitness.problemSpec, verifiedWitness);
       assertSolutionConsistency({...verifiedWitness.problemSpec,
@@ -559,28 +554,34 @@ export function buildCustomLoadoutPlan({
 
   const preparationTransfers = [];
   const sourceEquipByCharacter = new Map();
+  const reservedSpares = new Set();
   for (const item of resolvedItems) {
     if (String(item.owner) === String(targetCharacterId) || item.owner === "Vault" || !item.equipped) {
       continue;
     }
     const replacement = (inventory || []).find(candidate =>
       !targetIds.has(String(candidate?.id ?? "")) &&
+      !reservedSpares.has(String(candidate?.id ?? '')) &&
       candidate?.slot === item.slot && candidate?.classId === item.classId &&
       !candidate?.equipped &&
+      !(Number(candidate.cannotEquipReason) & 1024) && !(Number(candidate.transferStatus) & 2) &&
       // Prefer a non-exotic replacement so the source character never hits the
       // one-exotic-equipped rule while freeing the loadout piece (handoff 4.4).
       !candidate?.exotic &&
       (String(candidate?.owner) === String(item.owner) || candidate?.owner === "Vault"),
     ) || (inventory || []).find(candidate =>
       !targetIds.has(String(candidate?.id ?? "")) &&
+      !reservedSpares.has(String(candidate?.id ?? '')) &&
       candidate?.slot === item.slot && candidate?.classId === item.classId &&
       !candidate?.equipped &&
+      (!candidate.exotic || item.exotic) && !(Number(candidate.cannotEquipReason) & 1024) && !(Number(candidate.transferStatus) & 2) &&
       (String(candidate?.owner) === String(item.owner) || candidate?.owner === "Vault"),
     );
     if (!replacement) {
       errors.push({ code: "equippedElsewhereNoReplacement", slot: item.slot, owner: item.owner });
       continue;
     }
+    reservedSpares.add(String(replacement.id));
     if (replacement.owner === "Vault") {
       preparationTransfers.push(transferRequest(
         replacement, membershipType, item.owner, false,
@@ -610,28 +611,22 @@ export function buildCustomLoadoutPlan({
   // character to the vault first, so the transfers below do not fail on a full
   // backpack. targetCharacterInventory is null when the caller did not capture
   // it (offline / unknown), in which case no move-aside is planned.
-  const incomingCount = resolvedItems.filter(
-    item => String(item.owner) !== String(targetCharacterId),
-  ).length;
-  const moveAsideTransfers = [];
-  if (Array.isArray(targetCharacterInventory) && incomingCount > 0) {
-    const freeSlots = CHARACTER_INVENTORY_CAPACITY - targetCharacterInventory.length;
-    const needToFree = incomingCount - freeSlots;
-    if (needToFree > 0) {
-      for (const entry of targetCharacterInventory) {
-        if (moveAsideTransfers.length >= needToFree) break;
-        if (targetIds.has(String(entry?.itemInstanceId ?? ""))) continue;
-        moveAsideTransfers.push({
-          itemReferenceHash: Number(entry?.itemHash) || 0,
-          stackSize: 1,
-          transferToVault: true,
-          itemId: String(entry?.itemInstanceId ?? ""),
-          characterId: String(targetCharacterId),
-          membershipType: Number(membershipType),
-        });
-      }
-    }
+  const protectedIds = new Set([...targetIds, ...[...sourceEquipByCharacter.values()].flat()]);
+  const space = planSpace({incoming: resolvedItems.filter(item => String(item.owner) !== String(targetCharacterId)),
+    inventory, backpack: targetCharacterInventory, characterId: targetCharacterId, membershipType,
+    protectedIds, capacities: storage?.capacities});
+  const moveAsideTransfers = space.transfers;
+  errors.push(...space.errors);
+  // A vault spare also needs room on its source character before it can equip.
+  for (const owner of new Set(preparationTransfers.map(request => request.characterId))) {
+    const sourceSpace = planSpace({incoming: preparationTransfers.filter(request => request.characterId === owner)
+      .map(request => itemsById.get(request.itemId)).filter(Boolean), inventory,
+      backpack: storage?.characterInventories?.[owner], characterId: owner, membershipType,
+      protectedIds, capacities: storage?.capacities});
+    moveAsideTransfers.push(...sourceSpace.transfers);
+    errors.push(...sourceSpace.errors);
   }
+  errors.push(...checkVaultSpace({moveAsideTransfers, preparationTransfers, transfers}, storage));
 
   if (characterClassType === undefined) {
     errors.push({ code: "unknownClass" });
@@ -641,6 +636,9 @@ export function buildCustomLoadoutPlan({
     valid: errors.length === 0,
     errors,
     warnings,
+    mode,
+    items: resolvedItems,
+    alreadyEquippedIds: resolvedItems.filter(item => String(item.owner) === String(targetCharacterId) && item.equipped).map(item => String(item.id)),
     skippedMods: assignment.unassignedMods.filter(miss => miss.reason === "energy"),
     membershipType: Number(membershipType),
     membershipId: membershipId ? String(membershipId) : null,
@@ -891,7 +889,45 @@ export async function verifyLoadoutApplication({
   return { status: "failed", mismatches: lastMismatches, attempts: retries + 1 };
 }
 
-export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify = true, delays = true } = {}) {
+export async function reconcileCustomLoadout(plan, {retries = 1, delayMs = 500} = {}) {
+  if (!plan.membershipId) return {status: 'unverified', reason: 'missing-membership-id', mismatches: []};
+  let result;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const profile = await bungieFetch(`/Destiny2/${plan.membershipType}/Profile/${plan.membershipId}/?components=${[...ARMOR_COMPONENTS, CHARACTER_LOADOUTS_COMPONENT].join(',')}`, {retries: 0});
+      const data = unwrapProfile(profile);
+      const locations = [];
+      const add = (items, owner, equipped) => {
+        for (const item of items || []) locations.push({id: String(item.itemInstanceId), hash: Number(item.itemHash), owner, equipped});
+      };
+      add(data.profileInventory?.data?.items, 'Vault', false);
+      for (const [owner, component] of Object.entries(data.characterInventories?.data || {})) add(component.items, owner, false);
+      for (const [owner, component] of Object.entries(data.characterEquipment?.data || {})) add(component.items, owner, true);
+      const mismatches = [], itemStates = [];
+      for (const item of plan.items || []) {
+        const observed = locations.find(location => location.id === String(item.id) && location.hash === Number(item.hash));
+        const arrived = observed?.owner === plan.targetCharacterId;
+        const equipped = arrived && observed.equipped;
+        itemStates.push({itemId: String(item.id), arrived, equipped, owner: observed?.owner || null});
+        if (!arrived || (plan.mode !== 'collect' && !equipped)) mismatches.push({kind: 'armorInstanceMissing', itemId: String(item.id)});
+      }
+      const plugs = (plan.expectedSocketPlugs || []).map(operation => ({...operation,
+        verified: Number(data.itemComponents?.sockets?.data?.[operation.itemId]?.sockets?.[operation.socketIndex]?.plugHash) === Number(operation.plugItemHash)}));
+      for (const plug of plugs) if (!plug.verified) mismatches.push({kind: 'plugMismatch', itemId: plug.itemId, socketIndex: plug.socketIndex});
+      const complete = Array.isArray(data.characterInventories?.data?.[plan.targetCharacterId]?.items)
+        && Array.isArray(data.characterEquipment?.data?.[plan.targetCharacterId]?.items);
+      result = {status: complete ? (mismatches.length ? 'failed' : 'verified') : 'unverified', profile,
+        locations, itemStates, plugs, mismatches, storage: extractStorage(profile), attempts: attempt + 1};
+      if (result.status === 'verified') return result;
+    } catch (error) {
+      if (attempt === retries) return {...result, status: 'unverified', reason: 'read-back-failed', message: error.message};
+    }
+    if (attempt < retries && delayMs) await sleep(delayMs);
+  }
+  return result;
+}
+
+export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify = true, delays = true, shouldStop = () => false } = {}) {
   if (!plan?.valid) throw new BungieLoadoutPlanError(plan?.errors || []);
   const completed = {
     moveAsideTransfers: 0,
@@ -905,18 +941,42 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
   const transferFailures = []; // { itemId, errorCode } — pieces that never reached the character
   const plugFailures = []; // { itemId, socketIndex, errorCode } — mods that failed to insert
   let stage = "space";
+  let operationNumber = 0;
   const progress = detail => onProgress?.({ stage, completed: { ...completed }, ...detail });
   const pause = delays ? sleep : () => {};
+  const post = async (path, body, detail = {}) => {
+    if (shouldStop()) { const error = new Error('Stopped before next write'); error.code = 'stopped'; throw error; }
+    const operationId = String(++operationNumber);
+    const event = {operationId, itemId: body.itemId, itemIds: body.itemIds,
+      socketIndex: body.plug?.socketIndex,
+      from: body.transferToVault ? body.characterId : 'Vault',
+      to: body.transferToVault ? 'Vault' : body.characterId, ...detail};
+    progress({...event, state: 'running'});
+    try {
+      // Never transparently replay a write. A timeout/throttle is reconciled.
+      const response = await bungiePost(path, body, {retries: 0});
+      if (body.itemIds) {
+        const statuses = equipStatusByInstanceId(response);
+        for (const itemId of body.itemIds) progress({...event, itemIds: undefined, itemId,
+          state: statuses.get(String(itemId)) === PLATFORM_SUCCESS ? 'succeeded' : 'failed',
+          errorCode: statuses.get(String(itemId)) === PLATFORM_SUCCESS ? null : statuses.get(String(itemId))});
+      } else progress({...event, state: 'succeeded'});
+      return response;
+    } catch (error) {
+      progress({...event, state: error instanceof ApiError ? 'failed' : 'unknown', errorCode: error.errorCode ?? null});
+      throw error;
+    }
+  };
 
   // A Bungie action error (a specific ErrorCode for the action) is a per-item
   // soft failure: record it and keep going. Transport / auth / throttle errors
   // are hard and abort the whole sequence.
   const softPost = async (path, body, record) => {
     try {
-      await bungiePost(path, body);
+      await post(path, body);
       return true;
     } catch (error) {
-      if (error instanceof ApiError) {
+      if (error instanceof ApiError && error.status !== 401 && error.status !== 403) {
         record(error);
         return false;
       }
@@ -926,13 +986,10 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
 
   try {
     // 1. Move-aside: free target-character inventory slots before the loadout
-    //    transfers. A failure here is non-fatal — the loadout transfers below
-    //    still run and surface their own per-item failures if space is short.
+    //    transfers. A failure aborts: dependent moves must not use assumed space.
     for (const request of plan.moveAsideTransfers) {
-      progress({ action: "move-aside" });
-      if (await softPost("/Destiny2/Actions/Items/TransferItem/", request, () => {})) {
-        completed.moveAsideTransfers++;
-      }
+      await post("/Destiny2/Actions/Items/TransferItem/", request, {action: 'move-aside'});
+      completed.moveAsideTransfers++;
       await pause(WRITE_DELAY_MS);
     }
 
@@ -940,8 +997,7 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
     //    failure here means the source piece cannot be freed, so abort hard.
     stage = "prepare";
     for (const request of plan.preparationTransfers) {
-      progress({ action: "transfer" });
-      await bungiePost("/Destiny2/Actions/Items/TransferItem/", request);
+      await post("/Destiny2/Actions/Items/TransferItem/", request, {action: 'spare'});
       completed.preparationTransfers++;
       await pause(WRITE_DELAY_MS);
     }
@@ -949,8 +1005,7 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
     // 3. Source unequip. Hard failure aborts (the piece stays equipped elsewhere).
     stage = "unequip-source";
     for (const source of plan.sourceEquips) {
-      progress({ action: "equip-source", characterId: source.characterId });
-      const response = await bungiePost("/Destiny2/Actions/Items/EquipItems/", {
+      const response = await post("/Destiny2/Actions/Items/EquipItems/", {
         itemIds: source.itemIds,
         characterId: source.characterId,
         membershipType: plan.membershipType,
@@ -970,10 +1025,15 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
     //    vault for pieces coming off another character does not count.
     stage = "transfer";
     const onCharacterIds = new Set(plan.alreadyOnTargetIds || []);
+    const failedTransfers = new Set();
     for (const request of plan.transfers) {
-      progress({ action: "transfer" });
+      if (failedTransfers.has(String(request.itemId))) {
+        progress({itemId: request.itemId, state: 'skipped', action: 'dependency-failed'});
+        continue;
+      }
       const ok = await softPost("/Destiny2/Actions/Items/TransferItem/", request, error => {
         transferFailures.push({ itemId: String(request.itemId), errorCode: error.errorCode ?? null });
+        failedTransfers.add(String(request.itemId));
       });
       if (ok) {
         completed.transfers++;
@@ -985,12 +1045,12 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
     // 5. Bulk-equip only the pieces that actually reached the character, then
     //    read the per-item result. A piece that never transferred is a failure.
     stage = "equip";
-    const equipCandidates = (plan.equipItemIds || []).filter(
-      id => onCharacterIds.has(String(id)),
-    );
+    const alreadyEquipped = new Set(plan.alreadyEquippedIds || []);
+    completed.targetEquip = alreadyEquipped.size;
+    const equipCandidates = plan.mode === 'collect' ? [] : (plan.equipItemIds || []).filter(
+      id => onCharacterIds.has(String(id)) && !alreadyEquipped.has(String(id)));
     if (equipCandidates.length > 0) {
-      progress({ action: "equip-target" });
-      const equipResponse = await bungiePost("/Destiny2/Actions/Items/EquipItems/", {
+      const equipResponse = await post("/Destiny2/Actions/Items/EquipItems/", {
         itemIds: equipCandidates,
         characterId: plan.targetCharacterId,
         membershipType: plan.membershipType,
@@ -1007,7 +1067,7 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
     }
     // Pieces that never reached the character count as equip failures too.
     for (const itemId of plan.equipItemIds || []) {
-      if (!onCharacterIds.has(String(itemId)) &&
+      if (plan.mode !== 'collect' && !onCharacterIds.has(String(itemId)) &&
           !equipFailures.some(failure => failure.itemId === String(itemId))) {
         equipFailures.push({ itemId: String(itemId), errorCode: null });
       }
@@ -1050,14 +1110,8 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
     if (verify) {
       stage = "verify";
       progress({ action: "verify" });
-      verification = await verifyLoadoutApplication({
-        membershipType: plan.membershipType,
-        membershipId: plan.membershipId,
-        targetCharacterId: plan.targetCharacterId,
-        equipItemIds: plan.equipItemIds,
-        plugOperations: plan.expectedSocketPlugs || plan.plugOperations,
-        expectedArmorTotals: plan.expectedArmorTotals,
-      });
+      verification = await reconcileCustomLoadout(plan, {delayMs: delays ? 500 : 0});
+      progress({action: 'verify', state: verification.status, verification});
     }
 
     return {
@@ -1070,7 +1124,12 @@ export async function applyCustomLoadoutPlan(plan, { onProgress = null, verify =
       verification,
     };
   } catch (cause) {
-    throw new BungieLoadoutApplyError(stage, completed, cause);
+    const error = new BungieLoadoutApplyError(stage, completed, cause);
+    error.stopped = cause.code === 'stopped';
+    progress({action: 'verify', state: 'running', stage: 'verify'});
+    error.reconciliation = verify ? await reconcileCustomLoadout(plan, {delayMs: delays ? 500 : 0}) : null;
+    progress({action: 'verify', stage: 'verify', state: error.reconciliation?.status || 'unverified', verification: error.reconciliation});
+    throw error;
   }
 }
 

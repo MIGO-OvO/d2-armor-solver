@@ -12,6 +12,7 @@ import {
   STATS,
 } from "./armor-model.mjs";
 import { getArmorSetByItemHash } from "./armor-sets.mjs";
+import { inventoryEntry } from './bungie-storage.mjs';
 import {
   getEffectiveBaseStats,
   inferArchetypeFromStats,
@@ -347,6 +348,8 @@ export function normalizeApiItem(apiItem, context = {}) {
     displayedStats,
     owner,
     equipped: Boolean(equipped),
+    bucketHash: Number(apiItem.bucketHash) || 0,
+    transferStatus: apiItem.transferStatus ?? null,
     canEquip: instance.canEquip !== false,
     cannotEquipReason: Number(instance.cannotEquipReason) || 0,
     energy: energy && typeof energy === "object" ? {
@@ -447,10 +450,7 @@ export function buildArmorInventory(profileResponse, { language = "zh-chs", cata
   const characterInventories = {};
   for (const [characterId, component] of Object.entries(data.characterInventories?.data ?? {})) {
     characterInventories[characterId] = (component?.items || [])
-      .map(apiItem => ({
-        itemInstanceId: String(apiItem?.itemInstanceId ?? ""),
-        itemHash: Number(apiItem?.itemHash) || 0,
-      }))
+      .map(inventoryEntry)
       .filter(entry => entry.itemInstanceId);
   }
   const instances = data.itemComponents?.instances?.data ?? {};

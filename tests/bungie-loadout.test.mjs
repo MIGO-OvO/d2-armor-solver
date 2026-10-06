@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
 import { saveToken } from "../src/core/bungie-api.mjs";
+import { ARMOR_BUCKETS } from '../src/core/bungie-storage.mjs';
 import { buildArmorInventory } from "../src/core/bungie-inventory.mjs";
 import {
   BungieLoadoutApplyError,
@@ -273,12 +274,10 @@ test("buildCustomLoadoutPlan creates vault transfers, one bulk equip, and exact 
 
 test("buildCustomLoadoutPlan moves non-loadout items aside when the character is full", () => {
   const fixture = customPlanFixture();
-  // Ten items already fill the character's inventory (capacity 10); none are
-  // part of the loadout.
-  const targetCharacterInventory = Array.from({ length: 10 }, (_, index) => ({
-    itemInstanceId: String(1000 + index),
-    itemHash: 2000 + index,
-  }));
+  // Nine backpack items plus the equipped item fill EACH armor bucket.
+  const targetCharacterInventory = Object.values(ARMOR_BUCKETS).flatMap((bucketHash, slot) =>
+    Array.from({length: 9}, (_, index) => ({itemInstanceId: String(1000 + slot * 10 + index),
+      itemHash: 2000 + index, bucketHash, transferStatus: 0})));
   const plan = buildCustomLoadoutPlan({
     membershipType: 3,
     targetCharacterId: "character-1",
@@ -308,10 +307,11 @@ test("buildCustomLoadoutPlan skips move-aside when the character has room", () =
 test("buildCustomLoadoutPlan never moves a loadout piece aside", () => {
   const fixture = customPlanFixture();
   const targetCharacterInventory = [
-    { itemInstanceId: "100", itemHash: 1000 }, // a loadout piece id
-    ...Array.from({ length: 9 }, (_, index) => ({
+    { itemInstanceId: "100", itemHash: 1000, bucketHash: ARMOR_BUCKETS.helmet, transferStatus: 0 }, // protected
+    ...Array.from({ length: 8 }, (_, index) => ({
       itemInstanceId: String(300 + index),
       itemHash: 4000 + index,
+      bucketHash: ARMOR_BUCKETS.helmet, transferStatus: 0,
     })),
   ];
   const plan = buildCustomLoadoutPlan({
@@ -321,7 +321,7 @@ test("buildCustomLoadoutPlan never moves a loadout piece aside", () => {
     ...fixture,
     targetCharacterInventory,
   });
-  assert.equal(plan.moveAsideTransfers.length, 5);
+  assert.equal(plan.moveAsideTransfers.length, 1);
   assert.ok(!plan.moveAsideTransfers.some(request => request.itemId === "100"));
 });
 
@@ -381,9 +381,10 @@ test("single owned-armor action safely frees a source slot and target inventory 
     equipped: false,
     exotic: false,
   });
-  fixture.targetCharacterInventory = Array.from({ length: 10 }, (_, index) => ({
+  fixture.targetCharacterInventory = Array.from({ length: 9 }, (_, index) => ({
     itemInstanceId: String(200 + index),
     itemHash: 2000 + index,
+    bucketHash: ARMOR_BUCKETS.helmet, transferStatus: 0,
   }));
   const plan = buildBungieArmorItemActionPlan(fixture);
   assert.equal(plan.valid, true, JSON.stringify(plan.errors));

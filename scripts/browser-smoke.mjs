@@ -211,6 +211,11 @@ const syntheticProfileFixture = JSON.parse(
 function createWritableProfileFixture() {  const fixture = structuredClone(syntheticProfileFixture);
   const data = fixture.Response.data;
   const hunterId = "2305843009471208001";
+  for (const character of Object.values(data.characters.data)) {
+    character.emblemPath = '/common/mock-emblem.svg';
+    character.emblemBackgroundPath = '/common/mock-nameplate.svg';
+    character.titleRecordHash = 123;
+  }
   const subclassId = "1000000000000000999";
   const removedHunterIds = new Set([
     "1000000000000000001",
@@ -262,7 +267,7 @@ function createWritableProfileFixture() {  const fixture = structuredClone(synth
       quantity: 1,
       bindings: 0,
       location: 0,
-      transferStatus: 1,
+      transferStatus: 0,
       lockable: true,
       state: 0,
       bucketHash: item.bucketHash,
@@ -381,6 +386,8 @@ function postApplyProfileFixture(writeRequests, baseFixture) {
   const data = fixture.Response.data;
   const target = writeRequests.equipItems[0];
   const itemIds = target.itemIds;
+  const originals = new Map(data.profileInventory.data.items.map(item => [String(item.itemInstanceId), item]));
+  data.profileInventory.data.items = data.profileInventory.data.items.filter(item => !itemIds.includes(String(item.itemInstanceId)));
   const plugsByItem = {};
   for (const request of writeRequests.insertPlug) {
     const itemId = String(request.itemId);
@@ -390,7 +397,7 @@ function postApplyProfileFixture(writeRequests, baseFixture) {
   }
   data.characterEquipment.data[target.characterId] = {
     items: itemIds.map((itemId, index) => ({
-      itemHash: 1000 + index,
+      itemHash: originals.get(String(itemId))?.itemHash || 1000 + index,
       itemInstanceId: String(itemId),
       quantity: 1,
       bucketHash: [3448274439, 3551918588, 14239492, 20886954, 1585787867][index] ?? 3448274439,
@@ -1270,6 +1277,16 @@ async function checkBungieAuthFlow(browser) {
         body: membershipsBody,
       });
     }
+    if (url.pathname.includes('/Manifest/DestinyInventoryBucketDefinition/')) {
+      return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({ErrorCode: 1,
+        Response: {itemCount: url.pathname.includes('138197802') ? 1000 : 10}})});
+    }
+    if (url.pathname.includes('/Manifest/DestinyInventoryItemDefinition/') || url.pathname.includes('/Manifest/DestinyRecordDefinition/')) {
+      return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({ErrorCode: 1,
+        Response: {displayProperties: {icon: '/common/mock-armor.svg'}, titleInfo: {titlesByGender: {Male: '测试称号', Female: '测试称号'}}}})});
+    }
+    if (url.pathname.startsWith('/common/')) return route.fulfill({status: 200, contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="76"><rect width="320" height="76" fill="#24354f"/></svg>'});
     const writeRoute = {
       "/Platform/Destiny2/Actions/Loadouts/EquipLoadout/": "equipLoadout",
       "/Platform/Destiny2/Actions/Items/TransferItem/": "transfer",
@@ -1653,6 +1670,10 @@ async function checkBungieAuthFlow(browser) {
     await page.evaluate(() => window.analyzeArmorUpgrades());
     await page.locator("#inventoryResults:not([hidden])").waitFor();
     const equipButton = page.locator("#bungieEquipButton");
+    await equipButton.scrollIntoViewIfNeeded();
+    assert.equal(await page.locator('.bungie-equip-panel .bungie-character input:checked').count(), 1);
+    assert.match(await page.locator('.bungie-equip-panel .bungie-character-list').innerText(), /测试称号/);
+    await page.screenshot({path: path.join(projectRoot, '.audit', 'bungie-nameplates-desktop.png'), fullPage: false});
     assert.equal(
       await equipButton.isEnabled(),
       true,
@@ -1660,15 +1681,16 @@ async function checkBungieAuthFlow(browser) {
         await page.locator(".bungie-equip-hint").innerText(),
     );
     await equipButton.click();
-    await page.waitForFunction(() => /五件护甲与(?:可安装)?模组已装备|护甲与模组已装备|已装备 \d\/5 件护甲|装备到游戏失败|已完成部分/.test(
-      document.getElementById("bungieEquipStatus")?.textContent || "",
-    ));
+    await page.locator('#bungieOperationPanel button[onclick="confirmBungieTask()"]').waitFor();
+    assert.equal(writeRequests.transfer.length, 0, 'review must not write before confirmation');
+    await page.locator('#bungieOperationPanel button[onclick="confirmBungieTask()"]').click();
+    await page.waitForFunction(() => /操作已确认|部分完成|状态待确认/.test(document.getElementById('bungieTaskHeading')?.textContent || ''));
     assert.equal(writeRequests.transfer.length, 5, "five vault armor pieces should transfer");
     assert.equal(writeRequests.equipItems.length, 1, "target armor should equip in one request");
-    const customEquipStatus = await page.locator("#bungieEquipStatus").innerText();
+    const customEquipStatus = await page.locator("#bungieOperationPanel").innerText();
     assert.ok(
       writeRequests.insertPlug.length > 0 ||
-        /五件护甲与(?:可安装)?模组已装备/.test(
+        /操作已确认/.test(
           customEquipStatus,
         ),
       "the custom plan must either write its sockets or explicitly report an armor-only apply: " +
@@ -1676,6 +1698,18 @@ async function checkBungieAuthFlow(browser) {
     );
     assert.equal(writeRequests.equipItems[0].itemIds.length, 5);
     assert.ok(writeRequests.insertPlug.every(body => body.plug?.socketArrayType === 0));
+    assert.match(customEquipStatus, /到位 5\/5/);
+    assert.match(customEquipStatus, /已穿戴 5\/5/);
+    const writesBeforeCheck = writeRequests.transfer.length + writeRequests.equipItems.length + writeRequests.insertPlug.length;
+    await page.locator('#bungieOperationPanel button[onclick="recheckBungieTask()"]').click();
+    await page.waitForFunction(() => document.getElementById('bungieTaskHeading')?.textContent === '操作已确认');
+    assert.equal(writeRequests.transfer.length + writeRequests.equipItems.length + writeRequests.insertPlug.length, writesBeforeCheck, 'check again must only read');
+    await page.screenshot({path: path.join(projectRoot, '.audit', 'bungie-task-desktop.png'), fullPage: false});
+    await page.setViewportSize({width: 390, height: 844});
+    assert.ok(await page.locator('#bungieOperationPanel').evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+    await page.screenshot({path: path.join(projectRoot, '.audit', 'bungie-task-mobile.png'), fullPage: false});
+    await page.locator('#bungieOperationPanel button[onclick="closeBungieTask()"]').click();
+    await page.setViewportSize({width: 1440, height: 1000});
 
     // --- (e2) from-scratch owned armor exposes the live Bungie target picker.
     // The single-item action sequence itself is covered at the API boundary in
@@ -1708,7 +1742,7 @@ async function checkBungieAuthFlow(browser) {
       window.solve();
     });
     await page.locator("#results.show").waitFor();
-    assert.equal(await page.locator("#ownedGearSection .owned-gear-target select").count(), 1);
+    assert.ok(await page.locator('#ownedGearSection .bungie-character input[type="radio"]').count() > 0);
 
     // --- (f) error paths keep the user signed in and render classified copy ---
     for (const [mode, expectedText] of [
