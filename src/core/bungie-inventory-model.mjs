@@ -18,6 +18,7 @@ import {
   inferArchetypeFromStats,
 } from "./dim-csv.mjs";
 import {
+  ARMOR_MASTERWORK_TIER_BY_PLUG_HASH,
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
   TUNING_MOD_HASH_BY_TUNING,
@@ -211,10 +212,6 @@ export function normalizeApiItem(apiItem, context = {}) {
     || `item_${hash}`;
 
   const energy = instance.energy ?? instance.energyCapacity;
-  const masterworkTier = Number(
-    energy && typeof energy === "object" ? energy.energyCapacity : energy,
-  ) || 0;
-  const masterworkBonus = Math.min(5, Math.max(0, masterworkTier));
 
   // Forward tuning/mod inference from the installed plug hashes (Metis C1).
   // Exotic Class Item perk sockets carry the "Spirit of …" plug hashes; match
@@ -227,11 +224,13 @@ export function normalizeApiItem(apiItem, context = {}) {
   let armorModStat = null;
   let primaryPerkId = null;
   let secondaryPerkId = null;
+  let masterworkTier;
   const perkHashToId = new Map(Object.entries(EXOTIC_PERK_NAMES)
     .map(([id, meta]) => [meta.hash, id]));
   const primaryPerkIds = new Set((exoticClassItem?.primary || []).map(([id]) => id));
   const secondaryPerkIds = new Set((exoticClassItem?.secondary || []).map(([id]) => id));
   for (const plugHash of collectPlugHashes(instanceId, sockets)) {
+    masterworkTier ??= ARMOR_MASTERWORK_TIER_BY_PLUG_HASH.get(plugHash);
     if (plugHash === BALANCED_TUNING_MOD_HASH) {
       tuningMode = "plus3";
     } else if (TUNING_HASH_TO_TUNING.has(plugHash)) {
@@ -250,6 +249,10 @@ export function normalizeApiItem(apiItem, context = {}) {
       else if (secondaryPerkIds.has(perkId) && !secondaryPerkId) secondaryPerkId = perkId;
     }
   }
+  // Armor 3.0 has an independent masterwork plug even at tier 0. Older
+  // inventory inputs without that plug retain the legacy energy fallback.
+  masterworkTier ??= Number(energy && typeof energy === "object" ? energy.energyCapacity : energy) || 0;
+  const masterworkBonus = Math.min(5, Math.max(0, masterworkTier));
 
   // Directional shift changes are fully known from the installed plug; the
   // +3 balanced changes need the framework, so they are added after inference.
@@ -315,7 +318,12 @@ export function normalizeApiItem(apiItem, context = {}) {
   );
   const tuningSocket = findSocketByRole(socketsCapability, SOCKET_ROLE.TUNING);
   const statSocket = findSocketByRole(socketsCapability, SOCKET_ROLE.STAT);
-  const tuningInfo = deriveTuningStats(tuningSocket);
+  const socketTuning = deriveTuningStats(tuningSocket);
+  // The three Exotic Class Items share Manifest plug set 1155052024, which
+  // supports all six destinations. Instance socket evidence stays separate.
+  const tuningInfo = exoticClassItem && socketTuning.confidence === "unknown"
+    ? { fixedTuningStat: null, allowedTuningStats: [...STATS], confidence: "exact" }
+    : socketTuning;
   const dataConfidence = {
     stats: STATS.every(stat => Number.isSafeInteger(rawStats[stat])) ? "exact" : "unknown",
     framework: archetypeId && tertiary ? "exact" : "unknown",
