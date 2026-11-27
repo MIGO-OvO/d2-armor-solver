@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeApiItem } from "../src/core/bungie-inventory.mjs";
+import { solveInventory } from "../src/core/armor-engine.mjs";
+import { buildArmorInventory, normalizeApiItem } from "../src/core/bungie-inventory.mjs";
 import { normalizeDimItem } from "../src/core/dim-csv.mjs";
 import { createUpgradePieceFromItem } from "../src/core/upgrade-optimizer.mjs";
-import { ARCHETYPES, ARCHETYPE_LABELS } from "../src/core/armor-model.mjs";
+import { ARCHETYPES, ARCHETYPE_LABELS, EXOTIC_PERK_NAMES, STATS } from "../src/core/armor-model.mjs";
 import {
   BALANCED_TUNING_MOD_HASH,
   STAT_MOD_HASHES,
@@ -68,11 +69,11 @@ function tuningCandidatesFor(fixedTuningStat) {
 
 // One instance described per case: { name, masterworkTier, statMod, tuning, tuningStat }
 const CASES = [
-  { name: "no mod, no tuning, full masterwork", masterworkTier: 10, statMod: null, tuning: null, tuningStat: "health" },
-  { name: "+10 stat mod", masterworkTier: 10, statMod: { stat: "melee", size: 10 }, tuning: null, tuningStat: "health" },
-  { name: "+5 stat mod", masterworkTier: 10, statMod: { stat: "class", size: 5 }, tuning: null, tuningStat: "health" },
-  { name: "+5/-5 tuning", masterworkTier: 10, statMod: null, tuning: { to: "health", from: "weapons" }, tuningStat: "health" },
-  { name: "balanced tuning", masterworkTier: 10, statMod: null, tuning: "plus3", tuningStat: "health" },
+  { name: "no mod, no tuning, full masterwork", masterworkTier: 5, statMod: null, tuning: null, tuningStat: "health" },
+  { name: "+10 stat mod", masterworkTier: 5, statMod: { stat: "melee", size: 10 }, tuning: null, tuningStat: "health" },
+  { name: "+5 stat mod", masterworkTier: 5, statMod: { stat: "class", size: 5 }, tuning: null, tuningStat: "health" },
+  { name: "+5/-5 tuning", masterworkTier: 5, statMod: null, tuning: { to: "health", from: "weapons" }, tuningStat: "health" },
+  { name: "balanced tuning", masterworkTier: 5, statMod: null, tuning: "plus3", tuningStat: "health" },
   { name: "non-masterworked, no mods", masterworkTier: 0, statMod: null, tuning: null, tuningStat: "health" },
   { name: "partial masterwork + +10 mod", masterworkTier: 3, statMod: { stat: "super", size: 10 }, tuning: null, tuningStat: "health" },
 ];
@@ -115,9 +116,11 @@ function bungieItemFor({ masterworkTier, statMod, tuning, tuningStat }) {
   const tuningHash = tuning === "plus3"
     ? Number(BALANCED_TUNING_MOD_HASH)
     : tuning ? Number(TUNING_MOD_HASH_BY_TUNING[`${tuning.to}:${tuning.from}`]) : 0;
+  const masterworkPlug = [2024015888, 2024015889, 2024015890, 2024015891, 2024015892, 2024015893][masterworkTier];
   const sockets = [
     { socketIndex: 0, plugHash: statHash, isEnabled: true, isVisible: true },
     { socketIndex: 1, plugHash: tuningHash, isEnabled: true, isVisible: true },
+    { socketIndex: 2, plugHash: masterworkPlug, isEnabled: true, isVisible: true },
   ];
   const reusablePlugs = {
     0: ALL_STAT_HASHES.map(plugItemHash => ({ plugItemHash, canInsert: true, enabled: true })),
@@ -127,7 +130,7 @@ function bungieItemFor({ masterworkTier, statMod, tuning, tuningStat }) {
     { bucketHash: 3448274439, itemHash: ITEM_HASH, itemInstanceId: instanceId, tierType: 5 },
     {
       characterClassType: 1,
-      instances: { [instanceId]: { energy: { energyCapacity: masterworkTier, energyUsed: 0, energyUnused: 10 } } },
+      instances: { [instanceId]: { energy: { energyCapacity: 11, energyUsed: 0, energyUnused: 11 } } },
       itemStats: { [instanceId]: { stats: itemStatsFor({ masterworkTier, statMod, tuning }) } },
       sockets: { [instanceId]: { sockets } },
       reusablePlugs: { [instanceId]: { plugs: reusablePlugs } },
@@ -172,8 +175,6 @@ function capitalize(stat) {
   return stat[0].toUpperCase() + stat.slice(1);
 }
 
-const STATS = Object.keys(STAT_HASH);
-
 for (const entry of CASES) {
   test(`parity: ${entry.name} normalizes identically via Bungie and DIM CSV`, () => {
     const apiItem = bungieItemFor(entry);
@@ -189,6 +190,7 @@ for (const entry of CASES) {
       assert.equal(apiItem.optimizationBaseStats[stat], csvItem.optimizationBaseStats[stat], `optimizationBaseStats.${stat}`);
     }
     assert.equal(apiItem.masterworkTier, csvItem.masterworkTier, "masterwork tier");
+    assert.equal(apiItem.energy.capacity, 11, "mod energy capacity is independent of masterwork");
     assert.equal(apiItem.armorModStat, csvItem.armorModStat, "installed stat mod stat");
     assert.equal(apiItem.armorModSize, csvItem.armorModSize, "installed stat mod size");
     assert.equal(apiItem.tuningStat, csvItem.tuningStat, "fixed tuning stat");
@@ -206,7 +208,7 @@ for (const entry of CASES) {
 }
 
 test("parity: fixed tuning stat derived from Bungie sockets equals the DIM CSV Tuning Stat column", () => {
-  const apiItem = bungieItemFor({ masterworkTier: 10, statMod: null, tuning: null, tuningStat: "health" });
+  const apiItem = bungieItemFor({ masterworkTier: 5, statMod: null, tuning: null, tuningStat: "health" });
   // The tuning socket's reusable plugs contain only balanced + the directional
   // mods whose +5 destination is "health", so the derived fixed stat is health
   // — matching what DIM's CSV "Tuning Stat" column reports for the same piece.
@@ -238,4 +240,84 @@ test("an exotic-style tuning socket (every destination) is not locked to one sta
   assert.equal(exotic.tuningStat, null, "multiple tuning destinations mean the item is not locked");
   assert.ok(exotic.allowedTuningStats.length > 1);
   assert.equal(exotic.dataConfidence.tuning, "exact");
+});
+
+test("Bungie and DIM find the same exact four-piece set with Relativism", () => {
+  const classItemHash = 2809120022;
+  const primaryPerkId = "inmost";
+  const secondaryPerkId = "cyrtarachne";
+  // Five rolls from the reported case with synthetic instance IDs. Stats are in STATS order.
+  const rolls = [
+    { hash: 656307180, type: "Helmet", frame: "Specialist", tertiary: "Super", tuned: "class",
+      base: [0, 0, 0, 20, 30, 25], current: [0, 5, 5, 20, 35, 35],
+      masterwork: 5, masterworkPlug: 1283668722, tuning: "class:health", mod: "weapons" },
+    { hash: 4105572261, type: "Gauntlets", frame: "Gunner", tertiary: "Super", tuned: "super",
+      base: [0, 0, 25, 20, 0, 30], current: [0, 0, 25, 20, 0, 30],
+      masterwork: 0, masterworkPlug: 3266153492 },
+    { hash: 2245093627, type: "Chest Armor", frame: "Specialist", tertiary: "Melee", tuned: "grenade",
+      base: [0, 20, 0, 0, 30, 25], current: [1, 20, 1, 1, 30, 35],
+      masterwork: 0, masterworkPlug: 3266153492, tuning: "balanced", mod: "weapons" },
+    { hash: 157934631, type: "Leg Armor", frame: "Gunner", tertiary: "Melee", tuned: "grenade",
+      base: [0, 20, 25, 0, 0, 30], current: [0, 20, 30, -5, 0, 40],
+      masterwork: 0, masterworkPlug: 3266153492, tuning: "grenade:super", mod: "weapons" },
+    { hash: classItemHash, type: "Hunter Cloak", frame: "Paragon", tertiary: "Grenade",
+      base: [0, 25, 20, 30, 0, 0], current: [5, 35, 20, 25, 5, 10],
+      masterwork: 5, masterworkPlug: 2183487818, tuning: "weapons:super", mod: "melee" },
+  ];
+  const profileInventory = {data: {items: []}};
+  const itemComponents = { instances: { data: {} }, stats: { data: {} }, sockets: { data: {} }, reusablePlugs: { data: {} } };
+  const csv = rolls.map((roll, index) => {
+    const id = `report-${index}`;
+    const exotic = roll.hash === classItemHash;
+    const tuningHash = roll.tuning === "balanced" ? BALANCED_TUNING_MOD_HASH
+      : TUNING_MOD_HASH_BY_TUNING[roll.tuning] ?? 2121121504;
+    const plugHashes = [roll.mod ? STAT_MOD_HASHES[roll.mod][10] : 1980618587, tuningHash, roll.masterworkPlug];
+    if (exotic) plugHashes.push(EXOTIC_PERK_NAMES[primaryPerkId].hash, EXOTIC_PERK_NAMES[secondaryPerkId].hash);
+    profileInventory.data.items.push({ itemHash: roll.hash, itemInstanceId: id, bucketHash: 138197802 });
+    itemComponents.instances.data[id] = { energy: { energyCapacity: 11 } };
+    itemComponents.stats.data[id] = { stats: Object.fromEntries(STATS.map((stat, i) =>
+      [STAT_HASH[stat], { statHash: STAT_HASH[stat], value: roll.current[i] }])) };
+    itemComponents.sockets.data[id] = { sockets: plugHashes.map(plugHash => ({ plugHash, isEnabled: true })) };
+    itemComponents.reusablePlugs.data[id] = { plugs: {
+      1: exotic ? [] : tuningCandidatesFor(roll.tuned).map(plugItemHash => ({ plugItemHash })),
+    } };
+    return normalizeDimItem({ Id: id, Hash: roll.hash, Type: roll.type, Equippable: "Hunter",
+      Tier: "5", Rarity: exotic ? "Exotic" : "Legendary", Archetype: roll.frame,
+      "Tertiary Stat": roll.tertiary, "Tuning Stat": roll.tuned ? capitalize(roll.tuned) : "",
+      "Masterwork Tier": roll.masterwork,
+      ...Object.fromEntries(STATS.flatMap((stat, i) => [
+        [capitalize(stat), roll.current[i]], [`${capitalize(stat)} (Base)`, roll.base[i]],
+      ])),
+    });
+  });
+  const profile = { Response: { profileInventory, itemComponents } };
+  const { items } = buildArmorInventory(profile);
+  const targets = { health: 20, melee: 70, grenade: 80, super: 80, class: 80, weapons: 160 };
+  const request = {
+    targets, fragments: { class: -10 }, setRequirement: { type: "set", setHash: 741162535, count: 4 },
+    fixedExotic: { hash: classItemHash, classId: "hunter", slot: "classItem", primaryPerkId, secondaryPerkId,
+      config: { archetype: "Paragon", tertiary: "grenade", baseStats: csv.at(-1).optimizationBaseStats } },
+    reassignModifiers: true, onlyPlus5Tuning: true,
+    userConstraints: { exact: Object.fromEntries(STATS.map(stat => [stat, true])) },
+  };
+  for (const [source, inventory] of [["DIM CSV", csv], ["Bungie", items]]) {
+    const result = solveInventory({ ...request, items: inventory });
+    assert.equal(result.status, "EXACT_TARGET_PROVEN", source);
+    const [witness] = result.results;
+    assert.deepEqual(witness.finalTotals, targets);
+    assert.deepEqual(witness.pieces.map(piece => piece.sourceId).sort(), csv.map(item => item.id).sort());
+    const classItemIndex = witness.pieces.findIndex(piece => piece.hash === classItemHash);
+    assert.equal(witness.tuningAssignments[classItemIndex].to, "weapons");
+  }
+
+  const exotic = items.find(item => item.hash === classItemHash);
+  assert.equal(exotic.primaryPerkId, primaryPerkId);
+  assert.equal(exotic.secondaryPerkId, secondaryPerkId);
+  assert.deepEqual(exotic.allowedTuningStats, STATS);
+  assert.equal(exotic.dataConfidence.sockets, "partial");
+  delete itemComponents.reusablePlugs.data[exotic.id];
+  assert.deepEqual(buildArmorInventory(profile).items.at(-1).allowedTuningStats, STATS);
+  itemComponents.reusablePlugs.data[exotic.id] = { plugs: { 1: [{ plugItemHash: BALANCED_TUNING_MOD_HASH }] } };
+  // The current directional plug also remains a valid candidate for this socket.
+  assert.deepEqual(buildArmorInventory(profile).items.at(-1).allowedTuningStats, ["weapons"]);
 });

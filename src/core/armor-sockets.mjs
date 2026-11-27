@@ -102,14 +102,14 @@ export function buildSocketCapabilities(sockets = [], reusablePlugs = null, _ava
     // Reusable plugs are keyed by the socket's INDEX, not the array position.
     const reusableEntries = reusableByIndex[index] ?? null;
     const candidatePlugHashes = new Set();
-    let candidateState = CANDIDATE_STATE.UNKNOWN;
     if (Array.isArray(reusableEntries)) {
       for (const entry of reusableEntries) {
         const hash = Number(entry && typeof entry === "object" ? entry.plugItemHash : entry) || 0;
         if (hash) candidatePlugHashes.add(hash);
       }
-      candidateState = CANDIDATE_STATE.KNOWN;
     }
+    // Component 310 can omit all per-instance entries for a socket.
+    const candidateState = candidatePlugHashes.size ? CANDIDATE_STATE.KNOWN : CANDIDATE_STATE.UNKNOWN;
     // The currently installed plug is always a legal candidate (it sits in the
     // socket); adding it keeps availability checks from rejecting the status
     // quo when reusable data is partial.

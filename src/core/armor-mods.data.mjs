@@ -2,6 +2,17 @@
 // d2-known-values (tuning mods) and D2ArmorPicker's armor-stat data (stat
 // mods). DIM loadouts reference mods by these hashes in parameters.mods.
 
+// Armor 3.0 masterwork plugs grouped by tier (0–5), from the Manifest category
+// v460.plugs.armor.masterworks. The tier is the conditional stat bonus.
+export const ARMOR_MASTERWORK_TIER_BY_PLUG_HASH = new Map([
+  [788990507, 1283668727, 1431426106, 1582132965, 2024015888, 2183487823, 2416688579, 3266153492],
+  [788990506, 1283668726, 1431426107, 1582132964, 2024015889, 2183487822, 2416688578, 3266153493],
+  [788990505, 1283668725, 1431426104, 1582132967, 2024015890, 2183487821, 2416688577, 3266153494],
+  [788990504, 1283668724, 1431426105, 1582132966, 2024015891, 2183487820, 2416688576, 3266153495],
+  [788990511, 1283668723, 1431426110, 1582132961, 2024015892, 2183487819, 2416688583, 3266153488],
+  [788990510, 1283668722, 1431426111, 1582132960, 2024015893, 2183487818, 2416688582, 3266153489],
+].flatMap((hashes, tier) => hashes.map(hash => [hash, tier])));
+
 // +5 / +10 stat mod per armor stat. The 2.0 stat mods were updated in Edge of
 // Fate to grant the new Armor 3.0 stats (e.g. "Mobility Mod" -> +10 Weapons).
 export const STAT_MOD_HASHES = {
